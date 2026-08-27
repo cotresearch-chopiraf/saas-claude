@@ -1,6 +1,23 @@
 import { FormEvent, useEffect, useState } from "react";
-import { apiFetch } from "../api/client";
+import { apiFetch, getToken } from "../api/client";
 import type { BudgetSummary } from "../api/types";
+
+// A plain <a href> can't carry the Bearer token, so the CSV export fetches
+// as a blob and triggers the browser's own save dialog — this is also the
+// direct answer to the market leader's #1 complaint: your data is never
+// locked in here.
+async function downloadBudgetCsv(projectId: string) {
+  const res = await fetch(`/api/projects/${projectId}/budget/export.csv`, {
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `budget-${projectId}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
 
 const money = (n: number) => n.toLocaleString("ar", { maximumFractionDigits: 0 }) + " $";
 
@@ -63,7 +80,15 @@ export function BudgetPanel({ projectId }: { projectId: string }) {
       </div>
 
       <div>
-        <h3 className="mb-2 font-semibold text-stone-700">بنود الميزانية</h3>
+        <div className="mb-2 flex items-center justify-between">
+          <h3 className="font-semibold text-stone-700">بنود الميزانية</h3>
+          <button
+            onClick={() => downloadBudgetCsv(projectId)}
+            className="text-sm text-primary underline decoration-dotted"
+          >
+            تصدير CSV
+          </button>
+        </div>
         <div className="overflow-hidden rounded-lg border border-stone-200 bg-white">
           <table className="w-full text-sm">
             <thead className="bg-stone-50 text-stone-500">

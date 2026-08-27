@@ -3,11 +3,15 @@ import { useParams, Link } from "react-router-dom";
 import { Layout } from "../components/Layout";
 import { BudgetPanel } from "../components/BudgetPanel";
 import { TaskPanel } from "../components/TaskPanel";
+import { ChangeOrdersPanel } from "../components/ChangeOrdersPanel";
+import { DailyLogsPanel } from "../components/DailyLogsPanel";
 import { apiFetch } from "../api/client";
 import type { Project } from "../api/types";
 
 const tabs = [
   { key: "budget", label: "الميزانية" },
+  { key: "changeOrders", label: "أوامر التغيير" },
+  { key: "dailyLogs", label: "السجل اليومي" },
   { key: "tasks", label: "المهام" },
 ] as const;
 
@@ -52,7 +56,10 @@ export function ProjectDetail() {
         ))}
       </div>
 
-      {tab === "budget" ? <BudgetPanel projectId={id} /> : <TaskPanel projectId={id} />}
+      {tab === "budget" && <BudgetPanel projectId={id} />}
+      {tab === "changeOrders" && <ChangeOrdersPanel projectId={id} />}
+      {tab === "dailyLogs" && <DailyLogsPanel projectId={id} />}
+      {tab === "tasks" && <TaskPanel projectId={id} />}
     </Layout>
   );
 }

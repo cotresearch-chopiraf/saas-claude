@@ -58,6 +58,39 @@ budgetRouter.get("/", async (req: Request<ProjectParams>, res: Response) => {
   });
 });
 
+function csvCell(value: string | number): string {
+  const str = String(value);
+  return /[",\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
+}
+
+// Directly answers the #1 complaint about the market leader (Buildertrend):
+// "no simple or bulk way to download years of ... data." Your numbers are
+// never locked in here — one click, always a plain CSV.
+budgetRouter.get("/export.csv", async (req: Request<ProjectParams>, res: Response) => {
+  const projectId = req.params.projectId;
+  const items = await db.query.budgetItems.findMany({ where: eq(budgetItems.projectId, projectId) });
+  const projectExpenses = await db.query.expenses.findMany({ where: eq(expenses.projectId, projectId) });
+
+  const itemNameById = new Map(items.map((item) => [item.id, item.category]));
+
+  const rows = [
+    ["النوع", "البند", "الوصف", "المبلغ", "التاريخ"],
+    ...items.map((item) => ["بند ميزانية", item.category, "", item.plannedAmount, ""]),
+    ...projectExpenses.map((expense) => [
+      "مصروف",
+      expense.budgetItemId ? (itemNameById.get(expense.budgetItemId) ?? "") : "",
+      expense.description,
+      expense.amount,
+      expense.expenseDate,
+    ]),
+  ];
+
+  const csv = "﻿" + rows.map((row) => row.map(csvCell).join(",")).join("\n");
+  res.setHeader("Content-Type", "text/csv; charset=utf-8");
+  res.setHeader("Content-Disposition", `attachment; filename="budget-${projectId}.csv"`);
+  res.send(csv);
+});
+
 const itemSchema = z.object({
   category: z.string().min(2, "اسم البند قصير جداً"),
   plannedAmount: z.coerce.number().nonnegative(),

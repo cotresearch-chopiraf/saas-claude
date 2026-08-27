@@ -59,3 +59,23 @@ export interface Task {
   status: TaskStatus;
   createdAt: string;
 }
+
+export type ChangeOrderStatus = "pending" | "approved" | "rejected";
+
+export interface ChangeOrder {
+  id: string;
+  projectId: string;
+  title: string;
+  description: string | null;
+  amountDelta: string;
+  status: ChangeOrderStatus;
+  createdAt: string;
+}
+
+export interface DailyLog {
+  id: string;
+  projectId: string;
+  note: string;
+  logDate: string;
+  createdAt: string;
+}

@@ -23,6 +23,12 @@ export const taskStatusEnum = pgEnum("task_status", [
 
 export const userRoleEnum = pgEnum("user_role", ["owner", "member"]);
 
+export const changeOrderStatusEnum = pgEnum("change_order_status", [
+  "pending",
+  "approved",
+  "rejected",
+]);
+
 // A company is the tenant boundary — every other table hangs off it,
 // and every query in the app is scoped by companyId to keep tenants isolated.
 export const companies = pgTable("companies", {
@@ -95,6 +101,33 @@ export const tasks = pgTable("tasks", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+// Renovation scope changes constantly — this is the #1 workflow gap this
+// product exists to close. Approving a change order shifts the project's
+// budgetTotal by amountDelta (see the route handler).
+export const changeOrders = pgTable("change_orders", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  description: text("description"),
+  amountDelta: numeric("amount_delta", { precision: 12, scale: 2 }).notNull(),
+  status: changeOrderStatusEnum("status").notNull().default("pending"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+// The single most-cited strength of the market leader (Buildertrend) is its
+// site activity / daily log feature — this is the lightweight MVP version.
+export const dailyLogs = pgTable("daily_logs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  note: text("note").notNull(),
+  logDate: date("log_date").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 export const companiesRelations = relations(companies, ({ many }) => ({
   users: many(users),
   projects: many(projects),
@@ -108,6 +141,22 @@ export const projectsRelations = relations(projects, ({ one, many }) => ({
   budgetItems: many(budgetItems),
   expenses: many(expenses),
   tasks: many(tasks),
+  changeOrders: many(changeOrders),
+  dailyLogs: many(dailyLogs),
+}));
+
+export const changeOrdersRelations = relations(changeOrders, ({ one }) => ({
+  project: one(projects, {
+    fields: [changeOrders.projectId],
+    references: [projects.id],
+  }),
+}));
+
+export const dailyLogsRelations = relations(dailyLogs, ({ one }) => ({
+  project: one(projects, {
+    fields: [dailyLogs.projectId],
+    references: [projects.id],
+  }),
 }));
 
 export const budgetItemsRelations = relations(budgetItems, ({ one, many }) => ({

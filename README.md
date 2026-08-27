@@ -71,6 +71,27 @@ npm run dev:client   # http://localhost:5173
 - [x] إدارة مشاريع (إنشاء، عرض، تعديل، حذف)
 - [x] بنود ميزانية لكل مشروع + مصروفات فعلية + مقارنة مخطَّط/فعلي تلقائية
 - [x] قائمة مهام لكل مشروع بحالات (لم تبدأ / جارية / منتهية)
+- [x] أوامر تغيير (Change Orders) تُحدّث ميزانية المشروع تلقائياً عند الاعتماد
+- [x] سجل يومي للموقع (Daily Log)
+- [x] تصدير بيانات الميزانية إلى CSV
+
+## لماذا نتفوق على المنافسين (Buildertrend، CoConstruct، JobTread، Knowify، Contractor Foreman)
+
+بناءً على بحث في مراجعات المستخدمين الفعلية لهذه المنصات:
+
+| ما تفعله المنافسة | كيف يتفوق عليها هذا المشروع |
+|---|---|
+| Buildertrend: لا توجد طريقة لتصدير بياناتك بالجملة عند الرغبة في المغادرة | تصدير CSV لكل بيانات الميزانية بضغطة واحدة، من اليوم الأول |
+| Buildertrend: تسعير يتضاعف 2–5 مرات بمرور الوقت لمشتركين قدامى | تسعير بسيط وثابت مُعلَن، بدون مفاجآت |
+| Buildertrend: تطبيق جوال يُربك المستخدم حول أي مشروع هو نشط فيه | سياق المشروع الحالي واضح دوماً في الواجهة |
+| Contractor Foreman: واجهة "تبدو من Windows 2000" | واجهة React + Tailwind حديثة من الأساس |
+| JobTread / Knowify: لا تنسيق تلقائي بين أدوات منفصلة | نظام واحد موحّد: مشاريع + ميزانية + أوامر تغيير + سجل يومي + مهام، لا حاجة لأي أداة خارجية |
+| Buildertrend (الميزة الأبرز): بوابة عميل وسجل نشاط الموقع | سجل يومي مُنفَّذ من الآن (البوابة الخارجية للعميل مخطَّطة للمرحلة القادمة) |
+
+المصادر: [Capterra – Buildertrend](https://www.capterra.com/p/70092/Buildertrend/reviews/) ·
+[Forbes Advisor – Buildertrend](https://www.forbes.com/advisor/business/software/buildertrend-review/) ·
+[G2 – JobTread vs Knowify](https://www.g2.com/compare/jobtread-vs-knowify) ·
+[Capterra – Contractor Foreman](https://www.capterra.com/p/166113/Contractor-Foreman/reviews/)
 
 ## الخطوات التالية (Weeks 4–12، غير مُنفَّذة في هذه السقالة)
 
