@@ -45,7 +45,7 @@ export function Login() {
             className="mt-1 w-full rounded-md border border-stone-300 px-3 py-2"
           />
         </label>
-        <label className="mb-6 block text-sm">
+        <label className="mb-2 block text-sm">
           كلمة المرور
           <input
             type="password"
@@ -55,6 +55,9 @@ export function Login() {
             className="mt-1 w-full rounded-md border border-stone-300 px-3 py-2"
           />
         </label>
+        <p className="mb-6 text-left text-xs">
+          <Link to="/forgot-password" className="text-stone-400 underline hover:text-primary">نسيت كلمة المرور؟</Link>
+        </p>
 
         <button
           type="submit"

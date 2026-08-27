@@ -29,6 +29,13 @@ export const changeOrderStatusEnum = pgEnum("change_order_status", [
   "rejected",
 ]);
 
+export const quoteStatusEnum = pgEnum("quote_status", [
+  "draft",
+  "sent",
+  "accepted",
+  "rejected",
+]);
+
 // A company is the tenant boundary — every other table hangs off it,
 // and every query in the app is scoped by companyId to keep tenants isolated.
 export const companies = pgTable("companies", {
@@ -128,9 +135,83 @@ export const dailyLogs = pgTable("daily_logs", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+// Reset flows never leak whether an email exists — the route always answers
+// the same way. Only a hash of the token is stored, so a DB leak alone can't
+// be used to take over an account; expiresAt caps the exposure window.
+export const passwordResetTokens = pgTable("password_reset_tokens", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  tokenHash: text("token_hash").notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  usedAt: timestamp("used_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+// One company can have several users (owner + members) — an invite is how a
+// second person joins an existing company instead of creating a new one.
+export const companyInvites = pgTable("company_invites", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  email: text("email").notNull(),
+  role: userRoleEnum("role").notNull().default("member"),
+  tokenHash: text("token_hash").notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  acceptedAt: timestamp("accepted_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+// A quote precedes a project — it's the estimate a contractor sends before
+// work (and money) starts. publicToken lets the client view/accept it
+// without an account, which is the whole point of a client-facing quote.
+export const quotes = pgTable("quotes", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  clientName: text("client_name").notNull(),
+  clientEmail: text("client_email"),
+  projectName: text("project_name").notNull(),
+  status: quoteStatusEnum("status").notNull().default("draft"),
+  publicToken: text("public_token").notNull().unique(),
+  acceptedByName: text("accepted_by_name"),
+  acceptedAt: timestamp("accepted_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const quoteItems = pgTable("quote_items", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  quoteId: uuid("quote_id")
+    .notNull()
+    .references(() => quotes.id, { onDelete: "cascade" }),
+  description: text("description").notNull(),
+  amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 export const companiesRelations = relations(companies, ({ many }) => ({
   users: many(users),
   projects: many(projects),
+  invites: many(companyInvites),
+  quotes: many(quotes),
+}));
+
+export const quotesRelations = relations(quotes, ({ one, many }) => ({
+  company: one(companies, {
+    fields: [quotes.companyId],
+    references: [companies.id],
+  }),
+  items: many(quoteItems),
+}));
+
+export const quoteItemsRelations = relations(quoteItems, ({ one }) => ({
+  quote: one(quotes, {
+    fields: [quoteItems.quoteId],
+    references: [quotes.id],
+  }),
 }));
 
 export const projectsRelations = relations(projects, ({ one, many }) => ({

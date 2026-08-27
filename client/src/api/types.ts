@@ -79,3 +79,52 @@ export interface DailyLog {
   logDate: string;
   createdAt: string;
 }
+
+export type QuoteStatus = "draft" | "sent" | "accepted" | "rejected";
+
+export interface Quote {
+  id: string;
+  companyId: string;
+  clientName: string;
+  clientEmail: string | null;
+  projectName: string;
+  status: QuoteStatus;
+  publicToken: string;
+  acceptedByName: string | null;
+  acceptedAt: string | null;
+  createdAt: string;
+}
+
+export interface QuoteItem {
+  id: string;
+  quoteId: string;
+  description: string;
+  amount: string;
+}
+
+export interface PublicQuote {
+  projectName: string;
+  clientName: string;
+  status: QuoteStatus;
+  companyName: string;
+  items: QuoteItem[];
+  total: number;
+}
+
+export type CompanyRole = "owner" | "member";
+
+export interface CompanyMember {
+  id: string;
+  name: string;
+  email: string;
+  role: CompanyRole;
+  createdAt: string;
+}
+
+export interface CompanyInvite {
+  id: string;
+  email: string;
+  role: CompanyRole;
+  expiresAt: string;
+  createdAt: string;
+}

@@ -15,6 +15,13 @@
       "when": 1787872037635,
       "tag": "0001_cold_hammerhead",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1787872837207,
+      "tag": "0002_lumpy_nextwave",
+      "breakpoints": true
     }
   ]
 }
