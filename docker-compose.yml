@@ -1,0 +1,15 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: contractor
+      POSTGRES_PASSWORD: contractor
+      POSTGRES_DB: contractor_os
+    ports:
+      - "5432:5432"
+    volumes:
+      - contractor_os_db:/var/lib/postgresql/data
+
+volumes:
+  contractor_os_db:

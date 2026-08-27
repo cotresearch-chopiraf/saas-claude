@@ -1,0 +1,189 @@
+import { FormEvent, useEffect, useState } from "react";
+import { apiFetch } from "../api/client";
+import type { BudgetSummary } from "../api/types";
+
+const money = (n: number) => n.toLocaleString("ar", { maximumFractionDigits: 0 }) + " $";
+
+export function BudgetPanel({ projectId }: { projectId: string }) {
+  const [summary, setSummary] = useState<BudgetSummary | null>(null);
+  const [category, setCategory] = useState("");
+  const [plannedAmount, setPlannedAmount] = useState("");
+  const [expenseDescription, setExpenseDescription] = useState("");
+  const [expenseAmount, setExpenseAmount] = useState("");
+  const [expenseItemId, setExpenseItemId] = useState("");
+
+  function load() {
+    apiFetch<BudgetSummary>(`/projects/${projectId}/budget`).then(setSummary);
+  }
+
+  useEffect(load, [projectId]);
+
+  if (!summary) return <p className="text-stone-500">جارٍ التحميل...</p>;
+
+  const { totals } = summary;
+  const overBudget = totals.remaining < 0;
+
+  async function addItem(e: FormEvent) {
+    e.preventDefault();
+    await apiFetch(`/projects/${projectId}/budget/items`, {
+      method: "POST",
+      body: JSON.stringify({ category, plannedAmount }),
+    });
+    setCategory("");
+    setPlannedAmount("");
+    load();
+  }
+
+  async function addExpense(e: FormEvent) {
+    e.preventDefault();
+    await apiFetch(`/projects/${projectId}/budget/expenses`, {
+      method: "POST",
+      body: JSON.stringify({
+        description: expenseDescription,
+        amount: expenseAmount,
+        expenseDate: new Date().toISOString().slice(0, 10),
+        budgetItemId: expenseItemId || undefined,
+      }),
+    });
+    setExpenseDescription("");
+    setExpenseAmount("");
+    load();
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="grid gap-4 sm:grid-cols-3">
+        <StatCard label="المخطَّط" value={money(totals.planned)} />
+        <StatCard label="المُنفَق" value={money(totals.spent)} />
+        <StatCard
+          label={overBudget ? "تجاوز الميزانية" : "المتبقي"}
+          value={money(Math.abs(totals.remaining))}
+          tone={overBudget ? "danger" : "default"}
+        />
+      </div>
+
+      <div>
+        <h3 className="mb-2 font-semibold text-stone-700">بنود الميزانية</h3>
+        <div className="overflow-hidden rounded-lg border border-stone-200 bg-white">
+          <table className="w-full text-sm">
+            <thead className="bg-stone-50 text-stone-500">
+              <tr>
+                <th className="p-3 text-right">البند</th>
+                <th className="p-3 text-right">مخطَّط</th>
+                <th className="p-3 text-right">مُنفَق</th>
+              </tr>
+            </thead>
+            <tbody>
+              {summary.items.map((item) => (
+                <tr key={item.id} className="border-t border-stone-100">
+                  <td className="p-3">{item.category}</td>
+                  <td className="p-3">{money(Number(item.plannedAmount))}</td>
+                  <td className={`p-3 ${item.spent > Number(item.plannedAmount) ? "text-red-600" : ""}`}>
+                    {money(item.spent)}
+                  </td>
+                </tr>
+              ))}
+              {summary.items.length === 0 && (
+                <tr>
+                  <td colSpan={3} className="p-4 text-center text-stone-400">
+                    لا توجد بنود بعد
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        <form onSubmit={addItem} className="mt-3 flex gap-2">
+          <input
+            required
+            placeholder="اسم البند (مثال: مواد البناء)"
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            className="flex-1 rounded-md border border-stone-300 px-3 py-2 text-sm"
+          />
+          <input
+            required
+            type="number"
+            min="0"
+            placeholder="المبلغ المخطَّط"
+            value={plannedAmount}
+            onChange={(e) => setPlannedAmount(e.target.value)}
+            className="w-40 rounded-md border border-stone-300 px-3 py-2 text-sm"
+          />
+          <button className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white">إضافة بند</button>
+        </form>
+      </div>
+
+      <div>
+        <h3 className="mb-2 font-semibold text-stone-700">المصروفات</h3>
+        <div className="overflow-hidden rounded-lg border border-stone-200 bg-white">
+          <table className="w-full text-sm">
+            <thead className="bg-stone-50 text-stone-500">
+              <tr>
+                <th className="p-3 text-right">الوصف</th>
+                <th className="p-3 text-right">التاريخ</th>
+                <th className="p-3 text-right">المبلغ</th>
+              </tr>
+            </thead>
+            <tbody>
+              {summary.expenses.map((exp) => (
+                <tr key={exp.id} className="border-t border-stone-100">
+                  <td className="p-3">{exp.description}</td>
+                  <td className="p-3 text-stone-500">{exp.expenseDate}</td>
+                  <td className="p-3">{money(Number(exp.amount))}</td>
+                </tr>
+              ))}
+              {summary.expenses.length === 0 && (
+                <tr>
+                  <td colSpan={3} className="p-4 text-center text-stone-400">
+                    لا توجد مصروفات مسجّلة بعد
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        <form onSubmit={addExpense} className="mt-3 flex flex-wrap gap-2">
+          <input
+            required
+            placeholder="وصف المصروف"
+            value={expenseDescription}
+            onChange={(e) => setExpenseDescription(e.target.value)}
+            className="flex-1 rounded-md border border-stone-300 px-3 py-2 text-sm"
+          />
+          <input
+            required
+            type="number"
+            min="0"
+            placeholder="المبلغ"
+            value={expenseAmount}
+            onChange={(e) => setExpenseAmount(e.target.value)}
+            className="w-32 rounded-md border border-stone-300 px-3 py-2 text-sm"
+          />
+          <select
+            value={expenseItemId}
+            onChange={(e) => setExpenseItemId(e.target.value)}
+            className="rounded-md border border-stone-300 px-3 py-2 text-sm"
+          >
+            <option value="">بدون بند محدد</option>
+            {summary.items.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.category}
+              </option>
+            ))}
+          </select>
+          <button className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white">تسجيل مصروف</button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function StatCard({ label, value, tone = "default" }: { label: string; value: string; tone?: "default" | "danger" }) {
+  return (
+    <div className="rounded-lg border border-stone-200 bg-white p-4">
+      <p className="text-xs text-stone-500">{label}</p>
+      <p className={`mt-1 text-lg font-bold ${tone === "danger" ? "text-red-600" : "text-stone-800"}`}>{value}</p>
+    </div>
+  );
+}
