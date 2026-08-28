@@ -36,6 +36,13 @@
       "when": 1787875571744,
       "tag": "0004_lucky_rockslide",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1787876486443,
+      "tag": "0005_lean_invisible_woman",
+      "breakpoints": true
     }
   ]
 }

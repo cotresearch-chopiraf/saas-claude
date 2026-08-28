@@ -1,7 +1,8 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Layout } from "../components/Layout";
+import { LanguageSelect } from "../components/LanguageSelect";
 import { apiFetch, ApiError, getToken } from "../api/client";
-import type { Invoice } from "../api/types";
+import type { DocumentLanguage, Invoice } from "../api/types";
 
 const statusLabel: Record<Invoice["status"], string> = { draft: "مسودة", sent: "أُرسلت", paid: "مُسدَّدة" };
 const statusColor: Record<Invoice["status"], string> = {
@@ -9,6 +10,7 @@ const statusColor: Record<Invoice["status"], string> = {
   sent: "bg-amber-100 text-amber-700",
   paid: "bg-emerald-100 text-emerald-700",
 };
+const money = (n: number) => n.toLocaleString("ar", { maximumFractionDigits: 2 }) + " $";
 
 interface DraftItem {
   description: string;
@@ -61,6 +63,10 @@ export function Invoices() {
     );
   }
 
+  const paidInvoices = invoices.filter((inv) => inv.status === "paid");
+  const paidTaxTotal = paidInvoices.reduce((sum, inv) => sum + inv.taxAmount, 0);
+  const paidRevenueTotal = paidInvoices.reduce((sum, inv) => sum + inv.total, 0);
+
   return (
     <Layout>
       <div className="mb-6 flex items-center justify-between">
@@ -69,6 +75,19 @@ export function Invoices() {
           {showForm ? "إلغاء" : "+ فاتورة جديدة"}
         </button>
       </div>
+
+      {paidInvoices.length > 0 && (
+        <div className="mb-6 grid gap-4 sm:grid-cols-2">
+          <div className="rounded-lg border border-stone-200 bg-white p-4">
+            <p className="text-xs text-stone-500">إجمالي المُحصَّل (فواتير مُسدَّدة)</p>
+            <p className="mt-1 text-lg font-bold text-stone-800">{money(paidRevenueTotal)}</p>
+          </div>
+          <div className="rounded-lg border border-stone-200 bg-white p-4">
+            <p className="text-xs text-stone-500">إجمالي الضريبة من الفواتير المُسدَّدة</p>
+            <p className="mt-1 text-lg font-bold text-primary">{money(paidTaxTotal)}</p>
+          </div>
+        </div>
+      )}
 
       {showForm && (
         <NewInvoiceForm
@@ -91,6 +110,11 @@ export function Invoices() {
               <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs ${statusColor[inv.status]}`}>
                 {statusLabel[inv.status]}
               </span>
+            </div>
+            <div className="mt-2 flex gap-4 text-xs text-stone-500">
+              <span>المجموع الفرعي: {money(inv.subtotal)}</span>
+              <span>الضريبة ({inv.taxRatePercent}%): {money(inv.taxAmount)}</span>
+              <span className="font-medium text-stone-700">الإجمالي: {money(inv.total)}</span>
             </div>
             <div className="mt-3 flex gap-2">
               {inv.status === "draft" && (
@@ -123,6 +147,7 @@ export function Invoices() {
 function NewInvoiceForm({ onCreated }: { onCreated: () => void }) {
   const [clientName, setClientName] = useState("");
   const [clientAddress, setClientAddress] = useState("");
+  const [language, setLanguage] = useState<DocumentLanguage>("ar");
   const [items, setItems] = useState<DraftItem[]>([{ description: "", amount: "" }]);
   const [error, setError] = useState<string | null>(null);
 
@@ -139,6 +164,7 @@ function NewInvoiceForm({ onCreated }: { onCreated: () => void }) {
         body: JSON.stringify({
           clientName,
           clientAddress: clientAddress || undefined,
+          language,
           items: items
             .filter((item) => item.description && item.amount)
             .map((item) => ({ description: item.description, amount: item.amount })),
@@ -168,6 +194,8 @@ function NewInvoiceForm({ onCreated }: { onCreated: () => void }) {
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
         />
       </div>
+
+      <LanguageSelect value={language} onChange={setLanguage} />
 
       <div className="space-y-2">
         {items.map((item, i) => (

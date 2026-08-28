@@ -49,6 +49,10 @@ export const quoteStatusEnum = pgEnum("quote_status", [
   "rejected",
 ]);
 
+// Each document picks its own language independently — the same contractor
+// might send an Arabic devis to one client and a French one to another.
+export const documentLanguageEnum = pgEnum("document_language", ["ar", "fr", "en"]);
+
 export const invoiceStatusEnum = pgEnum("invoice_status", [
   "draft",
   "sent",
@@ -210,6 +214,7 @@ export const quotes = pgTable("quotes", {
   clientName: text("client_name").notNull(),
   clientEmail: text("client_email"),
   projectName: text("project_name").notNull(),
+  language: documentLanguageEnum("language").notNull().default("ar"),
   status: quoteStatusEnum("status").notNull().default("draft"),
   publicToken: text("public_token").notNull().unique(),
   acceptedByName: text("accepted_by_name"),
@@ -242,6 +247,7 @@ export const invoices = pgTable("invoices", {
   clientAddress: text("client_address"),
   clientTaxId: text("client_tax_id"),
   taxRatePercent: numeric("tax_rate_percent", { precision: 5, scale: 2 }).notNull(),
+  language: documentLanguageEnum("language").notNull().default("ar"),
   status: invoiceStatusEnum("status").notNull().default("draft"),
   publicToken: text("public_token").notNull().unique(),
   issueDate: date("issue_date").notNull(),

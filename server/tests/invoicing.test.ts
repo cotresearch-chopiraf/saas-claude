@@ -101,4 +101,50 @@ describe("invoice tax calculation", () => {
     const reread = await request(app).get(`/api/invoices/${invoice.body.id}`).set("Authorization", `Bearer ${token}`);
     expect(Number(reread.body.taxRatePercent)).toBe(20);
   });
+
+  it("computes subtotal/tax/total on the list endpoint from the frozen rate", async () => {
+    const token = await setupCompany();
+    await request(app)
+      .patch("/api/company/settings")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ defaultTaxRatePercent: 10 });
+
+    await request(app)
+      .post("/api/invoices")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ clientName: "Client", items: [{ description: "A", amount: 100 }, { description: "B", amount: 50 }] });
+
+    const list = await request(app).get("/api/invoices").set("Authorization", `Bearer ${token}`);
+    expect(list.body[0].subtotal).toBe(150);
+    expect(list.body[0].taxAmount).toBe(15);
+    expect(list.body[0].total).toBe(165);
+  });
+});
+
+describe("document language", () => {
+  beforeEach(resetDb);
+
+  it("defaults quotes and invoices to Arabic", async () => {
+    const token = await setupCompany();
+    const quote = await request(app)
+      .post("/api/quotes")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ clientName: "Client", projectName: "Job", items: [{ description: "x", amount: 10 }] });
+    expect(quote.body.language).toBe("ar");
+  });
+
+  it("accepts a per-document language choice and generates a PDF for each", async () => {
+    const token = await setupCompany();
+    for (const language of ["ar", "fr", "en"] as const) {
+      const invoice = await request(app)
+        .post("/api/invoices")
+        .set("Authorization", `Bearer ${token}`)
+        .send({ clientName: "Client", language, items: [{ description: "Work", amount: 100 }] });
+      expect(invoice.body.language).toBe(language);
+
+      const pdf = await request(app).get(`/api/invoices/${invoice.body.id}/pdf`).set("Authorization", `Bearer ${token}`);
+      expect(pdf.status).toBe(200);
+      expect(pdf.headers["content-type"]).toBe("application/pdf");
+    }
+  });
 });

@@ -5,7 +5,7 @@ import { db } from "../db/client.js";
 import { companies, defaultFeatureFlags, invoiceItems, invoices, quotes, type CompanyFeatureFlags } from "../db/schema.js";
 import { nextInvoiceNumber } from "../lib/numbering.js";
 import { generateToken } from "../lib/tokens.js";
-import { buildDocumentHtml } from "../lib/documentHtml.js";
+import { buildDocumentHtml, type DocumentLanguage } from "../lib/documentHtml.js";
 import { renderHtmlToPdf } from "../lib/pdf.js";
 import { logoFileToDataUri } from "../lib/uploads.js";
 
@@ -23,13 +23,28 @@ invoicesRouter.use(async (req, res, next) => {
   next();
 });
 
+// Each invoice carries its own frozen tax rate, so the amount + tax shown
+// here is exactly what was true when it was issued — not recomputed from
+// today's company settings. This is also what "الضريبة" per paid invoice
+// means: the client sums taxAmount over status === "paid" rows itself.
 invoicesRouter.get("/", async (req, res) => {
   const rows = await db.query.invoices.findMany({
     where: eq(invoices.companyId, req.companyId!),
     orderBy: (i, { desc }) => [desc(i.createdAt)],
   });
-  res.json(rows);
+
+  const withTotals = await Promise.all(
+    rows.map(async (invoice) => {
+      const items = await db.query.invoiceItems.findMany({ where: eq(invoiceItems.invoiceId, invoice.id) });
+      const subtotal = items.reduce((sum, item) => sum + Number(item.amount), 0);
+      const taxAmount = subtotal * (Number(invoice.taxRatePercent) / 100);
+      return { ...invoice, subtotal, taxAmount, total: subtotal + taxAmount };
+    }),
+  );
+  res.json(withTotals);
 });
+
+const languageEnum = z.enum(["ar", "fr", "en"]);
 
 const createSchema = z.object({
   quoteId: z.string().uuid().optional(),
@@ -37,6 +52,7 @@ const createSchema = z.object({
   clientAddress: z.string().optional(),
   clientTaxId: z.string().optional(),
   taxRatePercent: z.coerce.number().min(0).max(100).optional(),
+  language: languageEnum.default("ar"),
   dueDate: z.string().optional(),
   items: z
     .array(z.object({ description: z.string().min(1), amount: z.coerce.number().nonnegative() }))
@@ -67,6 +83,7 @@ invoicesRouter.post("/", async (req, res) => {
       clientAddress: parsed.data.clientAddress,
       clientTaxId: parsed.data.clientTaxId,
       taxRatePercent: String(parsed.data.taxRatePercent ?? company!.defaultTaxRatePercent),
+      language: parsed.data.language,
       publicToken: generateToken(),
       issueDate: new Date().toISOString().slice(0, 10),
       dueDate: parsed.data.dueDate,
@@ -132,8 +149,8 @@ async function buildInvoicePdf(invoiceId: string, companyId: string) {
   ]);
 
   const html = buildDocumentHtml({
-    docType: "فاتورة",
-    docTypeFr: "Facture",
+    kind: "invoice",
+    language: invoice.language as DocumentLanguage,
     number: invoice.invoiceNumber,
     date: invoice.issueDate,
     company: {

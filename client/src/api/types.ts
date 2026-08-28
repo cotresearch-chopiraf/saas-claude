@@ -81,6 +81,7 @@ export interface DailyLog {
 }
 
 export type QuoteStatus = "draft" | "sent" | "accepted" | "rejected";
+export type DocumentLanguage = "ar" | "fr" | "en";
 
 export interface Quote {
   id: string;
@@ -89,11 +90,13 @@ export interface Quote {
   clientName: string;
   clientEmail: string | null;
   projectName: string;
+  language: DocumentLanguage;
   status: QuoteStatus;
   publicToken: string;
   acceptedByName: string | null;
   acceptedAt: string | null;
   createdAt: string;
+  subtotal: number;
 }
 
 export interface QuoteItem {
@@ -155,10 +158,14 @@ export interface Invoice {
   clientAddress: string | null;
   clientTaxId: string | null;
   taxRatePercent: string;
+  language: DocumentLanguage;
   status: InvoiceStatus;
   publicToken: string;
   issueDate: string;
   dueDate: string | null;
   paidAt: string | null;
   createdAt: string;
+  subtotal: number;
+  taxAmount: number;
+  total: number;
 }

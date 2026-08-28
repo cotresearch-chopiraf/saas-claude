@@ -1,8 +1,11 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Layout } from "../components/Layout";
+import { LanguageSelect } from "../components/LanguageSelect";
 import { apiFetch, ApiError, getToken } from "../api/client";
-import type { Quote } from "../api/types";
+import type { DocumentLanguage, Quote } from "../api/types";
+
+const money = (n: number) => n.toLocaleString("ar", { maximumFractionDigits: 2 }) + " $";
 
 async function downloadQuotePdf(id: string, quoteNumber: string | null) {
   const res = await fetch(`/api/quotes/${id}/pdf`, { headers: { Authorization: `Bearer ${getToken()}` } });
@@ -62,6 +65,7 @@ export function Quotes() {
         body: JSON.stringify({
           quoteId: quote.id,
           clientName: quote.clientName,
+          language: quote.language,
           items: full.items.map((i) => ({ description: i.description, amount: i.amount })),
         }),
       });
@@ -94,8 +98,11 @@ export function Quotes() {
           <li key={quote.id} className="rounded-lg border border-stone-200 bg-white p-4">
             <div className="flex items-start justify-between gap-3">
               <div>
+                <p className="font-mono text-xs text-stone-400">{quote.quoteNumber}</p>
                 <p className="font-semibold text-stone-800">{quote.projectName}</p>
-                <p className="text-sm text-stone-500">العميل: {quote.clientName}</p>
+                <p className="text-sm text-stone-500">
+                  العميل: {quote.clientName} · {money(quote.subtotal)}
+                </p>
                 {quote.acceptedByName && (
                   <p className="text-sm text-emerald-600">قبِله {quote.acceptedByName} بتاريخ {quote.acceptedAt?.slice(0, 10)}</p>
                 )}
@@ -150,6 +157,7 @@ export function Quotes() {
 function NewQuoteForm({ onCreated }: { onCreated: () => void }) {
   const [clientName, setClientName] = useState("");
   const [projectName, setProjectName] = useState("");
+  const [language, setLanguage] = useState<DocumentLanguage>("ar");
   const [items, setItems] = useState<DraftItem[]>([{ description: "", amount: "" }]);
   const [error, setError] = useState<string | null>(null);
 
@@ -166,6 +174,7 @@ function NewQuoteForm({ onCreated }: { onCreated: () => void }) {
         body: JSON.stringify({
           clientName,
           projectName,
+          language,
           items: items
             .filter((item) => item.description && item.amount)
             .map((item) => ({ description: item.description, amount: item.amount })),
@@ -196,6 +205,8 @@ function NewQuoteForm({ onCreated }: { onCreated: () => void }) {
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
         />
       </div>
+
+      <LanguageSelect value={language} onChange={setLanguage} />
 
       <div className="space-y-2">
         {items.map((item, i) => (

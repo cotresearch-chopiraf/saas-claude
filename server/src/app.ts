@@ -1,3 +1,9 @@
+// Must be the first import: patches Express so a rejected promise inside an
+// async route handler is forwarded to the error middleware instead of
+// crashing the whole process (Express 4 doesn't do this natively — a single
+// malformed request, e.g. a non-UUID :id hitting Postgres, used to take the
+// entire server down for every concurrent user).
+import "express-async-errors";
 import express from "express";
 import cors from "cors";
 import multer from "multer";

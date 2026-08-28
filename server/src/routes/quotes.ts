@@ -5,7 +5,7 @@ import { db } from "../db/client.js";
 import { companies, quoteItems, quotes } from "../db/schema.js";
 import { generateToken } from "../lib/tokens.js";
 import { nextQuoteNumber } from "../lib/numbering.js";
-import { buildDocumentHtml } from "../lib/documentHtml.js";
+import { buildDocumentHtml, type DocumentLanguage } from "../lib/documentHtml.js";
 import { renderHtmlToPdf } from "../lib/pdf.js";
 import { logoFileToDataUri } from "../lib/uploads.js";
 
@@ -17,13 +17,24 @@ quotesRouter.get("/", async (req, res) => {
     where: eq(quotes.companyId, req.companyId!),
     orderBy: (q, { desc }) => [desc(q.createdAt)],
   });
-  res.json(rows);
+
+  const withTotals = await Promise.all(
+    rows.map(async (quote) => {
+      const items = await db.query.quoteItems.findMany({ where: eq(quoteItems.quoteId, quote.id) });
+      const subtotal = items.reduce((sum, item) => sum + Number(item.amount), 0);
+      return { ...quote, subtotal };
+    }),
+  );
+  res.json(withTotals);
 });
+
+const languageEnum = z.enum(["ar", "fr", "en"]);
 
 const createSchema = z.object({
   clientName: z.string().min(2, "اسم العميل قصير جداً"),
   clientEmail: z.string().email().optional().or(z.literal("")),
   projectName: z.string().min(2, "اسم المشروع قصير جداً"),
+  language: languageEnum.default("ar"),
   items: z
     .array(z.object({ description: z.string().min(1), amount: z.coerce.number().nonnegative() }))
     .min(1, "أضف بنداً واحداً على الأقل"),
@@ -41,6 +52,7 @@ quotesRouter.post("/", async (req, res) => {
       clientName: parsed.data.clientName,
       clientEmail: parsed.data.clientEmail || undefined,
       projectName: parsed.data.projectName,
+      language: parsed.data.language,
       publicToken: generateToken(),
     })
     .returning();
@@ -98,8 +110,8 @@ async function buildQuotePdf(quoteId: string, companyId: string) {
   ]);
 
   const html = buildDocumentHtml({
-    docType: "عرض سعر",
-    docTypeFr: "Devis",
+    kind: "quote",
+    language: quote.language as DocumentLanguage,
     number: quote.quoteNumber ?? quote.id.slice(0, 8),
     date: quote.createdAt.toISOString().slice(0, 10),
     company: {
