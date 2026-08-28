@@ -85,6 +85,7 @@ export type QuoteStatus = "draft" | "sent" | "accepted" | "rejected";
 export interface Quote {
   id: string;
   companyId: string;
+  quoteNumber: string | null;
   clientName: string;
   clientEmail: string | null;
   projectName: string;
@@ -126,5 +127,38 @@ export interface CompanyInvite {
   email: string;
   role: CompanyRole;
   expiresAt: string;
+  createdAt: string;
+}
+
+export interface CompanyFeatureFlags {
+  invoicing: boolean;
+}
+
+export interface CompanySettings {
+  name: string;
+  logoPath: string | null;
+  address: string | null;
+  taxId: string | null;
+  phone: string | null;
+  defaultTaxRatePercent: string;
+  featureFlags: CompanyFeatureFlags;
+}
+
+export type InvoiceStatus = "draft" | "sent" | "paid";
+
+export interface Invoice {
+  id: string;
+  companyId: string;
+  quoteId: string | null;
+  invoiceNumber: string;
+  clientName: string;
+  clientAddress: string | null;
+  clientTaxId: string | null;
+  taxRatePercent: string;
+  status: InvoiceStatus;
+  publicToken: string;
+  issueDate: string;
+  dueDate: string | null;
+  paidAt: string | null;
   createdAt: string;
 }

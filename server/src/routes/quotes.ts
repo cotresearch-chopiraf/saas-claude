@@ -4,6 +4,10 @@ import { and, eq } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { companies, quoteItems, quotes } from "../db/schema.js";
 import { generateToken } from "../lib/tokens.js";
+import { nextQuoteNumber } from "../lib/numbering.js";
+import { buildDocumentHtml } from "../lib/documentHtml.js";
+import { renderHtmlToPdf } from "../lib/pdf.js";
+import { logoFileToDataUri } from "../lib/uploads.js";
 
 export const quotesRouter = Router();
 export const publicQuotesRouter = Router();
@@ -33,6 +37,7 @@ quotesRouter.post("/", async (req, res) => {
     .insert(quotes)
     .values({
       companyId: req.companyId!,
+      quoteNumber: await nextQuoteNumber(req.companyId!),
       clientName: parsed.data.clientName,
       clientEmail: parsed.data.clientEmail || undefined,
       projectName: parsed.data.projectName,
@@ -83,6 +88,49 @@ quotesRouter.delete("/:id", async (req: Request<{ id: string }>, res: Response) 
   res.status(204).end();
 });
 
+async function buildQuotePdf(quoteId: string, companyId: string) {
+  const quote = await db.query.quotes.findFirst({ where: and(eq(quotes.id, quoteId), eq(quotes.companyId, companyId)) });
+  if (!quote) return null;
+
+  const [items, company] = await Promise.all([
+    db.query.quoteItems.findMany({ where: eq(quoteItems.quoteId, quote.id) }),
+    db.query.companies.findFirst({ where: eq(companies.id, companyId) }),
+  ]);
+
+  const html = buildDocumentHtml({
+    docType: "عرض سعر",
+    docTypeFr: "Devis",
+    number: quote.quoteNumber ?? quote.id.slice(0, 8),
+    date: quote.createdAt.toISOString().slice(0, 10),
+    company: {
+      name: company!.name,
+      logoDataUri: logoFileToDataUri(company!.logoPath),
+      address: company!.address,
+      taxId: company!.taxId,
+      phone: company!.phone,
+    },
+    client: { name: quote.clientName, address: null, taxId: null },
+    items: items.map((i) => ({ description: i.description, amount: Number(i.amount) })),
+    taxRatePercent: Number(company!.defaultTaxRatePercent),
+  });
+
+  return renderHtmlToPdf(html);
+}
+
+quotesRouter.get("/:id/pdf", async (req: Request<{ id: string }>, res: Response) => {
+  try {
+    const pdf = await buildQuotePdf(req.params.id, req.companyId!);
+    if (!pdf) return res.status(404).json({ error: "عرض السعر غير موجود" });
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="quote.pdf"`);
+    res.send(pdf);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "تعذّر إنشاء ملف PDF" });
+  }
+});
+
 // --- Public, unauthenticated: this is what the client opens from a link ---
 
 publicQuotesRouter.get("/:token", async (req: Request<{ token: string }>, res: Response) => {
@@ -125,4 +173,19 @@ publicQuotesRouter.post("/:token/reject", async (req: Request<{ token: string }>
 
   const [updated] = await db.update(quotes).set({ status: "rejected" }).where(eq(quotes.id, quote.id)).returning();
   res.json(updated);
+});
+
+publicQuotesRouter.get("/:token/pdf", async (req: Request<{ token: string }>, res: Response) => {
+  const quote = await db.query.quotes.findFirst({ where: eq(quotes.publicToken, req.params.token) });
+  if (!quote || quote.status === "draft") return res.status(404).json({ error: "عرض السعر غير موجود" });
+
+  try {
+    const pdf = await buildQuotePdf(quote.id, quote.companyId);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="quote.pdf"`);
+    res.send(pdf);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "تعذّر إنشاء ملف PDF" });
+  }
 });

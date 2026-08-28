@@ -17,7 +17,9 @@ export function Layout({ children }: { children: ReactNode }) {
               <nav className="flex items-center gap-4 text-sm text-stone-500">
                 <Link to="/" className="hover:text-primary">المشاريع</Link>
                 <Link to="/quotes" className="hover:text-primary">عروض الأسعار</Link>
+                <Link to="/invoices" className="hover:text-primary">الفواتير</Link>
                 <Link to="/team" className="hover:text-primary">الفريق</Link>
+                <Link to="/settings" className="hover:text-primary">الإعدادات</Link>
               </nav>
             )}
           </div>

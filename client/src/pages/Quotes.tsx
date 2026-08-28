@@ -1,7 +1,19 @@
 import { FormEvent, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Layout } from "../components/Layout";
-import { apiFetch, ApiError } from "../api/client";
+import { apiFetch, ApiError, getToken } from "../api/client";
 import type { Quote } from "../api/types";
+
+async function downloadQuotePdf(id: string, quoteNumber: string | null) {
+  const res = await fetch(`/api/quotes/${id}/pdf`, { headers: { Authorization: `Bearer ${getToken()}` } });
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${quoteNumber ?? "quote"}.pdf`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
 
 const statusLabel: Record<Quote["status"], string> = {
   draft: "مسودة",
@@ -25,6 +37,7 @@ interface DraftItem {
 export function Quotes() {
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [showForm, setShowForm] = useState(false);
+  const navigate = useNavigate();
 
   function load() {
     apiFetch<Quote[]>("/quotes").then(setQuotes);
@@ -39,6 +52,23 @@ export function Quotes() {
   function copyLink(quote: Quote) {
     const url = `${window.location.origin}/q/${quote.publicToken}`;
     navigator.clipboard.writeText(url);
+  }
+
+  async function convertToInvoice(quote: Quote) {
+    const full = await apiFetch<Quote & { items: { description: string; amount: string }[] }>(`/quotes/${quote.id}`);
+    try {
+      await apiFetch("/invoices", {
+        method: "POST",
+        body: JSON.stringify({
+          quoteId: quote.id,
+          clientName: quote.clientName,
+          items: full.items.map((i) => ({ description: i.description, amount: i.amount })),
+        }),
+      });
+      navigate("/invoices");
+    } catch (err) {
+      alert(err instanceof ApiError ? err.message : "تعذّر إنشاء الفاتورة");
+    }
   }
 
   return (
@@ -81,11 +111,27 @@ export function Quotes() {
                 </button>
               )}
               {quote.status !== "draft" && (
+                <>
+                  <button
+                    onClick={() => copyLink(quote)}
+                    className="rounded-md border border-stone-300 px-3 py-1 text-xs text-stone-600"
+                  >
+                    نسخ رابط العميل
+                  </button>
+                  <button
+                    onClick={() => downloadQuotePdf(quote.id, quote.quoteNumber)}
+                    className="rounded-md border border-stone-300 px-3 py-1 text-xs text-stone-600"
+                  >
+                    تنزيل PDF
+                  </button>
+                </>
+              )}
+              {quote.status === "accepted" && (
                 <button
-                  onClick={() => copyLink(quote)}
-                  className="rounded-md border border-stone-300 px-3 py-1 text-xs text-stone-600"
+                  onClick={() => convertToInvoice(quote)}
+                  className="rounded-md bg-accent px-3 py-1 text-xs font-medium text-white"
                 >
-                  نسخ رابط العميل
+                  تحويل إلى فاتورة
                 </button>
               )}
             </div>

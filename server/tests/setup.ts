@@ -11,7 +11,7 @@ export async function resetDb() {
     TRUNCATE TABLE
       companies, users, projects, budget_items, expenses, tasks,
       change_orders, daily_logs, password_reset_tokens, company_invites,
-      quotes, quote_items
+      quotes, quote_items, invoices, invoice_items
     RESTART IDENTITY CASCADE
   `);
 }
