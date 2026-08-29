@@ -1,22 +1,20 @@
-import { Router, type Request, type Response, type NextFunction } from "express";
+import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { companies, companyInvites, defaultFeatureFlags, users, type CompanyFeatureFlags } from "../db/schema.js";
 import { generateToken, hashToken } from "../lib/tokens.js";
 import { sendMail } from "../lib/mailer.js";
-import { logoUpload } from "../lib/uploads.js";
+import { handleLogoUpload } from "../lib/uploads.js";
+import { requirePermission } from "../lib/permissions.js";
+import { uploadFile, publicUrlFor } from "../lib/storage/index.js";
 
 export const companyRouter = Router();
 
 // Only the company owner can invite teammates or see pending invites.
-async function requireOwner(req: Request, res: Response, next: NextFunction) {
-  const user = await db.query.users.findFirst({ where: eq(users.id, req.userId!) });
-  if (user?.role !== "owner") {
-    return res.status(403).json({ error: "هذا الإجراء متاح لمالك الشركة فقط" });
-  }
-  next();
-}
+// Backed by the shared permission matrix (lib/permissions.ts) rather than a
+// standalone check, so this stays in sync with every other owner-only gate.
+const requireOwner = requirePermission("company.manage");
 
 companyRouter.get("/settings", async (req, res) => {
   const company = await db.query.companies.findFirst({ where: eq(companies.id, req.companyId!) });
@@ -72,10 +70,25 @@ companyRouter.patch("/settings", requireOwner, async (req, res) => {
   });
 });
 
-companyRouter.post("/logo", requireOwner, logoUpload.single("logo"), async (req, res) => {
+companyRouter.post("/logo", requireOwner, handleLogoUpload, async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "لم يتم إرفاق ملف" });
 
-  const logoPath = `/uploads/logos/${req.file.filename}`;
+  // Goes through the storage abstraction (lib/storage/) rather than
+  // writing to disk directly — records a `files` metadata row (who/when/
+  // checksum/size) for the same evidence-auditability reason every future
+  // attachment will need, proven here on an already-existing feature.
+  const file = await uploadFile({
+    companyId: req.companyId!,
+    uploadedBy: req.userId!,
+    entityType: "company_logo",
+    entityId: req.companyId!,
+    buffer: req.file.buffer,
+    fileName: req.file.originalname,
+    mimeType: req.file.mimetype,
+    namespace: "logos",
+  });
+
+  const logoPath = publicUrlFor(file.storageKey);
   await db.update(companies).set({ logoPath }).where(eq(companies.id, req.companyId!));
   res.json({ logoPath });
 });
