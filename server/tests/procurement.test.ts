@@ -160,6 +160,80 @@ describe("Commitment: creation, reads, tenant isolation, numbering", () => {
     expect(c2.commitment_number).toBe(c1.commitment_number + 1);
   });
 
+  // Concurrency Hardening: the MAX+1 subquery alone is not race-safe — two
+  // concurrent INSERTs can each read the same prior MAX before either
+  // commits. Same class of bug empirically proven (and fixed) for IPC
+  // numbering in Phase 2C; see docs/MIDAD_CONCURRENCY_HARDENING.md. Uses a
+  // dedicated fresh company (registered here, not the shared file-level
+  // one) so the asserted numbers are exact, not merely "N distinct values"
+  // on top of whatever earlier tests in this file already claimed.
+  it("5x: concurrent commitment creation for the same company never collides on commitment_number", async () => {
+    const freshRes = await request(app)
+      .post("/api/auth/register")
+      .send({ companyName: "Concurrency Co", name: "Owner", email: uniqueEmail("proc-conc"), password: "password123" });
+    expect(freshRes.status).toBe(201);
+    const freshToken = freshRes.body.token as string;
+
+    const projectRes = await request(app)
+      .post("/api/projects")
+      .set("Authorization", `Bearer ${freshToken}`)
+      .send({ name: "Concurrency Project" });
+    const projectId = projectRes.body.id as string;
+
+    const supplierRes = await request(app)
+      .post("/api/suppliers")
+      .set("Authorization", `Bearer ${freshToken}`)
+      .send({ name: "Concurrency Supplier", type: "supplier" });
+    const supplierId = supplierRes.body.id as string;
+
+    const results = await Promise.all(
+      Array.from({ length: 5 }, () =>
+        request(app)
+          .post(`/api/projects/${projectId}/commitments`)
+          .set("Authorization", `Bearer ${freshToken}`)
+          .send({ supplierId, type: "purchase_order" }),
+      ),
+    );
+    for (const r of results) expect(r.status).toBe(201);
+
+    const numbers = results.map((r) => r.body.commitment_number).sort((a, b) => a - b);
+    expect(new Set(numbers).size).toBe(5); // count(numbers) == count(unique(numbers))
+    expect(numbers).toEqual([1, 2, 3, 4, 5]); // contiguous from this fresh company's MAX (0) + 1
+  });
+
+  // Cross-scope proof: commitment numbering is company-wide, so the
+  // correct "independent scope" is a different COMPANY (not project). The
+  // parent-row lock must not serialize commitment creation across
+  // unrelated companies.
+  it("independent companies are not serialized against each other, and each keeps its own correct sequence", async () => {
+    const projectId = await createProject();
+    const supplier = await createSupplier();
+
+    const projectBRes = await request(app)
+      .post("/api/projects")
+      .set("Authorization", `Bearer ${companyBToken}`)
+      .send({ name: "Company B Project" });
+    const projectBId = projectBRes.body.id as string;
+    const supplierBRes = await request(app)
+      .post("/api/suppliers")
+      .set("Authorization", `Bearer ${companyBToken}`)
+      .send({ name: "Company B Supplier", type: "supplier" });
+    const supplierBId = supplierBRes.body.id as string;
+
+    const [beforeA] = await Promise.all([createDraftCommitment(projectId, supplier.id)]);
+
+    const results = await Promise.all([
+      createDraftCommitment(projectId, supplier.id),
+      request(app)
+        .post(`/api/projects/${projectBId}/commitments`)
+        .set("Authorization", `Bearer ${companyBToken}`)
+        .send({ supplierId: supplierBId, type: "purchase_order" }),
+    ]);
+
+    expect(results[0].commitment_number).toBe(beforeA.commitment_number + 1);
+    expect(results[1].status).toBe(201); // company B's own independent sequence, unaffected by company A's numbers
+  });
+
   it("rejects a supplierId belonging to another company", async () => {
     const projectId = await createProject();
     const otherSupplierRes = await request(app)

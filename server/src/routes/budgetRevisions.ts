@@ -33,10 +33,12 @@ const createSchema = z.object({
   reason: z.string().optional(),
 });
 
-// revisionNumber is claimed with the same atomic INSERT...SELECT-subquery
-// discipline used for BOQ revisions (routes/boq.ts) — two concurrent
-// "create a new budget revision for this project" requests can never be
-// handed the same revision number.
+// revisionNumber is claimed via an INSERT ... SELECT MAX+1 subquery, inside
+// a transaction that locks the parent project row FOR UPDATE first (see
+// docs/MIDAD_CONCURRENCY_HARDENING.md) — two concurrent "create a new
+// budget revision for this project" requests can never be handed the same
+// revision number. The project was already tenant-validated by this
+// router's own middleware above before this handler ever runs.
 budgetRevisionsRouter.post(
   "/",
   requirePermission("budgetRevision.manage"),
@@ -44,24 +46,32 @@ budgetRevisionsRouter.post(
     const parsed = createSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
 
-    const result = await db.execute<{
-      id: string;
-      revision_number: number;
-      status: string;
-      created_at: string;
-    }>(sql`
-      INSERT INTO budget_revisions (company_id, project_id, revision_number, status, reason, created_by)
-      VALUES (
-        ${req.companyId},
-        ${req.params.projectId},
-        (SELECT COALESCE(MAX(revision_number), 0) + 1 FROM budget_revisions WHERE project_id = ${req.params.projectId}),
-        'draft',
-        ${parsed.data.reason ?? null},
-        ${req.userId}
-      )
-      RETURNING id, revision_number, status, created_at
-    `);
-    const revision = result.rows[0];
+    // The MAX+1 subquery alone is not race-safe: two concurrent INSERTs can
+    // each read the same prior MAX before either commits. Locking the
+    // parent project row for the duration of the transaction serializes
+    // concurrent budget revision creation on the same project — same fix
+    // already proven for IPC numbering (routes/ipcs.ts).
+    const revision = await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT id FROM projects WHERE id = ${req.params.projectId} FOR UPDATE`);
+      const result = await tx.execute<{
+        id: string;
+        revision_number: number;
+        status: string;
+        created_at: string;
+      }>(sql`
+        INSERT INTO budget_revisions (company_id, project_id, revision_number, status, reason, created_by)
+        VALUES (
+          ${req.companyId},
+          ${req.params.projectId},
+          (SELECT COALESCE(MAX(revision_number), 0) + 1 FROM budget_revisions WHERE project_id = ${req.params.projectId}),
+          'draft',
+          ${parsed.data.reason ?? null},
+          ${req.userId}
+        )
+        RETURNING id, revision_number, status, created_at
+      `);
+      return result.rows[0];
+    });
 
     await recordAuditEvent(db, {
       companyId: req.companyId!,

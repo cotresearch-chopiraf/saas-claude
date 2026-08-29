@@ -34,11 +34,11 @@ const createRevisionSchema = z.object({
   notes: z.string().optional(),
 });
 
-// revisionNumber is claimed with a single atomic INSERT ... SELECT
-// subquery (the same discipline lib/numbering.ts already established for
-// document numbering) rather than a separate SELECT-max-then-INSERT — two
-// concurrent "create a new BOQ revision for this contract" requests can
-// never be handed the same revision number.
+// revisionNumber is claimed via an INSERT ... SELECT MAX+1 subquery, inside
+// a transaction that locks the parent contract row FOR UPDATE first (see
+// docs/MIDAD_CONCURRENCY_HARDENING.md) — two concurrent "create a new BOQ
+// revision for this contract" requests can never be handed the same
+// revision number.
 boqRouter.post(
   "/",
   requirePermission("boq.manage"),
@@ -51,25 +51,33 @@ boqRouter.post(
     });
     if (!contract) return res.status(404).json({ error: "العقد غير موجود" });
 
-    const result = await db.execute<{
-      id: string;
-      revision_number: number;
-      status: string;
-      created_at: string;
-    }>(sql`
-      INSERT INTO boq_revisions (company_id, project_id, contract_id, revision_number, status, notes, created_by)
-      VALUES (
-        ${req.companyId},
-        ${req.params.projectId},
-        ${parsed.data.contractId},
-        (SELECT COALESCE(MAX(revision_number), 0) + 1 FROM boq_revisions WHERE contract_id = ${parsed.data.contractId}),
-        'draft',
-        ${parsed.data.notes ?? null},
-        ${req.userId}
-      )
-      RETURNING id, revision_number, status, created_at
-    `);
-    const revision = result.rows[0];
+    // The MAX+1 subquery alone is not race-safe: two concurrent INSERTs can
+    // each read the same prior MAX before either commits. Locking the
+    // parent contract row for the duration of the transaction serializes
+    // concurrent BOQ revision creation on the same contract — same fix
+    // already proven for IPC numbering (routes/ipcs.ts).
+    const revision = await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT id FROM contracts WHERE id = ${parsed.data.contractId} FOR UPDATE`);
+      const result = await tx.execute<{
+        id: string;
+        revision_number: number;
+        status: string;
+        created_at: string;
+      }>(sql`
+        INSERT INTO boq_revisions (company_id, project_id, contract_id, revision_number, status, notes, created_by)
+        VALUES (
+          ${req.companyId},
+          ${req.params.projectId},
+          ${parsed.data.contractId},
+          (SELECT COALESCE(MAX(revision_number), 0) + 1 FROM boq_revisions WHERE contract_id = ${parsed.data.contractId}),
+          'draft',
+          ${parsed.data.notes ?? null},
+          ${req.userId}
+        )
+        RETURNING id, revision_number, status, created_at
+      `);
+      return result.rows[0];
+    });
 
     await recordAuditEvent(db, {
       companyId: req.companyId!,

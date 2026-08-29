@@ -49,12 +49,12 @@ const createSchema = z.object({
   currency: z.string().min(1).optional(),
 });
 
-// commitmentNumber is claimed with the same atomic INSERT...SELECT
-// subquery discipline as boqRevisions.revisionNumber /
-// budgetRevisions.revisionNumber (routes/boq.ts, routes/budgetRevisions.ts)
-// — scoped per company (not per project) here, matching how invoice/quote
-// numbers are company-wide sequences. Two concurrent "create a commitment"
-// requests for this company can never be handed the same number.
+// commitmentNumber is claimed via an INSERT ... SELECT MAX+1 subquery,
+// inside a transaction that locks the parent company row FOR UPDATE first
+// (see docs/MIDAD_CONCURRENCY_HARDENING.md) — scoped per company (not per
+// project), matching how invoice/quote numbers are company-wide
+// sequences. Two concurrent "create a commitment" requests for this
+// company can never be handed the same number.
 commitmentsRouter.post(
   "/",
   requirePermission("commitment.manage"),
@@ -77,28 +77,37 @@ commitmentsRouter.post(
       if (!contract) return res.status(404).json({ error: "العقد غير موجود" });
     }
 
-    const result = await db.execute<{
-      id: string;
-      commitment_number: number;
-      status: string;
-      created_at: string;
-    }>(sql`
-      INSERT INTO commitments (company_id, project_id, contract_id, supplier_id, type, status, commitment_number, description, currency, created_by)
-      VALUES (
-        ${req.companyId},
-        ${req.params.projectId},
-        ${parsed.data.contractId ?? null},
-        ${parsed.data.supplierId},
-        ${parsed.data.type},
-        'draft',
-        (SELECT COALESCE(MAX(commitment_number), 0) + 1 FROM commitments WHERE company_id = ${req.companyId}),
-        ${parsed.data.description ?? null},
-        ${parsed.data.currency ?? "SAR"},
-        ${req.userId}
-      )
-      RETURNING id, commitment_number, status, created_at
-    `);
-    const commitment = result.rows[0];
+    // The MAX+1 subquery alone is not race-safe: two concurrent INSERTs can
+    // each read the same prior MAX before either commits. Locking the
+    // parent company row (req.companyId is always the caller's own
+    // authenticated company, never an untrusted input) for the duration of
+    // the transaction serializes concurrent commitment creation for this
+    // company — same fix already proven for IPC numbering (routes/ipcs.ts).
+    const commitment = await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT id FROM companies WHERE id = ${req.companyId} FOR UPDATE`);
+      const result = await tx.execute<{
+        id: string;
+        commitment_number: number;
+        status: string;
+        created_at: string;
+      }>(sql`
+        INSERT INTO commitments (company_id, project_id, contract_id, supplier_id, type, status, commitment_number, description, currency, created_by)
+        VALUES (
+          ${req.companyId},
+          ${req.params.projectId},
+          ${parsed.data.contractId ?? null},
+          ${parsed.data.supplierId},
+          ${parsed.data.type},
+          'draft',
+          (SELECT COALESCE(MAX(commitment_number), 0) + 1 FROM commitments WHERE company_id = ${req.companyId}),
+          ${parsed.data.description ?? null},
+          ${parsed.data.currency ?? "SAR"},
+          ${req.userId}
+        )
+        RETURNING id, commitment_number, status, created_at
+      `);
+      return result.rows[0];
+    });
 
     await recordAuditEvent(db, {
       companyId: req.companyId!,

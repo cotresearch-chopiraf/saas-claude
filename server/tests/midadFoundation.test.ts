@@ -258,6 +258,51 @@ describe("MIDAD Phase 1 — BOQ revisions", () => {
     expect(second.body.revision_number).toBe(2);
   });
 
+  // Concurrency Hardening: the MAX+1 subquery alone is not race-safe — two
+  // concurrent INSERTs can each read the same prior MAX before either
+  // commits. This is the exact class of bug empirically proven (and fixed)
+  // for IPC numbering in Phase 2C; see docs/MIDAD_CONCURRENCY_HARDENING.md.
+  it("5x: concurrent BOQ revision creation on the same contract never collides on revision_number", async () => {
+    const { projectId, contractId } = await createContractForProject();
+
+    const results = await Promise.all(
+      Array.from({ length: 5 }, () =>
+        request(app)
+          .post(`/api/projects/${projectId}/boq-revisions`)
+          .set("Authorization", `Bearer ${ownerToken}`)
+          .send({ contractId }),
+      ),
+    );
+    for (const r of results) expect(r.status).toBe(201);
+
+    const numbers = results.map((r) => r.body.revision_number).sort((a, b) => a - b);
+    expect(new Set(numbers).size).toBe(5); // count(numbers) == count(unique(numbers))
+    expect(numbers).toEqual([1, 2, 3, 4, 5]); // contiguous from the existing MAX (0) + 1
+  });
+
+  // Cross-scope proof: the parent-row lock must serialize the correct
+  // scope (per contract) — it must not serialize the whole table. Two
+  // DIFFERENT contracts creating revisions concurrently must each get
+  // their own independent, correct 1..N sequence.
+  it("independent contracts are not serialized against each other, and each keeps its own correct sequence", async () => {
+    const projectId = await createProject();
+    const contractA = await createContract(projectId);
+    const contractB = await createContract(projectId);
+
+    const results = await Promise.all([
+      request(app).post(`/api/projects/${projectId}/boq-revisions`).set("Authorization", `Bearer ${ownerToken}`).send({ contractId: contractA.id }),
+      request(app).post(`/api/projects/${projectId}/boq-revisions`).set("Authorization", `Bearer ${ownerToken}`).send({ contractId: contractB.id }),
+      request(app).post(`/api/projects/${projectId}/boq-revisions`).set("Authorization", `Bearer ${ownerToken}`).send({ contractId: contractA.id }),
+      request(app).post(`/api/projects/${projectId}/boq-revisions`).set("Authorization", `Bearer ${ownerToken}`).send({ contractId: contractB.id }),
+    ]);
+    for (const r of results) expect(r.status).toBe(201);
+
+    const numbersA = results.filter((_, i) => i === 0 || i === 2).map((r) => r.body.revision_number).sort();
+    const numbersB = results.filter((_, i) => i === 1 || i === 3).map((r) => r.body.revision_number).sort();
+    expect(numbersA).toEqual([1, 2]);
+    expect(numbersB).toEqual([1, 2]);
+  });
+
   it("rejects a contractId that does not belong to this project", async () => {
     const { projectId } = await createContractForProject();
     const otherProjectId = await createProject();
@@ -460,6 +505,46 @@ describe("MIDAD Phase 1 — Budget revisions", () => {
       .get(`/api/projects/${projectId}/budget-revisions`)
       .set("Authorization", `Bearer ${ownerToken}`);
     expect(listRes.body).toHaveLength(2);
+  });
+
+  // Concurrency Hardening: same class of MAX+1 race as BOQ revisions above
+  // — see docs/MIDAD_CONCURRENCY_HARDENING.md.
+  it("5x: concurrent budget revision creation on the same project never collides on revision_number", async () => {
+    const projectId = await createProject();
+
+    const results = await Promise.all(
+      Array.from({ length: 5 }, () =>
+        request(app)
+          .post(`/api/projects/${projectId}/budget-revisions`)
+          .set("Authorization", `Bearer ${ownerToken}`)
+          .send({ reason: "concurrent" }),
+      ),
+    );
+    for (const r of results) expect(r.status).toBe(201);
+
+    const numbers = results.map((r) => r.body.revision_number).sort((a, b) => a - b);
+    expect(new Set(numbers).size).toBe(5);
+    expect(numbers).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  // Cross-scope proof: two DIFFERENT projects must not be serialized
+  // against each other, and each keeps its own correct sequence.
+  it("independent projects are not serialized against each other, and each keeps its own correct sequence", async () => {
+    const projectA = await createProject();
+    const projectB = await createProject();
+
+    const results = await Promise.all([
+      request(app).post(`/api/projects/${projectA}/budget-revisions`).set("Authorization", `Bearer ${ownerToken}`).send({}),
+      request(app).post(`/api/projects/${projectB}/budget-revisions`).set("Authorization", `Bearer ${ownerToken}`).send({}),
+      request(app).post(`/api/projects/${projectA}/budget-revisions`).set("Authorization", `Bearer ${ownerToken}`).send({}),
+      request(app).post(`/api/projects/${projectB}/budget-revisions`).set("Authorization", `Bearer ${ownerToken}`).send({}),
+    ]);
+    for (const r of results) expect(r.status).toBe(201);
+
+    const numbersA = results.filter((_, i) => i === 0 || i === 2).map((r) => r.body.revision_number).sort();
+    const numbersB = results.filter((_, i) => i === 1 || i === 3).map((r) => r.body.revision_number).sort();
+    expect(numbersA).toEqual([1, 2]);
+    expect(numbersB).toEqual([1, 2]);
   });
 
   it("assigns a budget item to a draft revision, optionally re-tagging its cost code, and audits it", async () => {
