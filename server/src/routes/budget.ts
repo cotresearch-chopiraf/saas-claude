@@ -3,6 +3,7 @@ import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { budgetItems, expenses, projects } from "../db/schema.js";
+import { sumMoney, roundMoney } from "../lib/money.js";
 
 type ProjectParams = { projectId: string };
 type ItemParams = ProjectParams & { itemId: string };
@@ -32,17 +33,24 @@ budgetRouter.get("/", async (req: Request<ProjectParams>, res: Response) => {
     orderBy: (e, { desc }) => [desc(e.expenseDate)],
   });
 
-  const spentByItem = new Map<string, number>();
-  let totalSpent = 0;
+  const amountsByItem = new Map<string, number[]>();
+  const allExpenseAmounts: number[] = [];
   for (const expense of projectExpenses) {
     const amount = Number(expense.amount);
-    totalSpent += amount;
+    allExpenseAmounts.push(amount);
     if (expense.budgetItemId) {
-      spentByItem.set(expense.budgetItemId, (spentByItem.get(expense.budgetItemId) ?? 0) + amount);
+      const amounts = amountsByItem.get(expense.budgetItemId) ?? [];
+      amounts.push(amount);
+      amountsByItem.set(expense.budgetItemId, amounts);
     }
   }
+  const spentByItem = new Map<string, number>();
+  for (const [itemId, amounts] of amountsByItem) {
+    spentByItem.set(itemId, sumMoney(amounts));
+  }
 
-  const totalPlanned = items.reduce((sum, item) => sum + Number(item.plannedAmount), 0);
+  const totalPlanned = sumMoney(items.map((item) => Number(item.plannedAmount)));
+  const totalSpent = sumMoney(allExpenseAmounts);
 
   res.json({
     items: items.map((item) => ({
@@ -53,7 +61,7 @@ budgetRouter.get("/", async (req: Request<ProjectParams>, res: Response) => {
     totals: {
       planned: totalPlanned,
       spent: totalSpent,
-      remaining: totalPlanned - totalSpent,
+      remaining: roundMoney(totalPlanned - totalSpent),
     },
   });
 });
@@ -152,6 +160,20 @@ const expenseSchema = z.object({
 budgetRouter.post("/expenses", async (req: Request<ProjectParams>, res: Response) => {
   const parsed = expenseSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
+
+  // A budget item id is never trusted as-is: without this check, any
+  // authenticated member of THIS company could attach an expense to a
+  // budget item belonging to a DIFFERENT project (this company's own, or —
+  // since budgetItemId was never scoped at all — even one visible only by
+  // guessing a UUID) silently corrupting that other project's spent/
+  // remaining totals. Same ownership-validation discipline invoices.ts
+  // already applies to quoteId.
+  if (parsed.data.budgetItemId) {
+    const owningItem = await db.query.budgetItems.findFirst({
+      where: and(eq(budgetItems.id, parsed.data.budgetItemId), eq(budgetItems.projectId, req.params.projectId)),
+    });
+    if (!owningItem) return res.status(404).json({ error: "بند الميزانية غير موجود" });
+  }
 
   const [expense] = await db
     .insert(expenses)
