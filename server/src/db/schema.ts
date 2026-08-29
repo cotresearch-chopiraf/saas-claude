@@ -309,6 +309,19 @@ export const invoices = pgTable("invoices", {
     .notNull()
     .references(() => companies.id, { onDelete: "cascade" }),
   quoteId: uuid("quote_id").references(() => quotes.id, { onDelete: "set null" }),
+  // MIDAD Phase 2E foundation — both nullable, added additively on top of
+  // every existing invoice (which keeps working exactly as before with
+  // both left NULL — an "unallocated" company-level invoice remains valid
+  // product behavior, not a data-quality problem to fix). Never populated
+  // by matching quotes.projectName (free text) against projects.name —
+  // that would be a non-deterministic heuristic, not a real relationship.
+  // Only a route that independently validates both FKs against the
+  // caller's company (and, when both are supplied, contract.projectId ===
+  // this projectId) may ever set them — see routes/invoices.ts. This is
+  // what makes Σ invoices reliably project-scopable for Cash Flow
+  // (Phase 2E), closing the gap the Phase 2E discovery report identified.
+  projectId: uuid("project_id").references(() => projects.id, { onDelete: "set null" }),
+  contractId: uuid("contract_id").references((): AnyPgColumn => contracts.id, { onDelete: "set null" }),
   invoiceNumber: text("invoice_number").notNull(),
   clientName: text("client_name").notNull(),
   clientAddress: text("client_address"),
@@ -509,6 +522,14 @@ export const invoicesRelations = relations(invoices, ({ one, many }) => ({
   quote: one(quotes, {
     fields: [invoices.quoteId],
     references: [quotes.id],
+  }),
+  project: one(projects, {
+    fields: [invoices.projectId],
+    references: [projects.id],
+  }),
+  contract: one(contracts, {
+    fields: [invoices.contractId],
+    references: [contracts.id],
   }),
   items: many(invoiceItems),
 }));

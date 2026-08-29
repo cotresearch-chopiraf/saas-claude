@@ -92,6 +92,13 @@
       "when": 1787995796191,
       "tag": "0012_lethal_red_wolf",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1788002343605,
+      "tag": "0013_pretty_sue_storm",
+      "breakpoints": true
     }
   ]
 }

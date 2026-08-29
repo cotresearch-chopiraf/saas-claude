@@ -2,7 +2,16 @@ import { Router, type Request, type Response, type NextFunction } from "express"
 import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { companies, defaultFeatureFlags, invoiceItems, invoices, quotes, type CompanyFeatureFlags } from "../db/schema.js";
+import {
+  companies,
+  contracts,
+  defaultFeatureFlags,
+  invoiceItems,
+  invoices,
+  projects,
+  quotes,
+  type CompanyFeatureFlags,
+} from "../db/schema.js";
 import { nextInvoiceNumber } from "../lib/numbering.js";
 import { generateToken } from "../lib/tokens.js";
 import { buildDocumentHtml, type DocumentLanguage } from "../lib/documentHtml.js";
@@ -10,6 +19,7 @@ import { renderHtmlToPdf } from "../lib/pdf.js";
 import { logoFileToDataUri } from "../lib/uploads.js";
 import { computeTotals } from "../lib/money.js";
 import { requirePermission, getUserRole, isPermittedRole } from "../lib/permissions.js";
+import { recordAuditEvent } from "../lib/audit.js";
 import { logger } from "../lib/logger.js";
 import { calculateTax } from "../lib/compliance/engine.js";
 
@@ -51,6 +61,11 @@ const languageEnum = z.enum(["ar", "fr", "en"]);
 
 const createSchema = z.object({
   quoteId: z.string().uuid().optional(),
+  // MIDAD Phase 2E foundation — both optional/nullable. See
+  // resolveInvoiceProjectContract below for the exact validation and
+  // derivation rules; neither is ever inferred from free text.
+  projectId: z.string().uuid().optional(),
+  contractId: z.string().uuid().optional(),
   clientName: z.string().min(2, "اسم العميل قصير جداً"),
   clientAddress: z.string().optional(),
   clientTaxId: z.string().optional(),
@@ -63,9 +78,50 @@ const createSchema = z.object({
     .min(1, "أضف بنداً واحداً على الأقل"),
 });
 
+// Independently validates projectId/contractId against the caller's own
+// company — never trusted merely because they were supplied, and never
+// derived from quotes.projectName or any other free-text match (the exact
+// heuristic the Phase 2E discovery report explicitly ruled out). When a
+// contractId is given, its own project is what actually gets stored — an
+// independently-supplied, conflicting projectId is rejected rather than
+// silently overridden or silently trusted.
+async function resolveInvoiceProjectContract(
+  companyId: string,
+  input: { projectId?: string; contractId?: string },
+): Promise<{ error: string; status: 404 | 400 } | { projectId?: string; contractId?: string }> {
+  if (input.contractId) {
+    const contract = await db.query.contracts.findFirst({
+      where: and(eq(contracts.id, input.contractId), eq(contracts.companyId, companyId)),
+    });
+    if (!contract) return { error: "العقد غير موجود", status: 404 };
+    if (input.projectId && input.projectId !== contract.projectId) {
+      return { error: "العقد لا ينتمي إلى المشروع المحدد", status: 400 };
+    }
+    return { projectId: contract.projectId, contractId: contract.id };
+  }
+
+  if (input.projectId) {
+    const project = await db.query.projects.findFirst({
+      where: and(eq(projects.id, input.projectId), eq(projects.companyId, companyId)),
+    });
+    if (!project) return { error: "المشروع غير موجود", status: 404 };
+    return { projectId: project.id };
+  }
+
+  // Neither supplied — an unallocated, company-level invoice remains valid
+  // product behavior (see docs/MIDAD_FINANCIAL_MODEL.md's Phase 2E note).
+  return {};
+}
+
 invoicesRouter.post("/", async (req, res) => {
   const parsed = createSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
+
+  const relationship = await resolveInvoiceProjectContract(req.companyId!, {
+    projectId: parsed.data.projectId,
+    contractId: parsed.data.contractId,
+  });
+  if ("error" in relationship) return res.status(relationship.status).json({ error: relationship.error });
 
   // TC-02 fix: an explicit taxRatePercent bypasses the compliance engine
   // entirely — no ruleVersionId/override provenance gets recorded for it,
@@ -127,6 +183,8 @@ invoicesRouter.post("/", async (req, res) => {
     .values({
       companyId: req.companyId!,
       quoteId: parsed.data.quoteId,
+      projectId: relationship.projectId,
+      contractId: relationship.contractId,
       invoiceNumber,
       clientName: parsed.data.clientName,
       clientAddress: parsed.data.clientAddress,
@@ -141,6 +199,21 @@ invoicesRouter.post("/", async (req, res) => {
       dueDate: parsed.data.dueDate,
     })
     .returning();
+
+  // New for the Phase 2E foundation: invoices previously only wrote to the
+  // structured log (see send/mark-paid below, unchanged) — the
+  // project/contract relationship is financially meaningful enough that it
+  // must be reconstructable via the canonical audit_events table, matching
+  // every other domain's creation-event precedent.
+  await recordAuditEvent(db, {
+    companyId: req.companyId!,
+    actorUserId: req.userId!,
+    action: "invoice.created",
+    entityType: "invoice",
+    entityId: invoice.id,
+    afterValue: invoice,
+    metadata: { projectId: relationship.projectId ?? null, contractId: relationship.contractId ?? null, quoteId: parsed.data.quoteId ?? null },
+  });
 
   await db.insert(invoiceItems).values(
     parsed.data.items.map((item) => ({
