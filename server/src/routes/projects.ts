@@ -58,7 +58,20 @@ projectsRouter.get("/:id", async (req, res) => {
   res.json(project);
 });
 
-const updateSchema = projectSchema.partial().extend({
+// budgetTotal is deliberately NOT part of this schema (unlike projectSchema
+// above, which this is intentionally not derived from via .partial()).
+// projects.budgetTotal is a legacy field: its only sanctioned writer is
+// change-order approval (changeOrders.ts's atomic, owner-gated, audited SQL
+// increment) — normal project updates must never be able to touch it.
+// Discovery found this route previously accepted an unguarded, unaudited
+// budgetTotal in its body, letting any member silently overwrite it outside
+// that workflow; see docs/MIDAD_FINANCIAL_MODEL.md for why that field is
+// not treated as authoritative for anything Phase 2 builds.
+const updateSchema = z.object({
+  name: z.string().min(2, "اسم المشروع قصير جداً").optional(),
+  clientName: z.string().optional(),
+  address: z.string().optional(),
+  startDate: z.string().optional(),
   status: z.enum(["active", "on_hold", "completed"]).optional(),
 });
 
@@ -71,13 +84,17 @@ projectsRouter.patch("/:id", async (req, res) => {
     return res.status(400).json({ error: parsed.error.issues[0].message });
   }
 
-  const { budgetTotal, ...rest } = parsed.data;
+  // A body containing only fields this schema doesn't recognize (e.g. a
+  // stray budgetTotal — see the schema comment above) parses to an empty
+  // object: nothing to set, so this is a no-op returning the project
+  // unchanged, not a Drizzle "no values to set" error.
+  if (Object.keys(parsed.data).length === 0) {
+    return res.json(existing);
+  }
+
   const [updated] = await db
     .update(projects)
-    .set({
-      ...rest,
-      ...(budgetTotal !== undefined ? { budgetTotal: String(budgetTotal) } : {}),
-    })
+    .set(parsed.data)
     .where(eq(projects.id, req.params.id))
     .returning();
 

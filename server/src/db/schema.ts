@@ -130,6 +130,17 @@ export const projects = pgTable("projects", {
   clientName: text("client_name"),
   address: text("address"),
   status: projectStatusEnum("status").notNull().default("active"),
+  // LEGACY, non-authoritative. Predates Contract/BOQ/BudgetItems entirely
+  // (the original MVP's only notion of "the project's money"). Kept for
+  // backward compatibility and display only — see
+  // docs/MIDAD_FINANCIAL_MODEL.md for the canonical financial model this
+  // does NOT participate in. Its only sanctioned writer is change-order
+  // approval's atomic SQL increment (changeOrders.ts); the normal project
+  // update route (routes/projects.ts) deliberately excludes it from its
+  // schema so it cannot be set through that path at all, by any role.
+  // Never read by Contract, BOQ, BudgetItems, or anything Phase 2 builds
+  // (Commitment, Actual Cost, Forecast, Cash Flow) — budgetItems.plannedAmount
+  // is the canonical Cost Plan those depend on instead.
   budgetTotal: numeric("budget_total", { precision: 12, scale: 2 })
     .notNull()
     .default("0"),
@@ -137,6 +148,14 @@ export const projects = pgTable("projects", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+// This table's plannedAmount is the canonical Cost Plan / expected-cost
+// baseline for this product — the number future Commitment, Actual Cost,
+// and Forecast logic computes variance against, grouped by project, cost
+// code, BOQ item, and/or budget revision. It is NOT the same figure as
+// Contract value (contracts.revisedValue — contractual/revenue value) or
+// published BOQ value (Σ boqItems.amount — contractual scope valuation);
+// see docs/MIDAD_FINANCIAL_MODEL.md for why these three are kept distinct
+// rather than collapsed into one generic "budget" number.
 export const budgetItems = pgTable("budget_items", {
   id: uuid("id").primaryKey().defaultRandom(),
   projectId: uuid("project_id")
@@ -185,7 +204,9 @@ export const tasks = pgTable("tasks", {
 
 // Renovation scope changes constantly — this is the #1 workflow gap this
 // product exists to close. Approving a change order shifts the project's
-// budgetTotal by amountDelta (see the route handler).
+// LEGACY budgetTotal by amountDelta (see the route handler) — this is the
+// one sanctioned writer of that field, kept exactly as it was; it does not
+// touch Contract, BOQ, or BudgetItems (see docs/MIDAD_FINANCIAL_MODEL.md).
 export const changeOrders = pgTable("change_orders", {
   id: uuid("id").primaryKey().defaultRandom(),
   projectId: uuid("project_id")
@@ -648,6 +669,10 @@ export const costCodes = pgTable("cost_codes", {
 // deferred to later phases; change_orders already exists and is untouched).
 // revisedValue starts equal to originalValue and is expected to move only
 // through an explicit, audited amendment — never edited in place silently.
+// revisedValue is the canonical CURRENT CONTRACT VALUE — the contractual/
+// revenue figure. It is a distinct concept from the Cost Plan
+// (budgetItems.plannedAmount) and from BOQ scope valuation (Σ boqItems.amount);
+// see docs/MIDAD_FINANCIAL_MODEL.md.
 export const contractTypeEnum = pgEnum("contract_type", ["main", "amendment"]);
 export const contractStatusEnum = pgEnum("contract_status", ["draft", "active", "completed", "terminated"]);
 
@@ -736,16 +761,16 @@ export const boqItems = pgTable("boq_items", {
 
 // --- Budget Revisions ---
 // An ADDITIVE versioning/approval layer on top of the existing budget_items
-// table — deliberately NOT a replacement for projects.budgetTotal, which
-// remains exactly what it is today: the current authoritative total that
-// change-order approval atomically adjusts (changeOrders.ts, already
-// concurrency-hardened and tested). A budget revision here means "we
-// approved a new allocation of the budget across cost codes" (e.g. a
-// transfer from Materials to Labor) — not "the total contract value
-// changed" (that is what a change order, or a contract amendment, already
-// represents). Conflating the two would have meant touching already-working,
-// tested, concurrency-sensitive change-order code in Phase 1, which the
-// approved plan's risk posture explicitly steers away from.
+// table (the canonical Cost Plan — see the comment above budgetItems). A
+// budget revision here means "we approved a new allocation of the budget
+// across cost codes" (e.g. a transfer from Materials to Labor) — not "the
+// total contract value changed" (that is what a contract amendment
+// represents; see docs/MIDAD_FINANCIAL_MODEL.md for the full distinction).
+// This intentionally does not touch the legacy projects.budgetTotal field
+// (see the comment on that column) or the already-working, concurrency-
+// hardened change-order code (changeOrders.ts) — conflating budget-item
+// reallocation with either would have meant redesigning tested code the
+// Phase 1 plan's risk posture explicitly steered away from touching.
 export const budgetRevisionStatusEnum = pgEnum("budget_revision_status", ["draft", "approved", "superseded"]);
 
 export const budgetRevisions = pgTable("budget_revisions", {
