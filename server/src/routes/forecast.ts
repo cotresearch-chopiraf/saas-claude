@@ -32,7 +32,7 @@ forecastRouter.use(async (req: Request<ProjectParams>, res: Response, next: Next
   next();
 });
 
-function todayStr(): string {
+export function todayStr(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
@@ -56,7 +56,7 @@ async function determineProjectCurrency(companyId: string, projectId: string): P
   return mainContract?.currency ?? "SAR";
 }
 
-interface CollectedInputs {
+export interface CollectedInputs {
   costPlan: number;
   actualCost: number;
   committedCost: number;
@@ -71,7 +71,12 @@ interface CollectedInputs {
 // full point-in-time reconstruction of every source: see
 // docs/MIDAD_FORECAST_MODEL.md's PIT section for exactly what each cutoff
 // means and why it is exact for each source.
-async function collectForecastInputs(
+//
+// Exported for routes/cashflow.ts (Phase 2E): Cash Flow's ETC and
+// committed-cost figures must be this exact same computation, never a
+// second, independent derivation of BAC/AC/committedCost — see
+// docs/MIDAD_CASHFLOW_MODEL.md.
+export async function collectForecastInputs(
   companyId: string,
   projectId: string,
   asOfDate: string,
