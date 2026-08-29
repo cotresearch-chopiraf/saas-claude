@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX IF NOT EXISTS "company_tax_overrides_one_open_active" ON "company_tax_overrides" USING btree ("company_id","setting_key") WHERE "company_tax_overrides"."status" = 'active' AND "company_tax_overrides"."effective_to" IS NULL;
