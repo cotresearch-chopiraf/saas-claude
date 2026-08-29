@@ -15,7 +15,7 @@ export async function resetDb() {
       compliance_rule_versions, company_compliance_profiles,
       company_tax_overrides, compliance_audit_events, company_tax_identifiers,
       contracts, cost_codes, boq_revisions, boq_items, budget_revisions,
-      audit_events, files
+      audit_events, files, suppliers, commitments, commitment_lines
     RESTART IDENTITY CASCADE
   `);
 }

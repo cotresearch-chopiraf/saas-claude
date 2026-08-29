@@ -903,3 +903,168 @@ export const filesRelations = relations(files, ({ one }) => ({
   uploader: one(users, { fields: [files.uploadedBy], references: [users.id] }),
   previousVersion: one(files, { fields: [files.previousVersionId], references: [files.id] }),
 }));
+
+// =============================================================================
+// MIDAD Phase 2A — Procurement + Supplier + Commitment foundation.
+//
+// Per the resolved canonical financial model (docs/MIDAD_FINANCIAL_MODEL.md):
+// Commitment is CONTRACTED/ORDERED FUTURE COST — a distinct concept from
+// Cost Plan (budgetItems.plannedAmount, unchanged, still the canonical
+// planning baseline), Contract Value (contracts.revisedValue), and BOQ
+// Value (Σ published boqItems.amount). Nothing here reads or writes
+// projects.budgetTotal, budgetItems, or contracts.revisedValue — Commitment
+// stands on its own, referencing costCodeId/boqItemId the same way
+// budgetItems already does, so a future Phase 2B (Actual Cost / Progress /
+// Forecast) can compute variance across Plan vs. Commitment vs. Actual
+// without any of the three being able to silently rewrite another.
+//
+// No Procurement Request entity: a Commitment can be created directly
+// against a Supplier — nothing in this scope requires an intermediate
+// request/RFQ step, so one was not built (avoids the RFQ/quote-comparison/
+// bidding workflow explicitly deferred for this phase).
+// =============================================================================
+
+// --- Suppliers ---
+// A company-wide directory, deliberately minimal (name/type/tax id/contact
+// only) — not a CRM. type distinguishes a materials/equipment supplier from
+// a labor subcontractor, since Commitment.type below needs to agree with
+// which kind of party it's committing to.
+export const supplierTypeEnum = pgEnum("supplier_type", ["supplier", "subcontractor"]);
+export const supplierStatusEnum = pgEnum("supplier_status", ["active", "inactive"]);
+
+export const suppliers = pgTable("suppliers", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  type: supplierTypeEnum("type").notNull(),
+  taxId: text("tax_id"),
+  email: text("email"),
+  phone: text("phone"),
+  address: text("address"),
+  status: supplierStatusEnum("status").notNull().default("active"),
+  createdBy: uuid("created_by")
+    .notNull()
+    .references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// --- Commitments ---
+// A Purchase Order or Subcontract — a binding commercial obligation to a
+// Supplier. Deliberately NOT a peer of Contract (which represents revenue
+// from the client); this is the outflow side.
+//
+// originalAmount / revisedAmount are DERIVED from commitment_lines, never
+// independently editable — this is the explicit fix for the requirement
+// "commitment.revisedAmount and line totals must never silently disagree."
+// Both start NULL (a draft's total isn't meaningful until it has lines);
+// originalAmount is frozen, once, at submit() from the sum of lines at
+// that moment (never changes again — "what was originally committed").
+// revisedAmount starts equal to it and moves only through amend(), which
+// atomically recomputes it from the full current line set inside a
+// FOR-UPDATE-locked transaction (see routes/commitments.ts) — the same
+// principle as Contract's originalValue/revisedValue, but WITHOUT
+// Contract's "amendment is a separate, unreconciled row" mechanic: that
+// mechanic is exactly what the no-silent-disagreement requirement rules
+// out here. The point-in-time history Contract gets from separate
+// amendment rows, Commitment gets from its audit_events trail instead
+// (every submit/approve/amend is its own audited before/after event) —
+// no second audit or versioning mechanism was introduced for this.
+export const commitmentTypeEnum = pgEnum("commitment_type", ["purchase_order", "subcontract"]);
+// partially_fulfilled and closed are reserved for Phase 2B (Actual Cost /
+// Progress linkage) — included now so the enum doesn't need a migration
+// later, but no route in Phase 2A transitions a commitment into either.
+export const commitmentStatusEnum = pgEnum("commitment_status", [
+  "draft",
+  "pending_approval",
+  "active",
+  "partially_fulfilled",
+  "closed",
+  "cancelled",
+]);
+
+export const commitments = pgTable("commitments", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  projectId: uuid("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  // Optional: a Commitment can exist without being tied to a specific
+  // Contract (general project procurement), matching the nullable design
+  // requested for Phase 2A.
+  contractId: uuid("contract_id").references(() => contracts.id),
+  supplierId: uuid("supplier_id")
+    .notNull()
+    .references(() => suppliers.id),
+  type: commitmentTypeEnum("type").notNull(),
+  status: commitmentStatusEnum("status").notNull().default("draft"),
+  // Atomically claimed per company (same INSERT...SELECT MAX+1 discipline
+  // as boqRevisions.revisionNumber / budgetRevisions.revisionNumber —
+  // reused here rather than extending lib/numbering.ts's companies-column
+  // mechanism, since that would need a new companies column/migration for
+  // a per-company-wide sequence this pattern already gives for free).
+  commitmentNumber: integer("commitment_number").notNull(),
+  description: text("description"),
+  originalAmount: numeric("original_amount", { precision: 14, scale: 2 }),
+  revisedAmount: numeric("revised_amount", { precision: 14, scale: 2 }),
+  currency: text("currency").notNull().default("SAR"),
+  createdBy: uuid("created_by")
+    .notNull()
+    .references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  submittedAt: timestamp("submitted_at"),
+  approvedBy: uuid("approved_by").references(() => users.id),
+  approvedAt: timestamp("approved_at"),
+  cancelledAt: timestamp("cancelled_at"),
+});
+
+// --- Commitment Lines ---
+// companyId is carried directly here too (not only reachable via
+// commitmentId -> commitments.companyId) per the Phase 2A tenant-isolation
+// requirement that every new table have it, even where every existing
+// analogous child table in this schema (boqItems, invoiceItems,
+// quoteItems) does not.
+export const commitmentLines = pgTable("commitment_lines", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  commitmentId: uuid("commitment_id")
+    .notNull()
+    .references(() => commitments.id, { onDelete: "cascade" }),
+  costCodeId: uuid("cost_code_id").references(() => costCodes.id),
+  boqItemId: uuid("boq_item_id").references(() => boqItems.id),
+  description: text("description").notNull(),
+  quantity: numeric("quantity", { precision: 14, scale: 3 }),
+  rate: numeric("rate", { precision: 14, scale: 2 }),
+  // Stored, computed once at write time via lib/money.ts when quantity and
+  // rate are both given (roundMoney(quantity * rate)) — otherwise supplied
+  // directly. Same frozen-computation discipline as boqItems.amount.
+  amount: numeric("amount", { precision: 14, scale: 2 }).notNull(),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const suppliersRelations = relations(suppliers, ({ one, many }) => ({
+  company: one(companies, { fields: [suppliers.companyId], references: [companies.id] }),
+  commitments: many(commitments),
+}));
+
+export const commitmentsRelations = relations(commitments, ({ one, many }) => ({
+  company: one(companies, { fields: [commitments.companyId], references: [companies.id] }),
+  project: one(projects, { fields: [commitments.projectId], references: [projects.id] }),
+  contract: one(contracts, { fields: [commitments.contractId], references: [contracts.id] }),
+  supplier: one(suppliers, { fields: [commitments.supplierId], references: [suppliers.id] }),
+  lines: many(commitmentLines),
+}));
+
+export const commitmentLinesRelations = relations(commitmentLines, ({ one }) => ({
+  commitment: one(commitments, { fields: [commitmentLines.commitmentId], references: [commitments.id] }),
+  costCode: one(costCodes, { fields: [commitmentLines.costCodeId], references: [costCodes.id] }),
+  boqItem: one(boqItems, { fields: [commitmentLines.boqItemId], references: [boqItems.id] }),
+}));

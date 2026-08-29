@@ -51,6 +51,24 @@ export const PERMISSIONS = {
   // already correctly audited via the frozen ruleVersionId/
   // overrideReference fields); only a manual override needs owner.
   "invoice.overrideTax": ["owner"],
+
+  // --- MIDAD Phase 2A — Procurement / Commitment ---
+  // A Commitment is a binding outflow obligation to a third party (a PO or
+  // Subcontract) — at least as consequential as Contract (the inflow
+  // side), which is owner-only end-to-end. No existing precedent in this
+  // matrix splits authority within one financial domain (draft-by-member,
+  // approve-by-owner) — Contract/BOQ/CostCode/BudgetRevision are all
+  // owner-gated for every mutation, not just approval. Introducing that
+  // split for Commitment specifically would be the first asymmetric-
+  // authority financial domain in this codebase, a bigger RBAC decision
+  // than this phase's scope calls for — so, matching every other Phase 1
+  // financial domain exactly, every commitment mutation (create, add/
+  // remove line, submit, approve, amend, cancel) requires owner. Read
+  // access (GET) is unrestricted, same as every other domain.
+  "commitment.manage": ["owner"],
+  // A supplier directory is company-sensitive master data, same posture
+  // as costCode.manage / company.manage.
+  "supplier.manage": ["owner"],
 } as const satisfies Record<string, readonly Role[]>;
 
 export type PermissionAction = keyof typeof PERMISSIONS;
