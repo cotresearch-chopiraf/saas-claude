@@ -76,13 +76,17 @@ authRouter.post("/login", async (req, res) => {
   });
 });
 
+// role is included so the frontend can render owner-only actions without
+// guessing — the backend remains the sole authorization authority (every
+// mutation route still independently re-checks the role from the DB via
+// requirePermission), this is presentation information only.
 authRouter.get("/me", requireAuth, async (req, res) => {
   const user = await db.query.users.findFirst({ where: eq(users.id, req.userId!) });
   if (!user) return res.status(404).json({ error: "المستخدم غير موجود" });
 
   const company = await db.query.companies.findFirst({ where: eq(companies.id, user.companyId) });
   res.json({
-    user: { id: user.id, name: user.name, email: user.email },
+    user: { id: user.id, name: user.name, email: user.email, role: user.role },
     company: company ? { id: company.id, name: company.name } : null,
   });
 });

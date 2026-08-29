@@ -2,6 +2,10 @@ export interface User {
   id: string;
   name: string;
   email: string;
+  // Presentation only — the backend independently re-checks this on every
+  // mutation route. Never treat the presence/absence of a UI element as a
+  // security boundary; see auth/permissions.ts.
+  role: CompanyRole;
 }
 
 export interface Company {

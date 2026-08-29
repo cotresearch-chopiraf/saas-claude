@@ -83,6 +83,40 @@ async function setupQuote() {
   return res.body.id as string;
 }
 
+// UI-Foundation: the frontend cannot render owner-only actions without
+// knowing the caller's own role — /auth/me is the one place that role is
+// now exposed. Backend authorization itself is unchanged: every mutation
+// route still independently re-checks the role from the DB via
+// requirePermission, proven by the describe block below this one.
+describe("/auth/me — role", () => {
+  it("an owner's /auth/me response includes role: owner", async () => {
+    const res = await request(app).get("/api/auth/me").set("Authorization", `Bearer ${ownerToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.user.role).toBe("owner");
+  });
+
+  it("a member's /auth/me response includes role: member", async () => {
+    const res = await request(app).get("/api/auth/me").set("Authorization", `Bearer ${memberToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.user.role).toBe("member");
+  });
+
+  it("every existing /auth/me field remains intact", async () => {
+    const res = await request(app).get("/api/auth/me").set("Authorization", `Bearer ${ownerToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.user.id).toBeTruthy();
+    expect(res.body.user.name).toBe("Owner");
+    expect(res.body.user.email).toMatch(/@test\.com$/);
+    expect(res.body.company.id).toBeTruthy();
+    expect(res.body.company.name).toBe("Authz Co");
+  });
+
+  it("unauthenticated /auth/me is rejected exactly as before", async () => {
+    const res = await request(app).get("/api/auth/me");
+    expect(res.status).toBe(401);
+  });
+});
+
 describe("server-side authorization: member cannot perform owner-only financial/destructive actions", () => {
   it("member cannot approve a change order, and the budget is left untouched", async () => {
     const { projectId, changeOrderId } = await setupProjectAndChangeOrder();

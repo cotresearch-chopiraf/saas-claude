@@ -18,16 +18,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [company, setCompany] = useState<Company | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // The single place user/company state is populated from, always via
+  // /auth/me — the only response that carries role. /auth/login and
+  // /auth/register are left untouched (their own response shapes are
+  // unrelated auth behavior, out of scope here); this just avoids trusting
+  // either endpoint's partial user object instead of that one canonical
+  // source, so role is never missing right after login/register.
+  async function loadMe() {
+    const res = await apiFetch<{ user: User; company: Company | null }>("/auth/me");
+    setUser(res.user);
+    setCompany(res.company);
+  }
+
   useEffect(() => {
     if (!getToken()) {
       setLoading(false);
       return;
     }
-    apiFetch<{ user: User; company: Company | null }>("/auth/me")
-      .then((res) => {
-        setUser(res.user);
-        setCompany(res.company);
-      })
+    loadMe()
       .catch(() => setToken(null))
       .finally(() => setLoading(false));
   }, []);
@@ -38,7 +46,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       body: JSON.stringify({ email, password }),
     });
     setToken(res.token);
-    setUser(res.user);
+    await loadMe();
   }
 
   async function register(companyName: string, name: string, email: string, password: string) {
@@ -47,8 +55,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       body: JSON.stringify({ companyName, name, email, password }),
     });
     setToken(res.token);
-    setUser(res.user);
-    setCompany(res.company);
+    await loadMe();
   }
 
   function logout() {

@@ -6,13 +6,19 @@ import { ForgotPassword } from "./pages/ForgotPassword";
 import { ResetPassword } from "./pages/ResetPassword";
 import { AcceptInvite } from "./pages/AcceptInvite";
 import { Dashboard } from "./pages/Dashboard";
-import { ProjectDetail } from "./pages/ProjectDetail";
 import { Quotes } from "./pages/Quotes";
 import { PublicQuote } from "./pages/PublicQuote";
 import { Invoices } from "./pages/Invoices";
 import { PublicInvoice } from "./pages/PublicInvoice";
+import { Suppliers } from "./pages/Suppliers";
 import { Team } from "./pages/Team";
 import { Settings } from "./pages/Settings";
+import { ProjectWorkspace } from "./project/ProjectWorkspace";
+import { OverviewSection } from "./project/sections/OverviewSection";
+import { OperationsSection } from "./project/sections/OperationsSection";
+import { LegacyBudgetSection } from "./project/sections/LegacyBudgetSection";
+import { PlaceholderSection } from "./project/sections/PlaceholderSection";
+import { legacySection } from "./project/sections";
 
 function ProtectedRoute({ children }: { children: JSX.Element }) {
   const { user, loading } = useAuth();
@@ -43,10 +49,26 @@ export default function App() {
         path="/projects/:id"
         element={
           <ProtectedRoute>
-            <ProjectDetail />
+            <ProjectWorkspace />
           </ProtectedRoute>
         }
-      />
+      >
+        <Route index element={<Navigate to="overview" replace />} />
+        <Route path="overview" element={<OverviewSection />} />
+        <Route path="contract" element={<PlaceholderSection title="العقد" description="بيانات العقد الأصلية والمعدَّلة، الشروط، والتعديلات." />} />
+        <Route path="boq" element={<PlaceholderSection title="جدول الكميات" description="نسخ جدول الكميات وبنودها المنشورة." />} />
+        <Route path="cost-plan" element={<PlaceholderSection title="خطة التكلفة" description="خطة التكلفة المرتبطة ببنود التكلفة وجدول الكميات." />} />
+        <Route path="procurement" element={<PlaceholderSection title="المشتريات والالتزامات" description="أوامر الشراء وعقود الباطن والموردون." />} />
+        <Route path="actual-cost" element={<PlaceholderSection title="التكلفة الفعلية" description="المصروفات الفعلية المرتبطة بالمشروع." />} />
+        <Route path="progress" element={<PlaceholderSection title="القياسات" description="قياسات التقدّم الفعلي مقابل جدول الكميات." />} />
+        <Route path="ipc" element={<PlaceholderSection title="شهادات الدفع (IPC)" description="دورة اعتماد وتصديق شهادات الدفع المرحلية." />} />
+        <Route path="forecast" element={<PlaceholderSection title="التوقعات المالية" description="التكلفة المتوقعة عند الإنجاز (EAC) والمتبقي لإنجاز العمل (ETC)." />} />
+        <Route path="cash-flow" element={<PlaceholderSection title="التدفق النقدي" description="التدفق النقدي التاريخي والمتوقع لهذا المشروع." />} />
+        <Route path="invoices" element={<PlaceholderSection title="الفواتير" description="فواتير هذا المشروع تحديداً." />} />
+        <Route path="operations" element={<OperationsSection />} />
+        <Route path="documents" element={<PlaceholderSection title="المستندات" description="مرفقات وأدلة المشروع." />} />
+        <Route path={legacySection.path} element={<LegacyBudgetSection />} />
+      </Route>
       <Route
         path="/quotes"
         element={
@@ -60,6 +82,14 @@ export default function App() {
         element={
           <ProtectedRoute>
             <Invoices />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/suppliers"
+        element={
+          <ProtectedRoute>
+            <Suppliers />
           </ProtectedRoute>
         }
       />
