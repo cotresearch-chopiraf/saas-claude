@@ -148,6 +148,12 @@ const assignItemSchema = z.object({
 // approved, a revision's item set is a historical record, exactly like a
 // published BOQ revision's items — a further change means creating a new
 // revision, not editing an approved one in place.
+//
+// Hardening 1: the early "revision.status !== 'draft'" check below is only
+// a fast-path — the actual guarantee against racing a concurrent approve
+// is the `SELECT ... FOR UPDATE` inside the transaction just before the
+// update, which takes the same row-level lock approve's own UPDATE takes
+// (same discipline as boq.ts's add/delete-item routes).
 budgetRevisionsRouter.post(
   "/:revisionId/items/:itemId",
   requirePermission("budgetRevision.manage"),
@@ -174,6 +180,13 @@ budgetRevisionsRouter.post(
     }
 
     const updated = await db.transaction(async (tx) => {
+      const [locked] = await tx
+        .select()
+        .from(budgetRevisions)
+        .where(eq(budgetRevisions.id, revision.id))
+        .for("update");
+      if (!locked || locked.status !== "draft") return null;
+
       const [row] = await tx
         .update(budgetItems)
         .set({
@@ -197,6 +210,9 @@ budgetRevisionsRouter.post(
       return row;
     });
 
+    if (!updated) {
+      return res.status(409).json({ error: "لا يمكن تعديل بنود نسخة معتمدة" });
+    }
     res.json(updated);
   },
 );

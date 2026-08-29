@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { buildApp } from "../src/app.js";
 import { resetDb } from "./setup.js";
 import { db } from "../src/db/client.js";
-import { auditEvents, budgetItems } from "../src/db/schema.js";
+import { auditEvents, boqItems, boqRevisions, budgetItems, budgetRevisions } from "../src/db/schema.js";
 
 // Real code path, not a mock of the app: only the outbound "email" is
 // intercepted so the test can read the raw invite token, same as
@@ -309,6 +309,9 @@ describe("MIDAD Phase 1 — BOQ revisions", () => {
       .set("Authorization", `Bearer ${ownerToken}`);
     expect(publishRes.status).toBe(200);
     expect(publishRes.body.status).toBe("published");
+    // Hardening 3: the first-ever publish for a contract has nothing to
+    // supersede.
+    expect(publishRes.body.supersedesRevisionId).toBeNull();
 
     const addAfterPublish = await request(app)
       .post(`/api/projects/${projectId}/boq-revisions/${revisionId}/items`)
@@ -350,6 +353,10 @@ describe("MIDAD Phase 1 — BOQ revisions", () => {
       .get(`/api/projects/${projectId}/boq-revisions/${rev1.body.id}`)
       .set("Authorization", `Bearer ${ownerToken}`);
     expect(rev1After.body.status).toBe("superseded");
+
+    // Hardening 3: the new revision records WHICH specific revision it
+    // replaced, not just inferable from status + timing.
+    expect(publish2.body.supersedesRevisionId).toBe(rev1.body.id);
   });
 
   // Dynamic concurrency test, same discipline as tests/concurrency.test.ts:
@@ -373,13 +380,48 @@ describe("MIDAD Phase 1 — BOQ revisions", () => {
     expect(statuses).toEqual([200, 409]);
   });
 
-  it("a member cannot create a revision, add items, or publish", async () => {
+  it("a member cannot create a revision", async () => {
     const { projectId, contractId } = await createContractForProject();
     const createRes = await request(app)
       .post(`/api/projects/${projectId}/boq-revisions`)
       .set("Authorization", `Bearer ${memberToken}`)
       .send({ contractId });
     expect(createRes.status).toBe(403);
+  });
+
+  it("a member cannot add an item to an existing (owner-created) draft revision", async () => {
+    const { projectId, contractId } = await createContractForProject();
+    const revRes = await request(app)
+      .post(`/api/projects/${projectId}/boq-revisions`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ contractId });
+    expect(revRes.status).toBe(201);
+
+    const addItemRes = await request(app)
+      .post(`/api/projects/${projectId}/boq-revisions/${revRes.body.id}/items`)
+      .set("Authorization", `Bearer ${memberToken}`)
+      .send({ description: "Member attempt", quantity: 1, rate: 1 });
+    expect(addItemRes.status).toBe(403);
+
+    const items = await db.query.boqItems.findMany({ where: eq(boqItems.boqRevisionId, revRes.body.id) });
+    expect(items).toHaveLength(0);
+  });
+
+  it("a member cannot publish an existing (owner-created) draft revision", async () => {
+    const { projectId, contractId } = await createContractForProject();
+    const revRes = await request(app)
+      .post(`/api/projects/${projectId}/boq-revisions`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ contractId });
+    expect(revRes.status).toBe(201);
+
+    const publishRes = await request(app)
+      .post(`/api/projects/${projectId}/boq-revisions/${revRes.body.id}/publish`)
+      .set("Authorization", `Bearer ${memberToken}`);
+    expect(publishRes.status).toBe(403);
+
+    const stillDraft = await db.query.boqRevisions.findFirst({ where: eq(boqRevisions.id, revRes.body.id) });
+    expect(stillDraft?.status).toBe("draft");
   });
 
   it("another company cannot read this project's BOQ revisions", async () => {
@@ -525,12 +567,29 @@ describe("MIDAD Phase 1 — Budget revisions", () => {
     expect(statuses).toEqual([200, 409]);
   });
 
-  it("a member cannot create or approve a budget revision", async () => {
+  it("a member cannot create a budget revision", async () => {
     const projectId = await createProject();
     const createRes = await request(app)
       .post(`/api/projects/${projectId}/budget-revisions`)
       .set("Authorization", `Bearer ${memberToken}`)
       .send({});
     expect(createRes.status).toBe(403);
+  });
+
+  it("a member cannot approve an existing (owner-created) draft budget revision", async () => {
+    const projectId = await createProject();
+    const revRes = await request(app)
+      .post(`/api/projects/${projectId}/budget-revisions`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({});
+    expect(revRes.status).toBe(201);
+
+    const approveRes = await request(app)
+      .post(`/api/projects/${projectId}/budget-revisions/${revRes.body.id}/approve`)
+      .set("Authorization", `Bearer ${memberToken}`);
+    expect(approveRes.status).toBe(403);
+
+    const stillDraft = await db.query.budgetRevisions.findFirst({ where: eq(budgetRevisions.id, revRes.body.id) });
+    expect(stillDraft?.status).toBe("draft");
   });
 });

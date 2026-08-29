@@ -119,6 +119,19 @@ boqRouter.post(
     if (!existing) return res.status(404).json({ error: "نسخة جدول الكميات غير موجودة" });
 
     const published = await db.transaction(async (tx) => {
+      // Lock the parent contract row for the duration of this
+      // transaction. Without this, two DIFFERENT draft revisions of the
+      // SAME contract published concurrently would each pass their own
+      // independent "WHERE status = 'draft'" check below (they're
+      // different rows, so that guard alone can't see each other) and
+      // both end up published at once. Locking the shared contract row
+      // serializes any two publish attempts under the same contract, so
+      // "at most one published revision per contract" and the
+      // supersedesRevisionId link below can never race each other —
+      // whichever transaction gets here first finishes (commit or
+      // rollback) before the other proceeds past this point.
+      await tx.select().from(contracts).where(eq(contracts.id, existing.contractId)).for("update");
+
       const [updated] = await tx
         .update(boqRevisions)
         .set({ status: "published", publishedAt: new Date() })
@@ -126,11 +139,11 @@ boqRouter.post(
         .returning();
       if (!updated) return null;
 
-      // Supersede whichever revision was previously published for this
-      // same contract, if any — a contract has at most one published BOQ
+      // Supersede whichever revision(s) were previously published for
+      // this same contract — a contract has at most one published BOQ
       // revision "current" at a time, but every prior one stays in the
       // table, unaltered, exactly as boq_revisions is designed to.
-      await tx
+      const supersededRows = await tx
         .update(boqRevisions)
         .set({ status: "superseded" })
         .where(
@@ -139,7 +152,25 @@ boqRouter.post(
             eq(boqRevisions.status, "published"),
             sql`${boqRevisions.id} != ${existing.id}`,
           ),
-        );
+        )
+        .returning();
+
+      // Records which single revision this one most directly replaces —
+      // normally there is exactly one (the contract-row lock above rules
+      // out a concurrent second publish changing this answer underneath
+      // us); the most-recently-published of the superseded rows is used
+      // as a defensive tie-breaker in case more than one was ever found.
+      let finalRevision = updated;
+      if (supersededRows.length > 0) {
+        const directPredecessor = supersededRows.sort(
+          (a, b) => (b.publishedAt?.getTime() ?? 0) - (a.publishedAt?.getTime() ?? 0),
+        )[0];
+        [finalRevision] = await tx
+          .update(boqRevisions)
+          .set({ supersedesRevisionId: directPredecessor.id })
+          .where(eq(boqRevisions.id, updated.id))
+          .returning();
+      }
 
       await recordAuditEvent(tx, {
         companyId: req.companyId!,
@@ -148,10 +179,10 @@ boqRouter.post(
         entityType: "boq_revision",
         entityId: existing.id,
         beforeValue: { status: existing.status },
-        afterValue: { status: "published" },
+        afterValue: { status: "published", supersedesRevisionId: finalRevision.supersedesRevisionId ?? null },
       });
 
-      return updated;
+      return finalRevision;
     });
 
     if (!published) {
@@ -177,6 +208,17 @@ const itemSchema = z.object({
 // published revision is immutable (mission requirement: "never overwrite
 // BOQ history"); a change means creating a NEW revision (POST / above),
 // never editing a published one's items in place.
+//
+// Hardening 1: the early "revision.status !== 'draft'" check below is only
+// a fast-path (cheap 409 for the common non-racing case) — it is NOT what
+// actually makes this safe under concurrency, because a plain SELECT can
+// be stale relative to an in-flight, not-yet-committed publish. The real
+// guarantee is the `SELECT ... FOR UPDATE` inside the transaction just
+// before the insert: it takes the same row-level lock publish's own
+// UPDATE takes, so whichever of the two (this insert, or a concurrent
+// publish) reaches the row first finishes before the other proceeds, and
+// the second one re-reads the now-current, post-commit status rather than
+// trusting anything read earlier.
 boqRouter.post(
   "/:revisionId/items",
   requirePermission("boq.manage"),
@@ -213,27 +255,40 @@ boqRouter.post(
         ? roundMoney(parsed.data.quantity * parsed.data.rate)
         : undefined;
 
-    const [item] = await db
-      .insert(boqItems)
-      .values({
-        boqRevisionId: revision.id,
-        parentItemId: parsed.data.parentItemId,
-        itemType: parsed.data.itemType,
-        code: parsed.data.code,
-        description: parsed.data.description,
-        unit: parsed.data.unit,
-        quantity: parsed.data.quantity !== undefined ? String(parsed.data.quantity) : undefined,
-        rate: parsed.data.rate !== undefined ? String(parsed.data.rate) : undefined,
-        amount: amount !== undefined ? String(amount) : undefined,
-        costCodeId: parsed.data.costCodeId,
-        sortOrder: parsed.data.sortOrder ?? 0,
-      })
-      .returning();
+    const item = await db.transaction(async (tx) => {
+      const [locked] = await tx.select().from(boqRevisions).where(eq(boqRevisions.id, revision.id)).for("update");
+      if (!locked || locked.status !== "draft") return null;
 
+      const [inserted] = await tx
+        .insert(boqItems)
+        .values({
+          boqRevisionId: revision.id,
+          parentItemId: parsed.data.parentItemId,
+          itemType: parsed.data.itemType,
+          code: parsed.data.code,
+          description: parsed.data.description,
+          unit: parsed.data.unit,
+          quantity: parsed.data.quantity !== undefined ? String(parsed.data.quantity) : undefined,
+          rate: parsed.data.rate !== undefined ? String(parsed.data.rate) : undefined,
+          amount: amount !== undefined ? String(amount) : undefined,
+          costCodeId: parsed.data.costCodeId,
+          sortOrder: parsed.data.sortOrder ?? 0,
+        })
+        .returning();
+      return inserted;
+    });
+
+    if (!item) {
+      return res.status(409).json({ error: "لا يمكن إضافة بنود إلى نسخة منشورة" });
+    }
     res.status(201).json(item);
   },
 );
 
+// Hardening 1: same atomic-lock discipline as add-item above — the early
+// status check is a fast-path only; the `FOR UPDATE` lock inside the
+// transaction is what actually prevents a delete from racing a concurrent
+// publish.
 boqRouter.delete(
   "/:revisionId/items/:itemId",
   requirePermission("boq.manage"),
@@ -249,7 +304,17 @@ boqRouter.delete(
     });
     if (!existing) return res.status(404).json({ error: "البند غير موجود" });
 
-    await db.delete(boqItems).where(eq(boqItems.id, existing.id));
+    const deleted = await db.transaction(async (tx) => {
+      const [locked] = await tx.select().from(boqRevisions).where(eq(boqRevisions.id, revision.id)).for("update");
+      if (!locked || locked.status !== "draft") return null;
+
+      const [row] = await tx.delete(boqItems).where(eq(boqItems.id, existing.id)).returning();
+      return row;
+    });
+
+    if (!deleted) {
+      return res.status(409).json({ error: "لا يمكن حذف بنود من نسخة منشورة" });
+    }
     res.status(204).end();
   },
 );

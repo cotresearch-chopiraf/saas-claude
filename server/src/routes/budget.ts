@@ -4,6 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { budgetItems, expenses, projects } from "../db/schema.js";
 import { sumMoney, roundMoney } from "../lib/money.js";
+import { recordAuditEvent } from "../lib/audit.js";
 
 type ProjectParams = { projectId: string };
 type ItemParams = ProjectParams & { itemId: string };
@@ -104,18 +105,41 @@ const itemSchema = z.object({
   plannedAmount: z.coerce.number().nonnegative(),
 });
 
+// Hardening 2: budget items are one of the two most directly
+// Phase-1-relevant financial mutation surfaces (the other is expenses,
+// below) and — unlike Contract/CostCode/BOQ/BudgetRevision — were not yet
+// writing to the canonical audit_events table, only to the (non-durable,
+// non-queryable) structured log. Wrapped in the same insert+audit
+// transaction discipline already used everywhere else recordAuditEvent is
+// called: a failed audit write rolls back the mutation too, matching
+// established policy.
 budgetRouter.post("/items", async (req: Request<ProjectParams>, res: Response) => {
   const parsed = itemSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
 
-  const [item] = await db
-    .insert(budgetItems)
-    .values({
-      projectId: req.params.projectId,
-      category: parsed.data.category,
-      plannedAmount: String(parsed.data.plannedAmount),
-    })
-    .returning();
+  const item = await db.transaction(async (tx) => {
+    const [created] = await tx
+      .insert(budgetItems)
+      .values({
+        projectId: req.params.projectId,
+        category: parsed.data.category,
+        plannedAmount: String(parsed.data.plannedAmount),
+      })
+      .returning();
+
+    await recordAuditEvent(tx, {
+      companyId: req.companyId!,
+      actorUserId: req.userId!,
+      action: "budgetItem.created",
+      entityType: "budget_item",
+      entityId: created.id,
+      afterValue: created,
+      metadata: { projectId: req.params.projectId },
+    });
+
+    return created;
+  });
+
   res.status(201).json(item);
 });
 
@@ -129,14 +153,30 @@ budgetRouter.patch("/items/:itemId", async (req: Request<ItemParams>, res: Respo
   if (!existing) return res.status(404).json({ error: "بند الميزانية غير موجود" });
 
   const { plannedAmount, ...rest } = parsed.data;
-  const [updated] = await db
-    .update(budgetItems)
-    .set({
-      ...rest,
-      ...(plannedAmount !== undefined ? { plannedAmount: String(plannedAmount) } : {}),
-    })
-    .where(eq(budgetItems.id, req.params.itemId))
-    .returning();
+  const updated = await db.transaction(async (tx) => {
+    const [row] = await tx
+      .update(budgetItems)
+      .set({
+        ...rest,
+        ...(plannedAmount !== undefined ? { plannedAmount: String(plannedAmount) } : {}),
+      })
+      .where(eq(budgetItems.id, req.params.itemId))
+      .returning();
+
+    await recordAuditEvent(tx, {
+      companyId: req.companyId!,
+      actorUserId: req.userId!,
+      action: "budgetItem.updated",
+      entityType: "budget_item",
+      entityId: existing.id,
+      beforeValue: existing,
+      afterValue: row,
+      metadata: { projectId: req.params.projectId },
+    });
+
+    return row;
+  });
+
   res.json(updated);
 });
 
@@ -146,7 +186,20 @@ budgetRouter.delete("/items/:itemId", async (req: Request<ItemParams>, res: Resp
   });
   if (!existing) return res.status(404).json({ error: "بند الميزانية غير موجود" });
 
-  await db.delete(budgetItems).where(eq(budgetItems.id, req.params.itemId));
+  await db.transaction(async (tx) => {
+    await tx.delete(budgetItems).where(eq(budgetItems.id, req.params.itemId));
+
+    await recordAuditEvent(tx, {
+      companyId: req.companyId!,
+      actorUserId: req.userId!,
+      action: "budgetItem.deleted",
+      entityType: "budget_item",
+      entityId: existing.id,
+      beforeValue: existing,
+      metadata: { projectId: req.params.projectId },
+    });
+  });
+
   res.status(204).end();
 });
 
@@ -175,25 +228,56 @@ budgetRouter.post("/expenses", async (req: Request<ProjectParams>, res: Response
     if (!owningItem) return res.status(404).json({ error: "بند الميزانية غير موجود" });
   }
 
-  const [expense] = await db
-    .insert(expenses)
-    .values({
-      projectId: req.params.projectId,
-      description: parsed.data.description,
-      amount: String(parsed.data.amount),
-      expenseDate: parsed.data.expenseDate,
-      budgetItemId: parsed.data.budgetItemId,
-    })
-    .returning();
+  const expense = await db.transaction(async (tx) => {
+    const [created] = await tx
+      .insert(expenses)
+      .values({
+        projectId: req.params.projectId,
+        description: parsed.data.description,
+        amount: String(parsed.data.amount),
+        expenseDate: parsed.data.expenseDate,
+        budgetItemId: parsed.data.budgetItemId,
+      })
+      .returning();
+
+    await recordAuditEvent(tx, {
+      companyId: req.companyId!,
+      actorUserId: req.userId!,
+      action: "expense.created",
+      entityType: "expense",
+      entityId: created.id,
+      afterValue: created,
+      metadata: { projectId: req.params.projectId },
+    });
+
+    return created;
+  });
+
   res.status(201).json(expense);
 });
 
+// No PATCH /expenses/:expenseId route exists in this codebase — an
+// expense is create-or-delete only, so "updated" is not part of the
+// actual mutation surface and has no audit event to add here.
 budgetRouter.delete("/expenses/:expenseId", async (req: Request<ExpenseParams>, res: Response) => {
   const existing = await db.query.expenses.findFirst({
     where: and(eq(expenses.id, req.params.expenseId), eq(expenses.projectId, req.params.projectId)),
   });
   if (!existing) return res.status(404).json({ error: "المصروف غير موجود" });
 
-  await db.delete(expenses).where(eq(expenses.id, req.params.expenseId));
+  await db.transaction(async (tx) => {
+    await tx.delete(expenses).where(eq(expenses.id, req.params.expenseId));
+
+    await recordAuditEvent(tx, {
+      companyId: req.companyId!,
+      actorUserId: req.userId!,
+      action: "expense.deleted",
+      entityType: "expense",
+      entityId: existing.id,
+      beforeValue: existing,
+      metadata: { projectId: req.params.projectId },
+    });
+  });
+
   res.status(204).end();
 });
