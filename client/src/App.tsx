@@ -21,6 +21,7 @@ import { CostPlanSection } from "./project/sections/CostPlanSection";
 import { ProcurementSection } from "./project/sections/ProcurementSection";
 import { ActualCostSection } from "./project/sections/ActualCostSection";
 import { ProgressSection } from "./project/sections/ProgressSection";
+import { ForecastSection } from "./project/sections/ForecastSection";
 import { OperationsSection } from "./project/sections/OperationsSection";
 import { LegacyBudgetSection } from "./project/sections/LegacyBudgetSection";
 import { PlaceholderSection } from "./project/sections/PlaceholderSection";
@@ -68,7 +69,7 @@ export default function App() {
         <Route path="actual-cost" element={<ActualCostSection />} />
         <Route path="progress" element={<ProgressSection />} />
         <Route path="ipc" element={<PlaceholderSection title="شهادات الدفع (IPC)" description="دورة اعتماد وتصديق شهادات الدفع المرحلية." />} />
-        <Route path="forecast" element={<PlaceholderSection title="التوقعات المالية" description="التكلفة المتوقعة عند الإنجاز (EAC) والمتبقي لإنجاز العمل (ETC)." />} />
+        <Route path="forecast" element={<ForecastSection />} />
         <Route path="cash-flow" element={<PlaceholderSection title="التدفق النقدي" description="التدفق النقدي التاريخي والمتوقع لهذا المشروع." />} />
         <Route path="invoices" element={<PlaceholderSection title="الفواتير" description="فواتير هذا المشروع تحديداً." />} />
         <Route path="operations" element={<OperationsSection />} />

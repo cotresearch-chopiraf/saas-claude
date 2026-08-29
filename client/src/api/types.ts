@@ -297,6 +297,70 @@ export interface MeasurementWithLines extends Measurement {
   lines: MeasurementLine[];
 }
 
+// --- MIDAD UI-05: Forecast (ETC/EAC) ---
+// Mirrors server/src/routes/forecast.ts's actual response shapes exactly
+// (verified fresh during the UI-05 discovery pass). Two distinct shapes,
+// deliberately not unified: the live GET /forecast response computes
+// costPlan/actualCost/etc/eac/... as plain JS numbers (lib/forecast.ts's
+// calculateForecast never touches the database), while a persisted
+// forecast_snapshots row returns the same figures as strings, like every
+// other DB-backed numeric column in this app. Every figure here is frozen
+// or computed server-side — never recomputed client-side (see
+// docs/MIDAD_FORECAST_MODEL.md and lib/format.ts's header comment).
+export type ForecastMethod = "cost_to_complete" | "commitment_aware";
+
+export interface ForecastCalculation {
+  method: ForecastMethod;
+  costPlan: number;
+  actualCost: number;
+  committedCost: number;
+  // Contextual only — certified IPC value, never blended into etc/eac.
+  certifiedValue: number;
+  remainingCost: number;
+  etc: number;
+  eac: number;
+  variance: number;
+  // null (never 0) when costPlan is 0 — a percentage of zero is undefined.
+  variancePercent: number | null;
+}
+
+export interface ForecastResult {
+  projectId: string;
+  asOfDate: string;
+  currency: string;
+  // Commitment ids excluded from committedCost because their currency
+  // didn't match the project's determined currency — never silently
+  // summed across currencies, never silently dropped without a trail.
+  excludedForeignCurrencyCommitmentIds: string[];
+  methods: Record<ForecastMethod, ForecastCalculation>;
+}
+
+export interface ForecastSnapshotAssumptions {
+  excludedForeignCurrencyCommitmentIds: string[];
+}
+
+export interface ForecastSnapshot {
+  id: string;
+  companyId: string;
+  projectId: string;
+  asOfDate: string;
+  method: ForecastMethod;
+  currency: string;
+  costPlan: string;
+  actualCost: string;
+  committedCost: string;
+  certifiedValue: string;
+  remainingCost: string;
+  etc: string;
+  eac: string;
+  variance: string;
+  variancePercent: string | null;
+  assumptions: ForecastSnapshotAssumptions;
+  notes: string | null;
+  createdBy: string;
+  createdAt: string;
+}
+
 export type TaskStatus = "todo" | "in_progress" | "done";
 
 export interface Task {
