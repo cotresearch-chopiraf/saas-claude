@@ -248,6 +248,55 @@ export interface BudgetSummary {
   totals: { planned: number; spent: number; remaining: number };
 }
 
+// --- MIDAD UI-04: Measurement (physical progress) ---
+// Mirrors server/src/db/schema.ts's `measurements`/`measurement_lines`
+// tables and server/src/routes/measurements.ts's response shapes exactly
+// (verified fresh during the UI-04 discovery pass). Non-financial: `value`
+// is a frozen (measuredQuantity * boqItem.rate) figure for future IPC's
+// convenience, never a certification/valuation amount, and never
+// recomputed client-side. Cumulative approved quantity is never stored on
+// this type — it is only ever surfaced via an approve-attempt's 409 body.
+export type MeasurementStatus = "draft" | "submitted" | "approved" | "rejected";
+
+export interface Measurement {
+  id: string;
+  companyId: string;
+  projectId: string;
+  contractId: string;
+  boqRevisionId: string;
+  status: MeasurementStatus;
+  measurementDate: string;
+  description: string | null;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  submittedBy: string | null;
+  submittedAt: string | null;
+  approvedBy: string | null;
+  approvedAt: string | null;
+  rejectedBy: string | null;
+  rejectedAt: string | null;
+  rejectionReason: string | null;
+}
+
+export interface MeasurementLine {
+  id: string;
+  companyId: string;
+  measurementId: string;
+  boqItemId: string;
+  measuredQuantity: string;
+  // Frozen server-side at write time (measuredQuantity * boqItem.rate) —
+  // never recompute this in the frontend; always display exactly what the
+  // API returns. Same discipline as boqItems.amount.
+  value: string | null;
+  notes: string | null;
+  createdAt: string;
+}
+
+export interface MeasurementWithLines extends Measurement {
+  lines: MeasurementLine[];
+}
+
 export type TaskStatus = "todo" | "in_progress" | "done";
 
 export interface Task {
