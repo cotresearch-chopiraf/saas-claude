@@ -151,6 +151,29 @@ export interface BudgetRevisionWithItems extends BudgetRevision {
   items: BudgetItem[];
 }
 
+// --- MIDAD UI-02: Supplier ---
+// Mirrors server/src/db/schema.ts's `suppliers` table and
+// server/src/routes/suppliers.ts's response shape exactly (verified fresh
+// during the UI-02 discovery pass). No delete endpoint exists — "removal"
+// is only ever a status change to "inactive".
+export type SupplierType = "supplier" | "subcontractor";
+export type SupplierStatus = "active" | "inactive";
+
+export interface Supplier {
+  id: string;
+  companyId: string;
+  name: string;
+  type: SupplierType;
+  taxId: string | null;
+  email: string | null;
+  phone: string | null;
+  address: string | null;
+  status: SupplierStatus;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Expense {
   id: string;
   projectId: string;
