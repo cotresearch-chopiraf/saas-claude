@@ -361,6 +361,57 @@ export interface ForecastSnapshot {
   createdAt: string;
 }
 
+// --- MIDAD UI-06: Cash Flow ---
+// Mirrors server/src/routes/cashflow.ts's / server/src/lib/cashflow.ts's
+// actual response shape exactly (verified fresh during the UI-06
+// discovery pass). Projection-only, never persisted — every figure is a
+// plain JS number, exactly like Forecast's own live GET response (there
+// is no Cash Flow snapshot entity, so no DB-numeric-string variant
+// exists here). `undated.etc` and `projected.commitments` are Forecast's
+// own commitment-aware ETC / committedCost, reused verbatim server-side —
+// never re-derived here. EAC is deliberately never part of this shape
+// (see docs/MIDAD_CASHFLOW_MODEL.md — including it would invite
+// double-counting against AC + Commitment + ETC).
+export interface CashFlowResult {
+  projectId: string;
+  asOfDate: string;
+  currency: string;
+  // Commitment ids excluded from projected.commitments because their
+  // currency didn't match the project's determined currency — never
+  // silently summed across currencies, never silently dropped.
+  excludedForeignCurrencyCommitmentIds: string[];
+  historical: {
+    // Σ paid invoices' totals, paidAt <= asOfDate — real payment evidence only.
+    cashReceived: number;
+    // Σ expenses, expenseDate <= asOfDate — reused from Forecast's own AC.
+    incurredCost: number;
+  };
+  projected: {
+    // Σ issued-but-unpaid ("sent") invoices' totals.
+    receivables: number;
+    // Σ certified IPCs' netCertified (gross minus withheld retention).
+    certifiedExpectedCollection: number;
+    // = Forecast's own committedCost, reused verbatim.
+    commitments: number;
+    // (receivables + certifiedExpectedCollection) - commitments — never
+    // blends in historical or undated amounts.
+    net: number;
+  };
+  undated: {
+    // = Forecast's own commitment-aware ETC, reused verbatim.
+    etc: number;
+    // Σ certified IPCs' retentionAmount — no release date exists anywhere.
+    retentionToBeReleased: number;
+    advance: { supported: false; reason: string };
+  };
+  assumptions: {
+    forecastMethod: string;
+    certifiedValueBasis: string;
+    commitmentExpenseReconciliation: string;
+    ipcInvoiceReconciliation: string;
+  };
+}
+
 export type TaskStatus = "todo" | "in_progress" | "done";
 
 export interface Task {
