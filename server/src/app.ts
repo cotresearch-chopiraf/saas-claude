@@ -24,6 +24,7 @@ import { budgetRevisionsRouter } from "./routes/budgetRevisions.js";
 import { suppliersRouter } from "./routes/suppliers.js";
 import { commitmentsRouter } from "./routes/commitments.js";
 import { measurementsRouter } from "./routes/measurements.js";
+import { ipcsRouter } from "./routes/ipcs.js";
 import { requireAuth } from "./middleware/auth.js";
 import { uploadsDir } from "./lib/uploads.js";
 import { logger } from "./lib/logger.js";
@@ -48,6 +49,7 @@ export function buildApp() {
   app.use("/api/projects/:projectId/budget-revisions", requireAuth, budgetRevisionsRouter);
   app.use("/api/projects/:projectId/commitments", requireAuth, commitmentsRouter);
   app.use("/api/projects/:projectId/measurements", requireAuth, measurementsRouter);
+  app.use("/api/projects/:projectId/ipcs", requireAuth, ipcsRouter);
   app.use("/api/cost-codes", requireAuth, costCodesRouter);
   app.use("/api/suppliers", requireAuth, suppliersRouter);
   app.use("/api/company", requireAuth, companyRouter);

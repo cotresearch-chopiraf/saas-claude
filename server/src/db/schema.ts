@@ -1165,3 +1165,139 @@ export const measurementLinesRelations = relations(measurementLines, ({ one }) =
   measurement: one(measurements, { fields: [measurementLines.measurementId], references: [measurements.id] }),
   boqItem: one(boqItems, { fields: [measurementLines.boqItemId], references: [boqItems.id] }),
 }));
+
+// =============================================================================
+// MIDAD Phase 2C — IPC (Interim Payment Certificate).
+//
+// IPC answers "how much contractual value is being certified for payment
+// this period" — a valuation/certification document, NOT a bank
+// transaction, NOT an invoice, NOT an expense, NOT a Commitment, and NOT a
+// replacement for Measurement (which only answers "how much physical work
+// has been measured"). See docs/MIDAD_IPC_MODEL.md for the full model.
+//
+// Nothing here rewrites Contract value, BOQ value, Cost Plan, Commitment
+// value, Expense value, or projects.budgetTotal — certify() only ever
+// reads those tables. No invoice is auto-created on certification (that
+// integration, if built later, references a certified IPC — it never
+// happens automatically from here).
+// =============================================================================
+
+export const ipcStatusEnum = pgEnum("ipc_status", ["draft", "submitted", "approved", "certified", "rejected"]);
+
+export const ipcs = pgTable("ipcs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  projectId: uuid("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  contractId: uuid("contract_id")
+    .notNull()
+    .references(() => contracts.id, { onDelete: "cascade" }),
+  boqRevisionId: uuid("boq_revision_id")
+    .notNull()
+    .references(() => boqRevisions.id),
+  // Atomically claimed per CONTRACT (matching boqRevisions.revisionNumber's
+  // scope, not commitments.commitmentNumber's company-wide scope) — an
+  // IPC's number is meaningful as "the Nth certificate for THIS contract",
+  // the standard construction-industry convention.
+  ipcNumber: integer("ipc_number").notNull(),
+  status: ipcStatusEnum("status").notNull().default("draft"),
+  periodStart: date("period_start").notNull(),
+  periodEnd: date("period_end").notNull(),
+  notes: text("notes"),
+  // Frozen once, atomically, at certify() — never independently editable,
+  // never recomputed on read. All null/zero until then. See
+  // docs/MIDAD_IPC_MODEL.md for the exact formula and why grossValue is
+  // derived from ipc_lines rather than being a second, driftable number.
+  grossValue: numeric("gross_value", { precision: 14, scale: 2 }),
+  // Snapshotted from contract.retentionPercent AT CERTIFICATION TIME — a
+  // later change to the contract's retention rule never rewrites an
+  // already-certified IPC's retentionAmount.
+  retentionAmount: numeric("retention_amount", { precision: 14, scale: 2 }),
+  // Always 0 in Phase 2C. contracts.advancePercent alone is not a
+  // sufficient recovery schedule (no advance-paid amount, no recovery
+  // cap, no recovery period exists anywhere in this schema) — inventing
+  // one here would be inventing a business rule this repository does not
+  // establish. Reserved, not wired to any input, until a real advance
+  // model exists.
+  advanceRecoveryAmount: numeric("advance_recovery_amount", { precision: 14, scale: 2 }),
+  // Always 0 in Phase 2C — reserved for a future explicit, auditable
+  // deduction model; deliberately not a generic user-editable field (see
+  // docs/MIDAD_IPC_MODEL.md).
+  otherDeductions: numeric("other_deductions", { precision: 14, scale: 2 }),
+  netCertified: numeric("net_certified", { precision: 14, scale: 2 }),
+  currency: text("currency").notNull().default("SAR"),
+  createdBy: uuid("created_by")
+    .notNull()
+    .references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  submittedBy: uuid("submitted_by").references(() => users.id),
+  submittedAt: timestamp("submitted_at"),
+  approvedBy: uuid("approved_by").references(() => users.id),
+  approvedAt: timestamp("approved_at"),
+  certifiedBy: uuid("certified_by").references(() => users.id),
+  certifiedAt: timestamp("certified_at"),
+  rejectedBy: uuid("rejected_by").references(() => users.id),
+  rejectedAt: timestamp("rejected_at"),
+  rejectionReason: text("rejection_reason"),
+});
+
+export const ipcLines = pgTable("ipc_lines", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  ipcId: uuid("ipc_id")
+    .notNull()
+    .references(() => ipcs.id, { onDelete: "cascade" }),
+  // Must belong to the SAME ipc.boqRevisionId — same discipline as
+  // measurement_lines.boqItemId. No direct measurementId FK: a line's
+  // certifiable quantity may legitimately aggregate approved quantity
+  // across MULTIPLE measurements for the same BOQ item, so the invariant
+  // is enforced against that aggregate (see routes/ipcs.ts), not a single
+  // measurement reference.
+  boqItemId: uuid("boq_item_id")
+    .notNull()
+    .references(() => boqItems.id),
+  description: text("description"),
+  // Set once at line-add time (user input) — the quantity this line is
+  // requesting to certify this period. Never changed afterward; a
+  // correction means removing and re-adding the line (only possible
+  // while the IPC is still draft/rejected).
+  currentQuantity: numeric("current_quantity", { precision: 14, scale: 3 }).notNull(),
+  // Frozen at line-add time from the BOQ item's own rate (same
+  // "computed once at write time" discipline as boqItems.amount /
+  // commitmentLines.amount / measurementLines.value) — BOQ items are
+  // already immutable post-publish, so this is a defensive, self-
+  // contained snapshot rather than a live join dependency.
+  rate: numeric("rate", { precision: 14, scale: 2 }).notNull(),
+  currentValue: numeric("current_value", { precision: 14, scale: 2 }).notNull(),
+  // The next four fields are NULL until certify() — they are the
+  // certification-time snapshot of the shared, race-checked quantity
+  // ledger for this BOQ item (previousCertifiedQuantity/Value = what
+  // prior CERTIFIED ipcs already claimed; cumulativeQuantity = previous +
+  // this line's current), frozen atomically inside the same locked
+  // transaction that flips ipcs.status to 'certified' — see
+  // routes/ipcs.ts's certify handler and docs/MIDAD_IPC_MODEL.md.
+  previousCertifiedQuantity: numeric("previous_certified_quantity", { precision: 14, scale: 3 }),
+  previousCertifiedValue: numeric("previous_certified_value", { precision: 14, scale: 2 }),
+  cumulativeQuantity: numeric("cumulative_quantity", { precision: 14, scale: 3 }),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const ipcsRelations = relations(ipcs, ({ one, many }) => ({
+  company: one(companies, { fields: [ipcs.companyId], references: [companies.id] }),
+  project: one(projects, { fields: [ipcs.projectId], references: [projects.id] }),
+  contract: one(contracts, { fields: [ipcs.contractId], references: [contracts.id] }),
+  boqRevision: one(boqRevisions, { fields: [ipcs.boqRevisionId], references: [boqRevisions.id] }),
+  lines: many(ipcLines),
+}));
+
+export const ipcLinesRelations = relations(ipcLines, ({ one }) => ({
+  ipc: one(ipcs, { fields: [ipcLines.ipcId], references: [ipcs.id] }),
+  boqItem: one(boqItems, { fields: [ipcLines.boqItemId], references: [boqItems.id] }),
+}));

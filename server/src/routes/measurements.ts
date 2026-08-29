@@ -298,7 +298,11 @@ measurementsRouter.post(
 // The sum of APPROVED measurement lines for a BOQ item, across every
 // approved measurement (not just this one) — this IS the canonical
 // "cumulative approved quantity," always derived, never stored.
-async function sumApprovedQuantity(
+// Exported for routes/ipcs.ts: IPC's certifiable-quantity check needs the
+// exact same "how much approved physical progress exists for this BOQ
+// item" figure — reusing this rather than re-deriving the same query a
+// second time.
+export async function sumApprovedQuantity(
   tx: { select: typeof db.select },
   boqItemId: string,
 ): Promise<number> {

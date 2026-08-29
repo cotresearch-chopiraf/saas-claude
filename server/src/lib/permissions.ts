@@ -82,6 +82,18 @@ export const PERMISSIONS = {
   // future IPC will build on) requires owner, the same posture as
   // changeOrder.approve.
   "measurement.approve": ["owner"],
+
+  // --- MIDAD Phase 2C — IPC (Interim Payment Certificate) ---
+  // Unlike Measurement, an IPC line itself defines a monetary figure the
+  // moment it's added (currentValue = currentQuantity * rate) — it is not
+  // pure quantity evidence, it's the certification instrument. That makes
+  // the whole domain closer to Contract/BOQ/CostCode/BudgetRevision/
+  // Commitment (fully owner-gated end-to-end) than to Measurement/tasks/
+  // dailyLogs (member-open site entry). So, matching that financial-
+  // instrument precedent exactly: every IPC mutation (create, add/remove
+  // line, submit, approve, reject, certify) requires owner. Read access
+  // is unrestricted, same as every domain.
+  "ipc.manage": ["owner"],
 } as const satisfies Record<string, readonly Role[]>;
 
 export type PermissionAction = keyof typeof PERMISSIONS;
