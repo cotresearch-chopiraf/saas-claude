@@ -1301,3 +1301,71 @@ export const ipcLinesRelations = relations(ipcLines, ({ one }) => ({
   ipc: one(ipcs, { fields: [ipcLines.ipcId], references: [ipcs.id] }),
   boqItem: one(boqItems, { fields: [ipcLines.boqItemId], references: [boqItems.id] }),
 }));
+
+// =============================================================================
+// MIDAD Phase 2D — Forecast (ETC / EAC).
+//
+// Forecast is a DERIVED financial intelligence layer, not a new source of
+// truth: it only ever READS Cost Plan (budgetItems.plannedAmount), Actual
+// Cost (expenses.amount), Committed Cost (commitments/commitmentLines), and
+// Certified Progress (certified ipcs), then computes a deterministic
+// projection via lib/forecast.ts's pure calculateForecast(). It never
+// writes to any of those tables, never reads or writes projects.budgetTotal,
+// and never substitutes contracts.revisedValue for the Cost Plan. See
+// docs/MIDAD_FORECAST_MODEL.md for the full model, including exactly which
+// commitment states count, how the as-of-date cutoff works per source, and
+// the documented double-counting / currency / Method-C limitations.
+//
+// A snapshot is an immutable historical record of one such calculation at
+// one point in time — never independently editable, never recalculated
+// in-place. No sequence number is generated (id + createdAt/asOfDate are
+// sufficient identifiers), avoiding the race-safety question entirely
+// rather than introducing an unnecessary MAX+1 numbering scheme.
+// =============================================================================
+
+export const forecastMethodEnum = pgEnum("forecast_method", ["cost_to_complete", "commitment_aware"]);
+
+export interface ForecastSnapshotAssumptions {
+  // Commitment ids excluded from committedCost because their currency did
+  // not match the project's determined currency — see
+  // docs/MIDAD_FORECAST_MODEL.md's Currency section. Never silently summed
+  // across currencies; never silently dropped without a visible trail.
+  excludedForeignCurrencyCommitmentIds: string[];
+}
+
+export const forecastSnapshots = pgTable("forecast_snapshots", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  projectId: uuid("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  asOfDate: date("as_of_date").notNull(),
+  method: forecastMethodEnum("method").notNull(),
+  currency: text("currency").notNull(),
+  // The four canonical inputs, frozen at calculation time — never
+  // recomputed on read, never independently editable.
+  costPlan: numeric("cost_plan", { precision: 14, scale: 2 }).notNull(),
+  actualCost: numeric("actual_cost", { precision: 14, scale: 2 }).notNull(),
+  committedCost: numeric("committed_cost", { precision: 14, scale: 2 }).notNull(),
+  certifiedValue: numeric("certified_value", { precision: 14, scale: 2 }).notNull(),
+  remainingCost: numeric("remaining_cost", { precision: 14, scale: 2 }).notNull(),
+  etc: numeric("etc", { precision: 14, scale: 2 }).notNull(),
+  eac: numeric("eac", { precision: 14, scale: 2 }).notNull(),
+  variance: numeric("variance", { precision: 14, scale: 2 }).notNull(),
+  // Nullable: undefined (not zero) when costPlan is 0 — see
+  // lib/forecast.ts's calculateForecast for why.
+  variancePercent: numeric("variance_percent", { precision: 9, scale: 2 }),
+  assumptions: jsonb("assumptions").$type<ForecastSnapshotAssumptions>().notNull(),
+  notes: text("notes"),
+  createdBy: uuid("created_by")
+    .notNull()
+    .references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const forecastSnapshotsRelations = relations(forecastSnapshots, ({ one }) => ({
+  company: one(companies, { fields: [forecastSnapshots.companyId], references: [companies.id] }),
+  project: one(projects, { fields: [forecastSnapshots.projectId], references: [projects.id] }),
+}));

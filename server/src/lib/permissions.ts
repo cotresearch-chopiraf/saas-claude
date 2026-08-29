@@ -94,6 +94,18 @@ export const PERMISSIONS = {
   // line, submit, approve, reject, certify) requires owner. Read access
   // is unrestricted, same as every domain.
   "ipc.manage": ["owner"],
+
+  // --- MIDAD Phase 2D — Forecast (ETC/EAC) ---
+  // Forecast itself is purely analytical/read-oriented (it derives from,
+  // never mutates, every upstream financial domain), so viewing the
+  // computed forecast is open to owner and member alike — no
+  // requirePermission gate at all on the GET routes, matching Measurement's
+  // read-access precedent. Creating a persisted snapshot is a financial
+  // record creation (an immutable, citable "as of this date, this was the
+  // project's EAC" artifact), so it follows the same least-privilege
+  // posture as every other financial record creation in this matrix:
+  // owner-only.
+  "forecast.manage": ["owner"],
 } as const satisfies Record<string, readonly Role[]>;
 
 export type PermissionAction = keyof typeof PERMISSIONS;
