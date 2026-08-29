@@ -69,6 +69,19 @@ export const PERMISSIONS = {
   // A supplier directory is company-sensitive master data, same posture
   // as costCode.manage / company.manage.
   "supplier.manage": ["owner"],
+
+  // --- MIDAD Phase 2B — Progress / Measurement ---
+  // Unlike Commitment, Measurement is site-level operational evidence
+  // entry, not a financial/commercial instrument — the same class of
+  // action as tasks.ts / dailyLogs.ts, which this codebase has always
+  // left open to any member with no requirePermission gate at all. So
+  // creating a measurement, adding/removing its lines, and submitting it
+  // are deliberately NOT listed here (member-accessible, matching that
+  // precedent exactly) — only the approval/rejection trust boundary
+  // (someone signs off that this physical progress is real, which a
+  // future IPC will build on) requires owner, the same posture as
+  // changeOrder.approve.
+  "measurement.approve": ["owner"],
 } as const satisfies Record<string, readonly Role[]>;
 
 export type PermissionAction = keyof typeof PERMISSIONS;

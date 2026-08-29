@@ -1068,3 +1068,100 @@ export const commitmentLinesRelations = relations(commitmentLines, ({ one }) => 
   costCode: one(costCodes, { fields: [commitmentLines.costCodeId], references: [costCodes.id] }),
   boqItem: one(boqItems, { fields: [commitmentLines.boqItemId], references: [boqItems.id] }),
 }));
+
+// =============================================================================
+// MIDAD Phase 2B — Progress / Measurement.
+//
+// Measurement is EVIDENCE OF PHYSICAL PROGRESS against a specific published
+// BOQ revision's quantities — not a financial instrument. It does not
+// modify, and is not read by, Contract value, Cost Plan (budgetItems), BOQ
+// values, Commitment amounts, or the legacy projects.budgetTotal. IPC
+// (certification, valuation, retention, advance recovery) is explicitly a
+// later phase; this table only tracks quantities and, for future IPC's
+// convenience, a per-line value (measuredQuantity * the BOQ item's own
+// rate) computed the same way boqItems.amount already is — not a second
+// pricing/valuation engine, no tax, no retention, no advance applied here.
+//
+// Cumulative approved quantity is intentionally NOT a stored column: it is
+// always derived as SUM(measurement_lines.measuredQuantity) across every
+// line belonging to an APPROVED measurement for that boqItemId (see
+// routes/measurements.ts's computeApprovedQuantity). Storing it would
+// create a second, cache-able-but-driftable copy of a number that must
+// never disagree with its own inputs — exactly the class of problem
+// Phase 2A's Commitment amount was deliberately built to avoid.
+// =============================================================================
+
+export const measurementStatusEnum = pgEnum("measurement_status", ["draft", "submitted", "approved", "rejected"]);
+
+export const measurements = pgTable("measurements", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  projectId: uuid("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  contractId: uuid("contract_id")
+    .notNull()
+    .references(() => contracts.id, { onDelete: "cascade" }),
+  // The specific published revision this measurement was taken against —
+  // set once at creation, never updated by any route, so a measurement's
+  // reference stays correct even if a later revision supersedes this one.
+  boqRevisionId: uuid("boq_revision_id")
+    .notNull()
+    .references(() => boqRevisions.id),
+  status: measurementStatusEnum("status").notNull().default("draft"),
+  measurementDate: date("measurement_date").notNull(),
+  description: text("description"),
+  createdBy: uuid("created_by")
+    .notNull()
+    .references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  submittedBy: uuid("submitted_by").references(() => users.id),
+  submittedAt: timestamp("submitted_at"),
+  approvedBy: uuid("approved_by").references(() => users.id),
+  approvedAt: timestamp("approved_at"),
+  rejectedBy: uuid("rejected_by").references(() => users.id),
+  rejectedAt: timestamp("rejected_at"),
+  rejectionReason: text("rejection_reason"),
+});
+
+export const measurementLines = pgTable("measurement_lines", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  measurementId: uuid("measurement_id")
+    .notNull()
+    .references(() => measurements.id, { onDelete: "cascade" }),
+  // Must belong to the SAME measurement.boqRevisionId — stricter than
+  // Commitment lines' boqItemId check (which only requires "same
+  // project"), because a BOQ item's quantity is only meaningful within
+  // its own revision: a superseded revision's item may have had a
+  // different quantity than the current one.
+  boqItemId: uuid("boq_item_id")
+    .notNull()
+    .references(() => boqItems.id),
+  measuredQuantity: numeric("measured_quantity", { precision: 14, scale: 3 }).notNull(),
+  // Stored, computed once at write time (measuredQuantity * the BOQ
+  // item's rate, via lib/money.ts) — same frozen-computation discipline
+  // as boqItems.amount / commitmentLines.amount. Explicitly NOT a
+  // valuation/certification figure (see the section comment above).
+  value: numeric("value", { precision: 14, scale: 2 }),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const measurementsRelations = relations(measurements, ({ one, many }) => ({
+  company: one(companies, { fields: [measurements.companyId], references: [companies.id] }),
+  project: one(projects, { fields: [measurements.projectId], references: [projects.id] }),
+  contract: one(contracts, { fields: [measurements.contractId], references: [contracts.id] }),
+  boqRevision: one(boqRevisions, { fields: [measurements.boqRevisionId], references: [boqRevisions.id] }),
+  lines: many(measurementLines),
+}));
+
+export const measurementLinesRelations = relations(measurementLines, ({ one }) => ({
+  measurement: one(measurements, { fields: [measurementLines.measurementId], references: [measurements.id] }),
+  boqItem: one(boqItems, { fields: [measurementLines.boqItemId], references: [boqItems.id] }),
+}));
