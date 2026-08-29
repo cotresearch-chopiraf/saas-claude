@@ -1,12 +1,14 @@
 import { FormEvent, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { apiFetch, setToken, ApiError } from "../api/client";
+import { useAuth } from "../auth/AuthContext";
 import type { User } from "../api/types";
 
 export function AcceptInvite() {
   const [params] = useSearchParams();
   const token = params.get("token") ?? "";
   const navigate = useNavigate();
+  const { refreshUser } = useAuth();
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -20,6 +22,12 @@ export function AcceptInvite() {
         body: JSON.stringify({ token, name, password }),
       });
       setToken(res.token);
+      // Synchronize authenticated user/role state through the same
+      // canonical /auth/me path login()/register() already use — never a
+      // second, ad hoc source of truth — before navigating into the
+      // protected app, so ProtectedRoute never sees a token with no user
+      // state behind it yet.
+      await refreshUser();
       navigate("/");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "تعذّر قبول الدعوة");

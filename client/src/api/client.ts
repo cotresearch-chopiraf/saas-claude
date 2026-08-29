@@ -9,7 +9,16 @@ export function setToken(token: string | null): void {
   else localStorage.removeItem(TOKEN_KEY);
 }
 
-export class ApiError extends Error {}
+// Carries the HTTP status alongside the message so a caller can tell a
+// genuine auth failure (401) apart from a transient one (429/500/...) —
+// see auth/AuthContext.tsx's session-error classification.
+export class ApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
+}
 
 export async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getToken();
@@ -25,7 +34,7 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
 
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new ApiError(body.error ?? "حدث خطأ غير متوقع");
+    throw new ApiError(body.error ?? "حدث خطأ غير متوقع", res.status);
   }
   return body as T;
 }
