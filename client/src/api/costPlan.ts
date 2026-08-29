@@ -1,5 +1,5 @@
 import { apiFetch } from "./client";
-import type { BudgetItem, BudgetRevision, BudgetRevisionWithItems, BudgetSummary, CostCode } from "./types";
+import type { BudgetItem, BudgetRevision, BudgetRevisionWithItems, BudgetSummary, CostCode, Expense } from "./types";
 
 // Thin typed wrappers over the existing, verified Budget / Budget Revision /
 // Cost Code APIs (server/src/routes/budget.ts, budgetRevisions.ts,
@@ -32,6 +32,31 @@ export function updateBudgetItem(projectId: string, itemId: string, input: Parti
 
 export function deleteBudgetItem(projectId: string, itemId: string): Promise<void> {
   return apiFetch<void>(`/projects/${projectId}/budget/items/${itemId}`, { method: "DELETE" });
+}
+
+// --- MIDAD UI-03B: Actual Cost (Expense) ---
+// Expenses are already part of GET /budget's response (see getBudget
+// above) — these are only the create/delete wrappers, matching
+// server/src/routes/budget.ts's expense routes exactly. No permission
+// gate exists server-side, so no RBAC visibility is applied client-side
+// either (same posture as Budget Item CRUD, mirrored deliberately).
+
+export interface ExpenseInput {
+  description: string;
+  amount: number;
+  expenseDate: string;
+  budgetItemId?: string;
+}
+
+export function createExpense(projectId: string, input: ExpenseInput): Promise<Expense> {
+  return apiFetch<Expense>(`/projects/${projectId}/budget/expenses`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function deleteExpense(projectId: string, expenseId: string): Promise<void> {
+  return apiFetch<void>(`/projects/${projectId}/budget/expenses/${expenseId}`, { method: "DELETE" });
 }
 
 export function listCostCodes(projectId?: string): Promise<CostCode[]> {
