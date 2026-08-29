@@ -8,6 +8,10 @@ import { generateToken } from "../lib/tokens.js";
 import { buildDocumentHtml, type DocumentLanguage } from "../lib/documentHtml.js";
 import { renderHtmlToPdf } from "../lib/pdf.js";
 import { logoFileToDataUri } from "../lib/uploads.js";
+import { computeTotals } from "../lib/money.js";
+import { requirePermission, getUserRole, isPermittedRole } from "../lib/permissions.js";
+import { logger } from "../lib/logger.js";
+import { calculateTax } from "../lib/compliance/engine.js";
 
 export const invoicesRouter = Router();
 export const publicInvoicesRouter = Router();
@@ -36,9 +40,8 @@ invoicesRouter.get("/", async (req, res) => {
   const withTotals = await Promise.all(
     rows.map(async (invoice) => {
       const items = await db.query.invoiceItems.findMany({ where: eq(invoiceItems.invoiceId, invoice.id) });
-      const subtotal = items.reduce((sum, item) => sum + Number(item.amount), 0);
-      const taxAmount = subtotal * (Number(invoice.taxRatePercent) / 100);
-      return { ...invoice, subtotal, taxAmount, total: subtotal + taxAmount };
+      const totals = computeTotals(items.map((item) => Number(item.amount)), Number(invoice.taxRatePercent));
+      return { ...invoice, ...totals };
     }),
   );
   res.json(withTotals);
@@ -52,6 +55,7 @@ const createSchema = z.object({
   clientAddress: z.string().optional(),
   clientTaxId: z.string().optional(),
   taxRatePercent: z.coerce.number().min(0).max(100).optional(),
+  taxCategory: z.string().optional(),
   language: languageEnum.default("ar"),
   dueDate: z.string().optional(),
   items: z
@@ -63,6 +67,18 @@ invoicesRouter.post("/", async (req, res) => {
   const parsed = createSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
 
+  // TC-02 fix: an explicit taxRatePercent bypasses the compliance engine
+  // entirely — no ruleVersionId/override provenance gets recorded for it,
+  // so a member could otherwise set an arbitrary rate with zero audit
+  // trail. The engine-computed path below (taxRatePercent omitted) stays
+  // open to any member; only a manual override needs owner.
+  if (parsed.data.taxRatePercent !== undefined) {
+    const role = await getUserRole(req.userId!);
+    if (!isPermittedRole("invoice.overrideTax", role)) {
+      return res.status(403).json({ error: "لا تملك صلاحية تحديد نسبة ضريبة يدوياً" });
+    }
+  }
+
   if (parsed.data.quoteId) {
     const quote = await db.query.quotes.findFirst({
       where: and(eq(quotes.id, parsed.data.quoteId), eq(quotes.companyId, req.companyId!)),
@@ -72,6 +88,39 @@ invoicesRouter.post("/", async (req, res) => {
 
   const company = await db.query.companies.findFirst({ where: eq(companies.id, req.companyId!) });
   const invoiceNumber = await nextInvoiceNumber(req.companyId!);
+  const issueDate = new Date().toISOString().slice(0, 10);
+
+  // An explicit taxRatePercent in the request always wins (preserves the
+  // pre-tax-engine behavior exactly). Otherwise, if this company has a
+  // compliance profile configured, the tax engine computes the rate and
+  // the result is frozen onto the invoice as a historical snapshot
+  // (taxCategory/ruleVersionId/overrideReference) — a later rule or
+  // override change never rewrites this invoice. A company with no
+  // compliance profile (the common case until the customer completes
+  // country onboarding) falls back to the company's flat default rate,
+  // exactly as it always has.
+  let taxRatePercent = parsed.data.taxRatePercent;
+  let taxCategory: string | undefined;
+  let ruleVersionId: string | undefined;
+  let overrideReference: string | undefined;
+
+  if (taxRatePercent === undefined) {
+    const category = parsed.data.taxCategory ?? "standard_rate";
+    const taxResult = await calculateTax({
+      companyId: req.companyId!,
+      transactionDate: issueDate,
+      taxCategory: category,
+      itemAmounts: parsed.data.items.map((item) => item.amount),
+    });
+    if (taxResult.status === "calculated") {
+      taxRatePercent = taxResult.taxRatePercent!;
+      taxCategory = taxResult.taxCategory;
+      ruleVersionId = taxResult.ruleVersionId!;
+      overrideReference = taxResult.overrideReference ?? undefined;
+    } else {
+      taxRatePercent = Number(company!.defaultTaxRatePercent);
+    }
+  }
 
   const [invoice] = await db
     .insert(invoices)
@@ -82,10 +131,13 @@ invoicesRouter.post("/", async (req, res) => {
       clientName: parsed.data.clientName,
       clientAddress: parsed.data.clientAddress,
       clientTaxId: parsed.data.clientTaxId,
-      taxRatePercent: String(parsed.data.taxRatePercent ?? company!.defaultTaxRatePercent),
+      taxRatePercent: String(taxRatePercent),
+      taxCategory,
+      ruleVersionId,
+      overrideReference,
       language: parsed.data.language,
       publicToken: generateToken(),
-      issueDate: new Date().toISOString().slice(0, 10),
+      issueDate,
       dueDate: parsed.data.dueDate,
     })
     .returning();
@@ -113,27 +165,35 @@ invoicesRouter.get("/:id", async (req: Request<{ id: string }>, res: Response) =
   res.json({ ...invoice, items });
 });
 
-invoicesRouter.patch("/:id/send", async (req: Request<{ id: string }>, res: Response) => {
+invoicesRouter.patch("/:id/send", requirePermission("invoice.send"), async (req: Request<{ id: string }>, res: Response) => {
   const invoice = await findOwnedInvoice(req.companyId!, req.params.id);
   if (!invoice) return res.status(404).json({ error: "الفاتورة غير موجودة" });
   if (invoice.status !== "draft") return res.status(409).json({ error: "تم إرسال الفاتورة مسبقاً" });
 
   const [updated] = await db.update(invoices).set({ status: "sent" }).where(eq(invoices.id, invoice.id)).returning();
+  logger.info("financial_mutation", { action: "invoice.send", userId: req.userId, companyId: req.companyId, invoiceId: invoice.id });
   res.json(updated);
 });
 
 // No real payment collection is wired up yet (needs Stripe) — this is the
 // honest MVP behavior: the owner records that they got paid some other way.
-invoicesRouter.patch("/:id/mark-paid", async (req: Request<{ id: string }>, res: Response) => {
+// Invoice lifecycle is draft -> sent -> paid, strictly in that order: an
+// invoice can only be marked paid once it has actually been sent to the
+// client (draft -> paid directly is not a valid transition).
+invoicesRouter.patch("/:id/mark-paid", requirePermission("invoice.markPaid"), async (req: Request<{ id: string }>, res: Response) => {
   const invoice = await findOwnedInvoice(req.companyId!, req.params.id);
   if (!invoice) return res.status(404).json({ error: "الفاتورة غير موجودة" });
   if (invoice.status === "paid") return res.status(409).json({ error: "الفاتورة مُسدَّدة مسبقاً" });
+  if (invoice.status !== "sent") {
+    return res.status(409).json({ error: "يجب إرسال الفاتورة أولاً قبل تسجيلها كمسدَّدة" });
+  }
 
   const [updated] = await db
     .update(invoices)
     .set({ status: "paid", paidAt: new Date() })
     .where(eq(invoices.id, invoice.id))
     .returning();
+  logger.info("financial_mutation", { action: "invoice.markPaid", userId: req.userId, companyId: req.companyId, invoiceId: invoice.id });
   res.json(updated);
 });
 
@@ -193,6 +253,7 @@ publicInvoicesRouter.get("/:token", async (req: Request<{ token: string }>, res:
     db.query.companies.findFirst({ where: eq(companies.id, invoice.companyId) }),
   ]);
 
+  const { total } = computeTotals(items.map((i) => Number(i.amount)), Number(invoice.taxRatePercent));
   res.json({
     invoiceNumber: invoice.invoiceNumber,
     status: invoice.status,
@@ -202,7 +263,7 @@ publicInvoicesRouter.get("/:token", async (req: Request<{ token: string }>, res:
     clientName: invoice.clientName,
     items,
     taxRatePercent: Number(invoice.taxRatePercent),
-    total: items.reduce((sum, i) => sum + Number(i.amount), 0) * (1 + Number(invoice.taxRatePercent) / 100),
+    total,
   });
 });
 

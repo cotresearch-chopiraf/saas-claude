@@ -8,8 +8,10 @@ import {
   integer,
   jsonb,
   pgEnum,
+  uniqueIndex,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 
 // Every optional feature this product ships lives as a key here, off or on
 // per company — a customer who doesn't want invoicing (or any future add-on)
@@ -58,6 +60,31 @@ export const invoiceStatusEnum = pgEnum("invoice_status", [
   "sent",
   "paid",
 ]);
+
+// --- Tax & Compliance Engine ---
+// GCC-first, Morocco as an additional country pack. See lib/compliance/ for
+// the country-agnostic engine and lib/compliance/packs/ for each country's
+// rules. Nothing here hard-codes a rate — every number lives inside a
+// versioned compliance_rule_versions row, and every company's active
+// configuration is official-default + optional-override, never a straight
+// overwrite (see companyTaxOverrides below).
+export const countryCodeEnum = pgEnum("country_code", ["SA", "AE", "QA", "KW", "BH", "OM", "MA"]);
+
+export const complianceStatusEnum = pgEnum("compliance_status", [
+  "configured",
+  "partially_configured",
+  "review_required",
+]);
+
+export const ruleVersionStatusEnum = pgEnum("rule_version_status", ["draft", "published", "superseded"]);
+
+export const sourceTypeEnum = pgEnum("source_type", [
+  "official_government",
+  "official_regulation",
+  "verified_professional",
+]);
+
+export const overrideStatusEnum = pgEnum("override_status", ["active", "reset"]);
 
 // A company is the tenant boundary — every other table hangs off it,
 // and every query in the app is scoped by companyId to keep tenants isolated.
@@ -115,8 +142,18 @@ export const budgetItems = pgTable("budget_items", {
   projectId: uuid("project_id")
     .notNull()
     .references(() => projects.id, { onDelete: "cascade" }),
+  // Free-text category is the original MVP field and stays exactly as it
+  // was — existing rows and the existing UI keep working unchanged. The
+  // three columns below are optional (nullable) MIDAD Foundation additions:
+  // a budget item can now *also* be tagged to a canonical cost code and/or
+  // a BOQ item, and grouped under a budget revision, without requiring any
+  // existing budget item to have them. See the "MIDAD Phase 1 — Foundation"
+  // section near the end of this file for what each referenced table is.
   category: text("category").notNull(),
   plannedAmount: numeric("planned_amount", { precision: 12, scale: 2 }).notNull(),
+  costCodeId: uuid("cost_code_id").references((): AnyPgColumn => costCodes.id),
+  boqItemId: uuid("boq_item_id").references((): AnyPgColumn => boqItems.id),
+  budgetRevisionId: uuid("budget_revision_id").references((): AnyPgColumn => budgetRevisions.id),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -216,6 +253,15 @@ export const quotes = pgTable("quotes", {
   projectName: text("project_name").notNull(),
   language: documentLanguageEnum("language").notNull().default("ar"),
   status: quoteStatusEnum("status").notNull().default("draft"),
+  // Tax is optional on a quote (a company with no compliance profile
+  // configured yet keeps working exactly as before — plain line-item sum,
+  // no tax fields). When the tax engine computed a result for this quote,
+  // these columns are the frozen snapshot of what it computed and why, so
+  // a later rule/override change never rewrites an already-created quote.
+  taxCategory: text("tax_category"),
+  taxRatePercent: numeric("tax_rate_percent", { precision: 5, scale: 2 }),
+  ruleVersionId: uuid("rule_version_id").references(() => complianceRuleVersions.id),
+  overrideReference: uuid("override_reference").references(() => companyTaxOverrides.id),
   publicToken: text("public_token").notNull().unique(),
   acceptedByName: text("accepted_by_name"),
   acceptedAt: timestamp("accepted_at"),
@@ -247,6 +293,13 @@ export const invoices = pgTable("invoices", {
   clientAddress: text("client_address"),
   clientTaxId: text("client_tax_id"),
   taxRatePercent: numeric("tax_rate_percent", { precision: 5, scale: 2 }).notNull(),
+  // Same historical-snapshot purpose as on quotes above — nullable because
+  // an invoice created before the tax engine existed, or by a company with
+  // no compliance profile configured, has none of this and still works
+  // exactly as before off the existing taxRatePercent column alone.
+  taxCategory: text("tax_category"),
+  ruleVersionId: uuid("rule_version_id").references(() => complianceRuleVersions.id),
+  overrideReference: uuid("override_reference").references(() => companyTaxOverrides.id),
   language: documentLanguageEnum("language").notNull().default("ar"),
   status: invoiceStatusEnum("status").notNull().default("draft"),
   publicToken: text("public_token").notNull().unique(),
@@ -264,6 +317,159 @@ export const invoiceItems = pgTable("invoice_items", {
   description: text("description").notNull(),
   amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+// One immutable, versioned snapshot of a country's compliance rules. Never
+// mutated once published — a regulation change produces a NEW row (a new
+// version), it never rewrites an old one. `rules` is a structured JSONB
+// payload (see lib/compliance/types.ts for the shape every country pack
+// must produce) rather than a fully relational schema, because the actual
+// shape of "what a country's tax rules look like" genuinely varies enough
+// (Zakat only applies in some, withholding tables differ, e-invoicing
+// requirements differ) that forcing one rigid relational shape across 7
+// jurisdictions up front would either be wrong for most of them or would
+// need a schema migration every time a country's rules turn out to need one
+// more field. The document is still queryable via Postgres JSONB operators
+// when a report genuinely needs to reach into it.
+export const complianceRuleVersions = pgTable("compliance_rule_versions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  countryCode: countryCodeEnum("country_code").notNull(),
+  version: text("version").notNull(),
+  status: ruleVersionStatusEnum("status").notNull().default("draft"),
+  effectiveFrom: date("effective_from").notNull(),
+  effectiveTo: date("effective_to"),
+  rules: jsonb("rules").notNull(),
+  // Provenance — see lib/compliance/types.ts ComplianceRules for what's
+  // actually inside `rules`; these columns are about where that content
+  // came from, required for auditability (mission-provided requirement:
+  // never invent a citation, never claim verification that didn't happen).
+  sourceUrl: text("source_url"),
+  sourceType: sourceTypeEnum("source_type"),
+  publicationDate: date("publication_date"),
+  retrievedAt: timestamp("retrieved_at"),
+  verificationStatus: text("verification_status").notNull().default("unverified"),
+  publishedAt: timestamp("published_at"),
+  publishedBy: uuid("published_by").references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+// One row per company: which country/entity/activity it's configured for,
+// and which published rule version is currently active for it. This is the
+// company-level compliance profile — the architecture intentionally leaves
+// room for a future branchId (nullable, added later) without a redesign,
+// but does not implement multi-branch tax profiles in this phase: nothing
+// else in this schema (projects, invoices, quotes) is branch-scoped today,
+// and retrofitting that everywhere is out of scope for the tax engine
+// itself. See the implementation report for this explicit scope decision.
+export const companyComplianceProfiles = pgTable("company_compliance_profiles", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .unique()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  countryCode: countryCodeEnum("country_code").notNull(),
+  legalEntityType: text("legal_entity_type"),
+  businessActivity: text("business_activity"),
+  taxRegistrationStatus: text("tax_registration_status"),
+  activeRuleVersionId: uuid("active_rule_version_id")
+    .notNull()
+    .references(() => complianceRuleVersions.id),
+  status: complianceStatusEnum("status").notNull().default("configured"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// The override layer. A row here NEVER mutates the country pack (that
+// stays in compliance_rule_versions, untouched) — it's a company-scoped
+// exception on top of it. `settingKey` is a dotted path into the rule
+// document (e.g. "vat.standardRatePercent"). Resetting an override does
+// NOT delete this row — it flips status to "reset" and stamps who/when, so
+// the audit history survives the reset (mission-required invariant).
+// TC-03 fix: a partial unique index enforces at the database level that a
+// company can have at most one OPEN-ENDED active override (effectiveTo IS
+// NULL) per settingKey at a time. Multiple *closed* (effectiveTo set)
+// status='active' rows are still allowed to coexist — that's the
+// intentional historical-timeline design (see createOverride() in
+// lib/compliance/overrides.ts): closing the prior row and inserting the
+// new one is two statements, not one atomic operation, so two concurrent
+// createOverride calls could previously both read "no prior active" and
+// both insert an open-ended row — this index makes the second INSERT fail
+// with a unique-violation instead of silently succeeding (reproduced live
+// in the tax-engine red-team audit, TC-03).
+export const companyTaxOverrides = pgTable(
+  "company_tax_overrides",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    settingKey: text("setting_key").notNull(),
+    overrideValue: jsonb("override_value").notNull(),
+    // What the official default WAS at the moment this override was created —
+    // kept alongside the override so the UI can always show "official vs.
+    // company" even if the country pack itself is later superseded by a new
+    // version with a different default.
+    officialDefaultSnapshot: jsonb("official_default_snapshot").notNull(),
+    ruleVersionId: uuid("rule_version_id")
+      .notNull()
+      .references(() => complianceRuleVersions.id),
+    status: overrideStatusEnum("status").notNull().default("active"),
+    effectiveFrom: date("effective_from").notNull(),
+    effectiveTo: date("effective_to"),
+    reason: text("reason"),
+    createdBy: uuid("created_by")
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    resetAt: timestamp("reset_at"),
+    resetBy: uuid("reset_by").references(() => users.id),
+  },
+  (table) => ({
+    oneOpenActivePerSetting: uniqueIndex("company_tax_overrides_one_open_active")
+      .on(table.companyId, table.settingKey)
+      .where(sql`${table.status} = 'active' AND ${table.effectiveTo} IS NULL`),
+  }),
+);
+
+// Append-only. No route ever exposes an UPDATE or DELETE against this
+// table — every sensitive compliance mutation writes exactly one row here
+// in the same transaction as the mutation itself (see lib/compliance for
+// the helper that guarantees this), and that is the entire audit trail.
+export const complianceAuditEvents = pgTable("compliance_audit_events", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  eventType: text("event_type").notNull(),
+  settingKey: text("setting_key"),
+  previousValue: jsonb("previous_value"),
+  newValue: jsonb("new_value"),
+  officialDefaultAtTime: jsonb("official_default_at_time"),
+  countryCode: countryCodeEnum("country_code"),
+  ruleVersionId: uuid("rule_version_id").references(() => complianceRuleVersions.id),
+  changedBy: uuid("changed_by")
+    .notNull()
+    .references(() => users.id),
+  reason: text("reason"),
+  effectiveFrom: date("effective_from"),
+  effectiveTo: date("effective_to"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+// A company's actual registered identifiers (VAT number, commercial
+// registration, e-invoicing ID, ...). Which identifierType values are
+// relevant/required for a given company is decided by its country pack
+// (getRequiredFields()), not hard-coded here.
+export const companyTaxIdentifiers = pgTable("company_tax_identifiers", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  identifierType: text("identifier_type").notNull(),
+  value: text("value").notNull(),
+  countryCode: countryCodeEnum("country_code").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
 export const companiesRelations = relations(companies, ({ many }) => ({
@@ -358,4 +564,317 @@ export const tasksRelations = relations(tasks, ({ one }) => ({
     fields: [tasks.projectId],
     references: [projects.id],
   }),
+}));
+
+export const companyComplianceProfilesRelations = relations(companyComplianceProfiles, ({ one }) => ({
+  company: one(companies, {
+    fields: [companyComplianceProfiles.companyId],
+    references: [companies.id],
+  }),
+  activeRuleVersion: one(complianceRuleVersions, {
+    fields: [companyComplianceProfiles.activeRuleVersionId],
+    references: [complianceRuleVersions.id],
+  }),
+}));
+
+export const companyTaxOverridesRelations = relations(companyTaxOverrides, ({ one }) => ({
+  company: one(companies, {
+    fields: [companyTaxOverrides.companyId],
+    references: [companies.id],
+  }),
+  ruleVersion: one(complianceRuleVersions, {
+    fields: [companyTaxOverrides.ruleVersionId],
+    references: [complianceRuleVersions.id],
+  }),
+}));
+
+export const complianceAuditEventsRelations = relations(complianceAuditEvents, ({ one }) => ({
+  company: one(companies, {
+    fields: [complianceAuditEvents.companyId],
+    references: [companies.id],
+  }),
+}));
+
+// =============================================================================
+// MIDAD Phase 1 — Foundation: Contract, BOQ, Cost Code, Budget Revision,
+// canonical audit trail, evidence/file metadata.
+//
+// Scope discipline (per the approved Phase 1 plan): this is the FOUNDATION
+// only. Procurement, Commitment, Progress, Measurement, IPC, Forecast are
+// NOT built here — the tables below exist so those later phases have
+// something real to attach to, not to implement them now. Nothing here
+// touches or replaces the existing projects/budgetItems/expenses/
+// changeOrders tables' current behavior; budgetItems gained three nullable
+// columns above and nothing else changed.
+// =============================================================================
+
+// --- Cost Codes ---
+// A canonical hierarchy, company-scoped. projectId is nullable: null means
+// a company-wide standard code (e.g. "01 Labor"), reusable across every
+// project; a non-null projectId is a project-specific extension that does
+// not pollute the company's global list for other projects — this is the
+// "project-specific extensions without breaking global standards"
+// requirement from the approved plan, and the reason this is one table
+// with a nullable scoping column rather than two separate tables.
+export const costCodeCategoryEnum = pgEnum("cost_code_category", [
+  "labor",
+  "materials",
+  "equipment",
+  "subcontract",
+  "site_overhead",
+  "general_overhead",
+  "other",
+]);
+
+export const costCodes = pgTable("cost_codes", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  projectId: uuid("project_id").references(() => projects.id, { onDelete: "cascade" }),
+  code: text("code").notNull(),
+  name: text("name").notNull(),
+  category: costCodeCategoryEnum("category"),
+  parentCostCodeId: uuid("parent_cost_code_id").references((): AnyPgColumn => costCodes.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+// --- Contracts ---
+// Organization -> Project -> Contract, exactly as approved. contractType
+// distinguishes a project's primary commercial instrument ("main") from a
+// later amendment to it ("amendment", self-referencing parentContractId) —
+// deliberately NOT trying to also represent subcontracts or change orders
+// in this same table (those are separate, larger domains explicitly
+// deferred to later phases; change_orders already exists and is untouched).
+// revisedValue starts equal to originalValue and is expected to move only
+// through an explicit, audited amendment — never edited in place silently.
+export const contractTypeEnum = pgEnum("contract_type", ["main", "amendment"]);
+export const contractStatusEnum = pgEnum("contract_status", ["draft", "active", "completed", "terminated"]);
+
+export const contracts = pgTable("contracts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  projectId: uuid("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  contractType: contractTypeEnum("contract_type").notNull().default("main"),
+  parentContractId: uuid("parent_contract_id").references((): AnyPgColumn => contracts.id),
+  contractNumber: text("contract_number"),
+  clientName: text("client_name"),
+  originalValue: numeric("original_value", { precision: 14, scale: 2 }).notNull(),
+  revisedValue: numeric("revised_value", { precision: 14, scale: 2 }).notNull(),
+  currency: text("currency").notNull().default("SAR"),
+  advancePercent: numeric("advance_percent", { precision: 5, scale: 2 }),
+  retentionPercent: numeric("retention_percent", { precision: 5, scale: 2 }),
+  paymentTerms: text("payment_terms"),
+  status: contractStatusEnum("status").notNull().default("draft"),
+  startDate: date("start_date"),
+  endDate: date("end_date"),
+  createdBy: uuid("created_by")
+    .notNull()
+    .references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// --- BOQ ---
+// Versioned exactly like compliance_rule_versions: a revision is immutable
+// once published — a change produces a NEW boq_revisions row (status
+// "superseded" on the old one via supersedesRevisionId), it never rewrites
+// boq_items belonging to an already-published revision. itemType
+// distinguishes a grouping/header row ("section") from a real billable
+// line ("item") — hierarchy and "sections" are the same mechanism
+// (parentItemId), not two competing ones.
+export const boqRevisionStatusEnum = pgEnum("boq_revision_status", ["draft", "published", "superseded"]);
+export const boqItemTypeEnum = pgEnum("boq_item_type", ["section", "item"]);
+
+export const boqRevisions = pgTable("boq_revisions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  projectId: uuid("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  contractId: uuid("contract_id")
+    .notNull()
+    .references(() => contracts.id, { onDelete: "cascade" }),
+  revisionNumber: integer("revision_number").notNull(),
+  status: boqRevisionStatusEnum("status").notNull().default("draft"),
+  supersedesRevisionId: uuid("supersedes_revision_id").references((): AnyPgColumn => boqRevisions.id),
+  notes: text("notes"),
+  createdBy: uuid("created_by")
+    .notNull()
+    .references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  publishedAt: timestamp("published_at"),
+});
+
+export const boqItems = pgTable("boq_items", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  boqRevisionId: uuid("boq_revision_id")
+    .notNull()
+    .references(() => boqRevisions.id, { onDelete: "cascade" }),
+  parentItemId: uuid("parent_item_id").references((): AnyPgColumn => boqItems.id),
+  itemType: boqItemTypeEnum("item_type").notNull().default("item"),
+  code: text("code"),
+  description: text("description").notNull(),
+  unit: text("unit"),
+  quantity: numeric("quantity", { precision: 14, scale: 3 }),
+  rate: numeric("rate", { precision: 14, scale: 2 }),
+  // Stored, not derived on every read — computed once at write time via
+  // lib/money.ts (same frozen-computation discipline as invoice/quote
+  // totals) so a BOQ item's amount is exact and doesn't depend on
+  // recomputing quantity*rate correctly at every call site.
+  amount: numeric("amount", { precision: 14, scale: 2 }),
+  costCodeId: uuid("cost_code_id").references(() => costCodes.id),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+// --- Budget Revisions ---
+// An ADDITIVE versioning/approval layer on top of the existing budget_items
+// table — deliberately NOT a replacement for projects.budgetTotal, which
+// remains exactly what it is today: the current authoritative total that
+// change-order approval atomically adjusts (changeOrders.ts, already
+// concurrency-hardened and tested). A budget revision here means "we
+// approved a new allocation of the budget across cost codes" (e.g. a
+// transfer from Materials to Labor) — not "the total contract value
+// changed" (that is what a change order, or a contract amendment, already
+// represents). Conflating the two would have meant touching already-working,
+// tested, concurrency-sensitive change-order code in Phase 1, which the
+// approved plan's risk posture explicitly steers away from.
+export const budgetRevisionStatusEnum = pgEnum("budget_revision_status", ["draft", "approved", "superseded"]);
+
+export const budgetRevisions = pgTable("budget_revisions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  projectId: uuid("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  revisionNumber: integer("revision_number").notNull(),
+  status: budgetRevisionStatusEnum("status").notNull().default("draft"),
+  reason: text("reason"),
+  createdBy: uuid("created_by")
+    .notNull()
+    .references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  approvedBy: uuid("approved_by").references(() => users.id),
+  approvedAt: timestamp("approved_at"),
+});
+
+// --- Canonical audit trail ---
+// One audit-event model for the whole product going forward, per the
+// approved decision to generalize now rather than let every domain grow
+// its own audit table. compliance_audit_events (above) is NOT dropped and
+// NOT migrated — it keeps every row it already has, exactly as-is, so no
+// historical compliance audit data is touched — but it is deprecated: the
+// compliance module's audit-writing code now targets this table instead
+// (see lib/audit.ts and the updated lib/compliance/audit.ts). Every new
+// domain (Contract, BOQ, Cost Code, Budget Revision, and everything later)
+// writes here, keyed by entityType/entityId rather than one column set per
+// domain — this is intentionally NOT event-sourcing (no replay, no event
+// stream is the source of truth for current state; current state always
+// lives in its own table, this is only the trail of who-changed-what-when).
+export const auditEvents = pgTable("audit_events", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  // Nullable: a future system/AI-originated event (source below) may have
+  // no human actor — never fabricate one to satisfy a NOT NULL constraint.
+  actorUserId: uuid("actor_user_id").references(() => users.id),
+  action: text("action").notNull(),
+  entityType: text("entity_type").notNull(),
+  entityId: uuid("entity_id").notNull(),
+  beforeValue: jsonb("before_value"),
+  afterValue: jsonb("after_value"),
+  reason: text("reason"),
+  source: text("source").notNull().default("api"),
+  // Domain-specific extras that don't deserve their own first-class column
+  // on a shared table (e.g. compliance's ruleVersionId/countryCode) — kept
+  // here instead of forcing every future domain's audit needs into this
+  // table's fixed column set.
+  metadata: jsonb("metadata"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+// --- Evidence / file metadata ---
+// Metadata only — never the file bytes themselves (per the approved
+// decision). storageProvider + storageKey are the abstraction boundary:
+// today only "local" (the existing multer-disk mechanism, now wrapped
+// behind lib/storage/ instead of called directly) is implemented, but nothing
+// about this table's shape assumes local disk — an "s3" provider later is
+// an additive enum value and a new lib/storage/ implementation, not a
+// schema change. A new version of an evidence file is a NEW row
+// (previousVersionId points back) — no route ever updates storageKey on an
+// existing row, so historical evidence is never silently replaced.
+export const storageProviderEnum = pgEnum("storage_provider", ["local"]);
+
+export const files = pgTable("files", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  storageProvider: storageProviderEnum("storage_provider").notNull().default("local"),
+  storageKey: text("storage_key").notNull(),
+  fileName: text("file_name").notNull(),
+  mimeType: text("mime_type").notNull(),
+  size: integer("size").notNull(),
+  checksum: text("checksum"),
+  uploadedBy: uuid("uploaded_by")
+    .notNull()
+    .references(() => users.id),
+  uploadedAt: timestamp("uploaded_at").notNull().defaultNow(),
+  entityType: text("entity_type").notNull(),
+  entityId: uuid("entity_id").notNull(),
+  version: integer("version").notNull().default(1),
+  previousVersionId: uuid("previous_version_id").references((): AnyPgColumn => files.id),
+});
+
+export const costCodesRelations = relations(costCodes, ({ one, many }) => ({
+  company: one(companies, { fields: [costCodes.companyId], references: [companies.id] }),
+  project: one(projects, { fields: [costCodes.projectId], references: [projects.id] }),
+  parent: one(costCodes, { fields: [costCodes.parentCostCodeId], references: [costCodes.id] }),
+  budgetItems: many(budgetItems),
+  boqItems: many(boqItems),
+}));
+
+export const contractsRelations = relations(contracts, ({ one, many }) => ({
+  company: one(companies, { fields: [contracts.companyId], references: [companies.id] }),
+  project: one(projects, { fields: [contracts.projectId], references: [projects.id] }),
+  parentContract: one(contracts, { fields: [contracts.parentContractId], references: [contracts.id] }),
+  boqRevisions: many(boqRevisions),
+}));
+
+export const boqRevisionsRelations = relations(boqRevisions, ({ one, many }) => ({
+  project: one(projects, { fields: [boqRevisions.projectId], references: [projects.id] }),
+  contract: one(contracts, { fields: [boqRevisions.contractId], references: [contracts.id] }),
+  items: many(boqItems),
+}));
+
+export const boqItemsRelations = relations(boqItems, ({ one }) => ({
+  revision: one(boqRevisions, { fields: [boqItems.boqRevisionId], references: [boqRevisions.id] }),
+  parent: one(boqItems, { fields: [boqItems.parentItemId], references: [boqItems.id] }),
+  costCode: one(costCodes, { fields: [boqItems.costCodeId], references: [costCodes.id] }),
+}));
+
+export const budgetRevisionsRelations = relations(budgetRevisions, ({ one, many }) => ({
+  project: one(projects, { fields: [budgetRevisions.projectId], references: [projects.id] }),
+  budgetItems: many(budgetItems),
+}));
+
+export const auditEventsRelations = relations(auditEvents, ({ one }) => ({
+  company: one(companies, { fields: [auditEvents.companyId], references: [companies.id] }),
+  actor: one(users, { fields: [auditEvents.actorUserId], references: [users.id] }),
+}));
+
+export const filesRelations = relations(files, ({ one }) => ({
+  company: one(companies, { fields: [files.companyId], references: [companies.id] }),
+  uploader: one(users, { fields: [files.uploadedBy], references: [users.id] }),
+  previousVersion: one(files, { fields: [files.previousVersionId], references: [files.id] }),
 }));

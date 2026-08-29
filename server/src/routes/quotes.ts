@@ -8,6 +8,10 @@ import { nextQuoteNumber } from "../lib/numbering.js";
 import { buildDocumentHtml, type DocumentLanguage } from "../lib/documentHtml.js";
 import { renderHtmlToPdf } from "../lib/pdf.js";
 import { logoFileToDataUri } from "../lib/uploads.js";
+import { computeTotals } from "../lib/money.js";
+import { requirePermission } from "../lib/permissions.js";
+import { logger } from "../lib/logger.js";
+import { calculateTax } from "../lib/compliance/engine.js";
 
 export const quotesRouter = Router();
 export const publicQuotesRouter = Router();
@@ -21,8 +25,13 @@ quotesRouter.get("/", async (req, res) => {
   const withTotals = await Promise.all(
     rows.map(async (quote) => {
       const items = await db.query.quoteItems.findMany({ where: eq(quoteItems.quoteId, quote.id) });
-      const subtotal = items.reduce((sum, item) => sum + Number(item.amount), 0);
-      return { ...quote, subtotal };
+      // Quotes are opt-in to tax (see createSchema above): a quote's own
+      // frozen taxRatePercent is used when present, exactly as invoices.ts
+      // already does — never a hardcoded 0 that silently discards a tax
+      // category the write path correctly computed and stored.
+      const taxRatePercent = quote.taxRatePercent !== null ? Number(quote.taxRatePercent) : 0;
+      const totals = computeTotals(items.map((item) => Number(item.amount)), taxRatePercent);
+      return { ...quote, ...totals };
     }),
   );
   res.json(withTotals);
@@ -35,6 +44,12 @@ const createSchema = z.object({
   clientEmail: z.string().email().optional().or(z.literal("")),
   projectName: z.string().min(2, "اسم المشروع قصير جداً"),
   language: languageEnum.default("ar"),
+  // Opt-in only: a quote that doesn't ask for a tax category stays exactly
+  // what it always was — a plain line-item sum, no tax fields. This is
+  // deliberate: quotes never had a tax concept before the compliance
+  // engine existed, and nothing should silently start taxing an existing
+  // integration's quotes that never asked for it.
+  taxCategory: z.string().optional(),
   items: z
     .array(z.object({ description: z.string().min(1), amount: z.coerce.number().nonnegative() }))
     .min(1, "أضف بنداً واحداً على الأقل"),
@@ -43,6 +58,29 @@ const createSchema = z.object({
 quotesRouter.post("/", async (req, res) => {
   const parsed = createSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
+
+  let taxRatePercent: number | undefined;
+  let taxCategory: string | undefined;
+  let ruleVersionId: string | undefined;
+  let overrideReference: string | undefined;
+
+  if (parsed.data.taxCategory) {
+    const taxResult = await calculateTax({
+      companyId: req.companyId!,
+      transactionDate: new Date().toISOString().slice(0, 10),
+      taxCategory: parsed.data.taxCategory,
+      itemAmounts: parsed.data.items.map((item) => item.amount),
+    });
+    if (taxResult.status === "calculated") {
+      taxRatePercent = taxResult.taxRatePercent!;
+      taxCategory = taxResult.taxCategory;
+      ruleVersionId = taxResult.ruleVersionId!;
+      overrideReference = taxResult.overrideReference ?? undefined;
+    }
+    // status === "review_required": quote is created without a tax
+    // snapshot rather than blocking quote creation on a compliance gap —
+    // the compliance status endpoint is where that gap gets surfaced.
+  }
 
   const [quote] = await db
     .insert(quotes)
@@ -53,6 +91,10 @@ quotesRouter.post("/", async (req, res) => {
       clientEmail: parsed.data.clientEmail || undefined,
       projectName: parsed.data.projectName,
       language: parsed.data.language,
+      taxRatePercent: taxRatePercent !== undefined ? String(taxRatePercent) : undefined,
+      taxCategory,
+      ruleVersionId,
+      overrideReference,
       publicToken: generateToken(),
     })
     .returning();
@@ -82,12 +124,13 @@ quotesRouter.get("/:id", async (req: Request<{ id: string }>, res: Response) => 
   res.json({ ...quote, items });
 });
 
-quotesRouter.patch("/:id/send", async (req: Request<{ id: string }>, res: Response) => {
+quotesRouter.patch("/:id/send", requirePermission("quote.send"), async (req: Request<{ id: string }>, res: Response) => {
   const quote = await findOwnedQuote(req.companyId!, req.params.id);
   if (!quote) return res.status(404).json({ error: "عرض السعر غير موجود" });
   if (quote.status !== "draft") return res.status(409).json({ error: "تم إرسال عرض السعر مسبقاً" });
 
   const [updated] = await db.update(quotes).set({ status: "sent" }).where(eq(quotes.id, quote.id)).returning();
+  logger.info("financial_mutation", { action: "quote.send", userId: req.userId, companyId: req.companyId, quoteId: quote.id });
   res.json(updated);
 });
 
@@ -123,7 +166,13 @@ async function buildQuotePdf(quoteId: string, companyId: string) {
     },
     client: { name: quote.clientName, address: null, taxId: null },
     items: items.map((i) => ({ description: i.description, amount: Number(i.amount) })),
-    taxRatePercent: Number(company!.defaultTaxRatePercent),
+    // The quote's own frozen taxRatePercent, exactly as its create-time
+    // snapshot recorded it — never the company's CURRENT default. Using the
+    // company default here was the original bug (TC-01): a company that
+    // changes its default tax rate later would retroactively change the
+    // displayed tax on every past quote's PDF, and an untaxed quote (never
+    // opted into a taxCategory) would incorrectly show tax at all.
+    taxRatePercent: quote.taxRatePercent !== null ? Number(quote.taxRatePercent) : 0,
   });
 
   return renderHtmlToPdf(html);
@@ -152,13 +201,16 @@ publicQuotesRouter.get("/:token", async (req: Request<{ token: string }>, res: R
   const items = await db.query.quoteItems.findMany({ where: eq(quoteItems.quoteId, quote.id) });
   const company = await db.query.companies.findFirst({ where: eq(companies.id, quote.companyId) });
 
+  const taxRatePercent = quote.taxRatePercent !== null ? Number(quote.taxRatePercent) : 0;
+  const { total } = computeTotals(items.map((item) => Number(item.amount)), taxRatePercent);
   res.json({
     projectName: quote.projectName,
     clientName: quote.clientName,
     status: quote.status,
     companyName: company?.name ?? "",
     items,
-    total: items.reduce((sum, item) => sum + Number(item.amount), 0),
+    taxRatePercent,
+    total,
   });
 });
 
