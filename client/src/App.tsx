@@ -15,6 +15,9 @@ import { Team } from "./pages/Team";
 import { Settings } from "./pages/Settings";
 import { ProjectWorkspace } from "./project/ProjectWorkspace";
 import { OverviewSection } from "./project/sections/OverviewSection";
+import { ContractSection } from "./project/sections/ContractSection";
+import { BoqSection } from "./project/sections/BoqSection";
+import { CostPlanSection } from "./project/sections/CostPlanSection";
 import { OperationsSection } from "./project/sections/OperationsSection";
 import { LegacyBudgetSection } from "./project/sections/LegacyBudgetSection";
 import { PlaceholderSection } from "./project/sections/PlaceholderSection";
@@ -55,9 +58,9 @@ export default function App() {
       >
         <Route index element={<Navigate to="overview" replace />} />
         <Route path="overview" element={<OverviewSection />} />
-        <Route path="contract" element={<PlaceholderSection title="العقد" description="بيانات العقد الأصلية والمعدَّلة، الشروط، والتعديلات." />} />
-        <Route path="boq" element={<PlaceholderSection title="جدول الكميات" description="نسخ جدول الكميات وبنودها المنشورة." />} />
-        <Route path="cost-plan" element={<PlaceholderSection title="خطة التكلفة" description="خطة التكلفة المرتبطة ببنود التكلفة وجدول الكميات." />} />
+        <Route path="contract" element={<ContractSection />} />
+        <Route path="boq" element={<BoqSection />} />
+        <Route path="cost-plan" element={<CostPlanSection />} />
         <Route path="procurement" element={<PlaceholderSection title="المشتريات والالتزامات" description="أوامر الشراء وعقود الباطن والموردون." />} />
         <Route path="actual-cost" element={<PlaceholderSection title="التكلفة الفعلية" description="المصروفات الفعلية المرتبطة بالمشروع." />} />
         <Route path="progress" element={<PlaceholderSection title="القياسات" description="قياسات التقدّم الفعلي مقابل جدول الكميات." />} />

@@ -34,6 +34,121 @@ export interface BudgetItem {
   plannedAmount: string;
   spent: number;
   createdAt: string;
+  // Already returned by GET /projects/:id/budget (a plain findMany with no
+  // column restriction) — previously untyped/unused client-side. See
+  // docs/MIDAD_FINANCIAL_MODEL.md: these are the Phase 1 links that make a
+  // budget item a real Cost Plan line rather than a free-text category.
+  costCodeId: string | null;
+  boqItemId: string | null;
+  budgetRevisionId: string | null;
+}
+
+// --- MIDAD UI-01: Contract, BOQ, Cost Code, Budget Revision ---
+// Every field below mirrors server/src/db/schema.ts and the corresponding
+// route's actual response shape exactly (verified fresh during the UI-01
+// discovery pass) — no speculative field is included.
+
+export type ContractType = "main" | "amendment";
+export type ContractStatus = "draft" | "active" | "completed" | "terminated";
+
+export interface Contract {
+  id: string;
+  companyId: string;
+  projectId: string;
+  contractType: ContractType;
+  parentContractId: string | null;
+  contractNumber: string | null;
+  clientName: string | null;
+  originalValue: string;
+  revisedValue: string;
+  currency: string;
+  advancePercent: string | null;
+  retentionPercent: string | null;
+  paymentTerms: string | null;
+  status: ContractStatus;
+  startDate: string | null;
+  endDate: string | null;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type BoqRevisionStatus = "draft" | "published" | "superseded";
+export type BoqItemType = "section" | "item";
+
+export interface BoqRevision {
+  id: string;
+  companyId: string;
+  projectId: string;
+  contractId: string;
+  revisionNumber: number;
+  status: BoqRevisionStatus;
+  supersedesRevisionId: string | null;
+  notes: string | null;
+  createdBy: string;
+  createdAt: string;
+  publishedAt: string | null;
+}
+
+export interface BoqItem {
+  id: string;
+  boqRevisionId: string;
+  parentItemId: string | null;
+  itemType: BoqItemType;
+  code: string | null;
+  description: string;
+  unit: string | null;
+  quantity: string | null;
+  rate: string | null;
+  // Frozen server-side at write time (quantity * rate) — never recompute
+  // this in the frontend; always display exactly what the API returns.
+  amount: string | null;
+  costCodeId: string | null;
+  sortOrder: number;
+  createdAt: string;
+}
+
+export interface BoqRevisionWithItems extends BoqRevision {
+  items: BoqItem[];
+}
+
+export type CostCodeCategory =
+  | "labor"
+  | "materials"
+  | "equipment"
+  | "subcontract"
+  | "site_overhead"
+  | "general_overhead"
+  | "other";
+
+export interface CostCode {
+  id: string;
+  companyId: string;
+  projectId: string | null;
+  code: string;
+  name: string;
+  category: CostCodeCategory | null;
+  parentCostCodeId: string | null;
+  createdAt: string;
+}
+
+export type BudgetRevisionStatus = "draft" | "approved" | "superseded";
+
+export interface BudgetRevision {
+  id: string;
+  companyId: string;
+  projectId: string;
+  revisionNumber: number;
+  status: BudgetRevisionStatus;
+  reason: string | null;
+  createdBy: string;
+  createdAt: string;
+  approvedBy: string | null;
+  approvedAt: string | null;
+}
+
+export interface BudgetRevisionWithItems extends BudgetRevision {
+  items: BudgetItem[];
 }
 
 export interface Expense {
