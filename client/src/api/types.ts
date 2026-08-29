@@ -174,6 +174,64 @@ export interface Supplier {
   updatedAt: string;
 }
 
+// --- MIDAD UI-03A: Commitment (Purchase Order / Subcontract) ---
+// Mirrors server/src/db/schema.ts's `commitments`/`commitment_lines` tables
+// and server/src/routes/commitments.ts's response shapes exactly (verified
+// fresh during the UI-03A implementation pass). originalAmount/revisedAmount
+// are backend-derived (frozen from SUM(lines) at submit/amend time) —
+// never independently editable or recomputed client-side.
+export type CommitmentType = "purchase_order" | "subcontract";
+export type CommitmentStatus =
+  | "draft"
+  | "pending_approval"
+  | "active"
+  | "partially_fulfilled"
+  | "closed"
+  | "cancelled";
+
+export interface Commitment {
+  id: string;
+  companyId: string;
+  projectId: string;
+  contractId: string | null;
+  supplierId: string;
+  type: CommitmentType;
+  status: CommitmentStatus;
+  commitmentNumber: number;
+  description: string | null;
+  originalAmount: string | null;
+  revisedAmount: string | null;
+  currency: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  submittedAt: string | null;
+  approvedBy: string | null;
+  approvedAt: string | null;
+  cancelledAt: string | null;
+}
+
+export interface CommitmentLine {
+  id: string;
+  companyId: string;
+  commitmentId: string;
+  costCodeId: string | null;
+  boqItemId: string | null;
+  description: string;
+  quantity: string | null;
+  rate: string | null;
+  // Frozen server-side at write time (quantity * rate, or an explicit
+  // amount) — never recompute this in the frontend; always display exactly
+  // what the API returns. Same discipline as boqItems.amount.
+  amount: string;
+  sortOrder: number;
+  createdAt: string;
+}
+
+export interface CommitmentWithLines extends Commitment {
+  lines: CommitmentLine[];
+}
+
 export interface Expense {
   id: string;
   projectId: string;
