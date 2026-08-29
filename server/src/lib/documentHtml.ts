@@ -1,3 +1,5 @@
+import { computeTotals } from "./money.js";
+
 export type DocumentLanguage = "ar" | "fr" | "en";
 export type DocumentKind = "quote" | "invoice";
 
@@ -96,9 +98,10 @@ export function buildDocumentHtml(data: DocumentData): string {
   const t = LABELS[data.language];
   const money = (n: number) => n.toLocaleString(t.locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-  const subtotal = data.items.reduce((sum, item) => sum + item.amount, 0);
-  const taxAmount = subtotal * (data.taxRatePercent / 100);
-  const total = subtotal + taxAmount;
+  const { subtotal, taxAmount, total } = computeTotals(
+    data.items.map((item) => item.amount),
+    data.taxRatePercent,
+  );
 
   const itemRows = data.items
     .map(

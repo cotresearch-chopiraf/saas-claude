@@ -117,25 +117,38 @@ const resetSchema = z.object({
   newPassword: z.string().min(8, "كلمة المرور يجب أن تكون 8 أحرف على الأقل"),
 });
 
+// Consuming the token is a single conditional UPDATE (WHERE usedAt IS NULL),
+// not an earlier SELECT followed by a separate UPDATE — that is what makes
+// this atomic against two concurrent reset-password calls racing on the
+// same token: only one of them can ever find the row still unused at the
+// moment its own UPDATE executes, regardless of how close together the two
+// requests arrive.
 authRouter.post("/reset-password", async (req, res) => {
   const parsed = resetSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
 
   const tokenHash = hashToken(parsed.data.token);
-  const record = await db.query.passwordResetTokens.findFirst({
-    where: and(
-      eq(passwordResetTokens.tokenHash, tokenHash),
-      isNull(passwordResetTokens.usedAt),
-      gt(passwordResetTokens.expiresAt, new Date()),
-    ),
-  });
-  if (!record) return res.status(400).json({ error: "رابط إعادة التعيين غير صالح أو منتهي الصلاحية" });
+  const newPasswordHash = await hashPassword(parsed.data.newPassword);
 
-  await db
-    .update(users)
-    .set({ passwordHash: await hashPassword(parsed.data.newPassword) })
-    .where(eq(users.id, record.userId));
-  await db.update(passwordResetTokens).set({ usedAt: new Date() }).where(eq(passwordResetTokens.id, record.id));
+  const consumed = await db.transaction(async (tx) => {
+    const [record] = await tx
+      .update(passwordResetTokens)
+      .set({ usedAt: new Date() })
+      .where(
+        and(
+          eq(passwordResetTokens.tokenHash, tokenHash),
+          isNull(passwordResetTokens.usedAt),
+          gt(passwordResetTokens.expiresAt, new Date()),
+        ),
+      )
+      .returning();
+    if (!record) return null;
+
+    await tx.update(users).set({ passwordHash: newPasswordHash }).where(eq(users.id, record.userId));
+    return record;
+  });
+
+  if (!consumed) return res.status(400).json({ error: "رابط إعادة التعيين غير صالح أو منتهي الصلاحية" });
 
   res.json({ message: "تم تحديث كلمة المرور بنجاح" });
 });

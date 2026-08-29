@@ -1,8 +1,10 @@
 import { Router, type Request, type Response, type NextFunction } from "express";
 import { z } from "zod";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { changeOrders, projects } from "../db/schema.js";
+import { requirePermission } from "../lib/permissions.js";
+import { logger } from "../lib/logger.js";
 
 type ProjectParams = { projectId: string };
 type ChangeOrderParams = ProjectParams & { changeOrderId: string };
@@ -51,40 +53,61 @@ const decisionSchema = z.object({
   status: z.enum(["approved", "rejected"]),
 });
 
-// Approving shifts the project's budget by amountDelta exactly once — a
-// change order can only move out of "pending", so double-approval can't
-// double-apply the delta.
-changeOrdersRouter.patch("/:changeOrderId", async (req: Request<ChangeOrderParams>, res: Response) => {
-  const parsed = decisionSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
+// Approving/rejecting a change order is an owner-only action: it moves real
+// budget money and must not be reachable by every company member.
+//
+// The decision + budget update run inside one transaction, and the decision
+// UPDATE itself is conditioned on `status = 'pending'` (not just checked by
+// an earlier SELECT) — so two concurrent decisions on the same change order
+// can never both succeed, and an approved change order's delta is applied
+// via a single atomic SQL increment (`budget_total = budget_total + delta`,
+// no read-modify-write in JS) — so two different change orders on the same
+// project, approved concurrently, can never lose one delta to the other's
+// overwrite.
+changeOrdersRouter.patch(
+  "/:changeOrderId",
+  requirePermission("changeOrder.approve"),
+  async (req: Request<ChangeOrderParams>, res: Response) => {
+    const parsed = decisionSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
 
-  const existing = await db.query.changeOrders.findFirst({
-    where: and(
-      eq(changeOrders.id, req.params.changeOrderId),
-      eq(changeOrders.projectId, req.params.projectId),
-    ),
-  });
-  if (!existing) return res.status(404).json({ error: "أمر التغيير غير موجود" });
-  if (existing.status !== "pending") {
-    return res.status(409).json({ error: "تم البتّ في أمر التغيير هذا مسبقاً" });
-  }
-
-  const [updated] = await db
-    .update(changeOrders)
-    .set({ status: parsed.data.status })
-    .where(eq(changeOrders.id, req.params.changeOrderId))
-    .returning();
-
-  if (parsed.data.status === "approved") {
-    const project = await db.query.projects.findFirst({
-      where: eq(projects.id, req.params.projectId),
+    const existing = await db.query.changeOrders.findFirst({
+      where: and(
+        eq(changeOrders.id, req.params.changeOrderId),
+        eq(changeOrders.projectId, req.params.projectId),
+      ),
     });
-    const newTotal = Number(project!.budgetTotal) + Number(existing.amountDelta);
-    await db.update(projects).set({ budgetTotal: String(newTotal) }).where(eq(projects.id, req.params.projectId));
-  }
+    if (!existing) return res.status(404).json({ error: "أمر التغيير غير موجود" });
 
-  res.json(updated);
-});
+    const updated = await db.transaction(async (tx) => {
+      const [decided] = await tx
+        .update(changeOrders)
+        .set({ status: parsed.data.status })
+        .where(and(eq(changeOrders.id, req.params.changeOrderId), eq(changeOrders.status, "pending")))
+        .returning();
+      if (!decided) return null; // another request already decided this one
+
+      if (parsed.data.status === "approved") {
+        await tx
+          .update(projects)
+          .set({ budgetTotal: sql`${projects.budgetTotal} + ${existing.amountDelta}` })
+          .where(eq(projects.id, req.params.projectId));
+      }
+      return decided;
+    });
+
+    if (!updated) return res.status(409).json({ error: "تم البتّ في أمر التغيير هذا مسبقاً" });
+
+    logger.info("financial_mutation", {
+      action: "changeOrder.decide",
+      userId: req.userId,
+      companyId: req.companyId,
+      changeOrderId: req.params.changeOrderId,
+      status: parsed.data.status,
+    });
+    res.json(updated);
+  },
+);
 
 changeOrdersRouter.delete("/:changeOrderId", async (req: Request<ChangeOrderParams>, res: Response) => {
   const existing = await db.query.changeOrders.findFirst({

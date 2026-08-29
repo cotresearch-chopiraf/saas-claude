@@ -3,6 +3,8 @@ import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { projects } from "../db/schema.js";
+import { requirePermission } from "../lib/permissions.js";
+import { logger } from "../lib/logger.js";
 
 export const projectsRouter = Router();
 
@@ -82,10 +84,11 @@ projectsRouter.patch("/:id", async (req, res) => {
   res.json(updated);
 });
 
-projectsRouter.delete("/:id", async (req, res) => {
+projectsRouter.delete("/:id", requirePermission("project.delete"), async (req, res) => {
   const existing = await findOwnedProject(req.companyId!, req.params.id);
   if (!existing) return res.status(404).json({ error: "المشروع غير موجود" });
 
   await db.delete(projects).where(eq(projects.id, req.params.id));
+  logger.warn("destructive_mutation", { action: "project.delete", userId: req.userId, companyId: req.companyId, projectId: req.params.id });
   res.status(204).end();
 });
