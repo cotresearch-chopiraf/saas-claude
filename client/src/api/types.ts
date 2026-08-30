@@ -722,3 +722,130 @@ export interface SubcontractIpcDocument {
   version: number;
   previousVersionId: string | null;
 }
+
+// MIDAD Phase 4 — Compliance / Tax Center. Mirrors
+// server/src/lib/compliance/types.ts and server/src/routes/compliance.ts
+// exactly, read fresh from the live backend (not inferred) — the frontend
+// never invents a field the backend doesn't actually return. This domain
+// is company-scoped (no projectId anywhere), matching Settings/Team/
+// Suppliers, not the project-scoped domains above.
+export type CountryCode = "SA" | "AE" | "QA" | "KW" | "BH" | "OM" | "MA";
+
+export interface ComplianceCountry {
+  countryCode: CountryCode;
+  // Partial: a country pack is not required to supply every language.
+  displayName: Partial<Record<DocumentLanguage, string>>;
+}
+
+export type ComplianceProfileStatus = "configured" | "partially_configured" | "review_required";
+
+export interface ComplianceProfile {
+  id: string;
+  companyId: string;
+  countryCode: CountryCode;
+  legalEntityType: string | null;
+  businessActivity: string | null;
+  taxRegistrationStatus: string | null;
+  activeRuleVersionId: string;
+  status: ComplianceProfileStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ComplianceTaxCategoryDefinition {
+  code: string;
+  label: Partial<Record<DocumentLanguage, string>>;
+  ratePercent: number | null;
+}
+
+export interface ComplianceWithholdingRule {
+  vendorType: string;
+  serviceCategory: string | null;
+  ratePercent: number;
+}
+
+export interface ComplianceRequiredIdentifier {
+  type: string;
+  label: Partial<Record<DocumentLanguage, string>>;
+  required: boolean;
+}
+
+// The full ComplianceRules payload (server/src/lib/compliance/types.ts) —
+// displayed as-is, never recomputed. No tax percentage on this page is
+// ever calculated from anything other than a value already present here
+// or on a ComplianceOverride below.
+export interface ComplianceRules {
+  vat: { applicable: boolean; standardRatePercent: number; categories: ComplianceTaxCategoryDefinition[] };
+  withholding: { applicable: boolean; rules: ComplianceWithholdingRule[] };
+  zakat: { applicable: boolean; reviewRequired: boolean; notes?: string };
+  eInvoicing: { required: boolean; profile: string | null; notes?: string };
+  invoice: { requiredFields: string[]; bilingualRequired: boolean };
+  localization: { currency: string; language: DocumentLanguage; direction: "rtl" | "ltr"; dateFormat: string };
+  identifiers: ComplianceRequiredIdentifier[];
+}
+
+export type ComplianceRulesResponse =
+  | { status: "review_required"; reason: string }
+  | { status: "resolved"; countryCode: CountryCode; ruleVersion: string; ruleVersionId: string; rules: ComplianceRules };
+
+export type ComplianceZakatStatus =
+  | { status: "resolved"; applicable: boolean; reviewRequired: boolean; notes?: string }
+  | { status: "review_required"; reason: string };
+
+export type ComplianceStatus =
+  | { status: "not_configured" }
+  | {
+      status: ComplianceProfileStatus;
+      countryCode: CountryCode;
+      ruleVersion: string | null;
+      zakat: ComplianceZakatStatus;
+      overrideCount: number;
+      lastUpdate: string;
+    };
+
+export type ComplianceOverrideStatus = "active" | "reset";
+
+// overrideValue/officialDefaultSnapshot are JSONB on the backend (a
+// setting's value may be a number or a boolean today) — kept as `unknown`
+// here rather than assumed to always be a percentage, since a future
+// overridable setting key is not something this page predicts.
+export interface ComplianceOverride {
+  id: string;
+  companyId: string;
+  settingKey: string;
+  overrideValue: unknown;
+  officialDefaultSnapshot: unknown;
+  ruleVersionId: string;
+  status: ComplianceOverrideStatus;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  reason: string | null;
+  createdBy: string;
+  createdAt: string;
+  resetAt: string | null;
+  resetBy: string | null;
+}
+
+// The exact two-step contract server/src/routes/compliance.ts's POST
+// /overrides implements — the frontend must branch on `status` and never
+// flatten this into a single-step save.
+export type CreateOverrideResult =
+  | { status: "confirmation_required"; warning: string; officialDefault: unknown }
+  | { status: "created"; override: ComplianceOverride };
+
+// The canonical audit_events shape (server/src/db/schema.ts), as returned
+// by GET /compliance/history — never a compliance-specific shape.
+export interface ComplianceAuditEvent {
+  id: string;
+  companyId: string;
+  actorUserId: string | null;
+  action: string;
+  entityType: string;
+  entityId: string;
+  beforeValue: unknown;
+  afterValue: unknown;
+  reason: string | null;
+  source: string;
+  metadata: Record<string, unknown> | null;
+  createdAt: string;
+}

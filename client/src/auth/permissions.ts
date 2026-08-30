@@ -27,6 +27,13 @@ export const OWNER_ONLY_ACTIONS = [
   "invoice.send",
   "invoice.markPaid",
   "subcontractIpc.manage",
+  // MIDAD Phase 4 — mirrors an action that already existed server-side
+  // since Phase 1 (server/src/lib/permissions.ts's "compliance.manage")
+  // but was never mirrored here because no client screen consumed it
+  // until now. Not a new permission — see this file's own header comment:
+  // every entry here is a UI-only mirror of an already-authoritative
+  // server-side name.
+  "compliance.manage",
 ] as const;
 
 export type PermissionAction = (typeof OWNER_ONLY_ACTIONS)[number];
