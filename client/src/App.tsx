@@ -16,6 +16,7 @@ import { CustomerDetail } from "./pages/CustomerDetail";
 import { Team } from "./pages/Team";
 import { Settings } from "./pages/Settings";
 import { Compliance } from "./pages/Compliance";
+import { Activity } from "./pages/Activity";
 import { ProjectWorkspace } from "./project/ProjectWorkspace";
 import { OverviewSection } from "./project/sections/OverviewSection";
 import { ContractSection } from "./project/sections/ContractSection";
@@ -149,6 +150,14 @@ export default function App() {
         element={
           <ProtectedRoute>
             <Compliance />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/activity"
+        element={
+          <ProtectedRoute>
+            <Activity />
           </ProtectedRoute>
         }
       />

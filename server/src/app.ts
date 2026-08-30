@@ -31,6 +31,7 @@ import { subcontractIpcDocumentsRouter } from "./routes/subcontractIpcDocuments.
 import { forecastRouter } from "./routes/forecast.js";
 import { cashflowRouter } from "./routes/cashflow.js";
 import { documentsRouter } from "./routes/documents.js";
+import { auditEventsRouter } from "./routes/auditEvents.js";
 import { requireAuth } from "./middleware/auth.js";
 import { uploadsDir } from "./lib/uploads.js";
 import { logger } from "./lib/logger.js";
@@ -83,6 +84,7 @@ export function buildApp() {
   app.use("/api/invoices", requireAuth, invoicesRouter);
   app.use("/api/public/invoices", publicInvoicesRouter);
   app.use("/api/compliance", requireAuth, complianceRouter);
+  app.use("/api/audit-events", requireAuth, auditEventsRouter);
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   app.use((err: Error, req: express.Request, res: express.Response, _next: express.NextFunction) => {

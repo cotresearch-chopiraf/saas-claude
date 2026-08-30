@@ -869,6 +869,35 @@ export type CreateOverrideResult =
   | { status: "confirmation_required"; warning: string; officialDefault: unknown }
   | { status: "created"; override: ComplianceOverride };
 
+// MIDAD Phase C — the shape returned by GET /api/audit-events (the general
+// company-wide Activity Timeline). Deliberately a different shape than
+// ComplianceAuditEvent below: this one adds the resolved actor name/email
+// (never fabricated — null when the underlying event has no actor) and is
+// always paginated. Same canonical audit_events table, a different read
+// surface over it.
+export interface ActivityEvent {
+  id: string;
+  action: string;
+  entityType: string;
+  entityId: string;
+  actorUserId: string | null;
+  actorName: string | null;
+  actorEmail: string | null;
+  reason: string | null;
+  source: string;
+  beforeValue: unknown;
+  afterValue: unknown;
+  metadata: Record<string, unknown> | null;
+  createdAt: string;
+}
+
+export interface ActivityPage {
+  events: ActivityEvent[];
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+}
+
 // The canonical audit_events shape (server/src/db/schema.ts), as returned
 // by GET /compliance/history — never a compliance-specific shape.
 export interface ComplianceAuditEvent {
