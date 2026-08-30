@@ -412,6 +412,82 @@ export interface CashFlowResult {
   };
 }
 
+// --- MIDAD UI-07: IPC (Interim Payment Certificate) ---
+// Mirrors server/src/db/schema.ts's `ipcs`/`ipc_lines` tables and
+// server/src/routes/ipcs.ts's actual response shapes exactly (verified
+// fresh during the UI-07 discovery/implementation pass). A certified
+// financial document: grossValue/retentionAmount/advanceRecoveryAmount/
+// otherDeductions/netCertified are all null until certify() freezes them
+// server-side — never computed or recomputed client-side. Likewise a
+// line's previousCertifiedQuantity/previousCertifiedValue/
+// cumulativeQuantity are null until that same certify() call freezes the
+// certification-time ledger snapshot.
+export type IpcStatus = "draft" | "submitted" | "approved" | "certified" | "rejected";
+
+export interface Ipc {
+  id: string;
+  companyId: string;
+  projectId: string;
+  contractId: string;
+  boqRevisionId: string;
+  ipcNumber: number;
+  status: IpcStatus;
+  periodStart: string;
+  periodEnd: string;
+  notes: string | null;
+  grossValue: string | null;
+  retentionAmount: string | null;
+  advanceRecoveryAmount: string | null;
+  otherDeductions: string | null;
+  netCertified: string | null;
+  currency: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  submittedBy: string | null;
+  submittedAt: string | null;
+  approvedBy: string | null;
+  approvedAt: string | null;
+  certifiedBy: string | null;
+  certifiedAt: string | null;
+  rejectedBy: string | null;
+  rejectedAt: string | null;
+  rejectionReason: string | null;
+}
+
+export interface IpcLine {
+  id: string;
+  companyId: string;
+  ipcId: string;
+  boqItemId: string;
+  description: string | null;
+  currentQuantity: string;
+  rate: string;
+  currentValue: string;
+  previousCertifiedQuantity: string | null;
+  previousCertifiedValue: string | null;
+  cumulativeQuantity: string | null;
+  sortOrder: number;
+  createdAt: string;
+}
+
+export interface IpcWithLines extends Ipc {
+  lines: IpcLine[];
+}
+
+// POST /ipcs's own response is deliberately narrower than `Ipc` — it's
+// built from a raw SQL INSERT...RETURNING (for the same-transaction
+// contract-row-locked MAX+1 numbering), not Drizzle's ORM layer, so it
+// returns exactly these four snake_case columns rather than the full
+// camelCase row every other IPC route returns. The section only ever
+// needs `id` from this to select the new IPC and reload its full detail.
+export interface IpcCreateResult {
+  id: string;
+  ipc_number: number;
+  status: IpcStatus;
+  created_at: string;
+}
+
 export type TaskStatus = "todo" | "in_progress" | "done";
 
 export interface Task {
