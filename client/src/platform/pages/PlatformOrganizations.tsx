@@ -11,29 +11,33 @@ import type { Organization } from "../api/types";
 const PAGE_SIZE = 20;
 
 export function PlatformOrganizations() {
+  const [search, setSearch] = useState("");
   const [organizations, setOrganizations] = useState<Organization[] | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [requestingFor, setRequestingFor] = useState<Organization | null>(null);
 
-  function load() {
+  function load(currentSearch: string) {
     setOrganizations(null);
     setError(null);
-    listOrganizations(PAGE_SIZE, 0)
+    listOrganizations(PAGE_SIZE, 0, currentSearch)
       .then((page) => {
         setOrganizations(page.organizations);
         setHasMore(page.hasMore);
       })
       .catch((err) => setError(err instanceof ApiError ? err.message : "تعذّر تحميل قائمة الشركات"));
   }
-  useEffect(load, []);
+  // search is the effect's own dependency — every change (including
+  // clearing it back to "") re-fetches through the same real API call,
+  // never a client-side filter over stale data.
+  useEffect(() => load(search), [search]);
 
   async function loadMore() {
     if (!organizations) return;
     setLoadingMore(true);
     try {
-      const page = await listOrganizations(PAGE_SIZE, organizations.length);
+      const page = await listOrganizations(PAGE_SIZE, organizations.length, search);
       setOrganizations([...organizations, ...page.organizations]);
       setHasMore(page.hasMore);
     } catch (err) {
@@ -50,15 +54,27 @@ export function PlatformOrganizations() {
 
   return (
     <PlatformLayout>
-      <PageHeader title="الشركات" subtitle="قائمة الشركات المسجّلة على المنصة (للقراءة فقط)." />
+      <PageHeader
+        title="الشركات"
+        subtitle="قائمة الشركات المسجّلة على المنصة (للقراءة فقط)."
+        actions={
+          <input
+            type="search"
+            placeholder="البحث باسم الشركة"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="rounded-md border border-stone-300 px-3 py-2 text-sm"
+          />
+        }
+      />
 
       <FinancialTable
         columns={columns}
         rows={organizations}
         rowKey={(o) => o.id}
         error={error}
-        onRetry={load}
-        emptyMessage="لا توجد شركات بعد"
+        onRetry={() => load(search)}
+        emptyMessage={search ? "لا توجد شركات مطابقة للبحث" : "لا توجد شركات بعد"}
         rowActions={(o) => (
           <Button size="sm" variant="secondary" onClick={() => setRequestingFor(o)}>
             طلب وصول دعم
