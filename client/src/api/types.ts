@@ -613,3 +613,18 @@ export interface Invoice {
   taxAmount: number;
   total: number;
 }
+
+// MIDAD UI-10 — mirrors server/src/routes/documents.ts's toDocumentResponse
+// exactly. No status/category/approval/version-workflow fields exist on
+// this response — the backend doesn't support them, so none are declared
+// here either.
+export interface ProjectDocument {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  size: number;
+  uploadedAt: string;
+  uploadedByName: string | null;
+  version: number;
+  previousVersionId: string | null;
+}

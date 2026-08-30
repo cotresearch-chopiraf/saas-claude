@@ -56,6 +56,17 @@ export function formatNumber(value: number | string, fractionDigits = 0): string
   return n.toLocaleString("ar", { maximumFractionDigits: fractionDigits });
 }
 
+// Bytes → a human-readable size (KB/MB), for Documents (UI-10) — never a
+// financial value, purely a display detail over the backend's own `size`.
+export function formatFileSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return "—";
+  if (bytes < 1024) return `${bytes} بايت`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${kb.toLocaleString("ar", { maximumFractionDigits: 1 })} ك.ب`;
+  const mb = kb / 1024;
+  return `${mb.toLocaleString("ar", { maximumFractionDigits: 2 })} م.ب`;
+}
+
 export function formatDate(date: string | null | undefined): string {
   if (!date) return "—";
   const d = new Date(date);

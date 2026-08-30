@@ -25,9 +25,9 @@ import { ForecastSection } from "./project/sections/ForecastSection";
 import { CashFlowSection } from "./project/sections/CashFlowSection";
 import { IpcSection } from "./project/sections/IpcSection";
 import { InvoicesSection } from "./project/sections/InvoicesSection";
+import { DocumentsSection } from "./project/sections/DocumentsSection";
 import { OperationsSection } from "./project/sections/OperationsSection";
 import { LegacyBudgetSection } from "./project/sections/LegacyBudgetSection";
-import { PlaceholderSection } from "./project/sections/PlaceholderSection";
 import { legacySection } from "./project/sections";
 
 function ProtectedRoute({ children }: { children: JSX.Element }) {
@@ -76,7 +76,7 @@ export default function App() {
         <Route path="cash-flow" element={<CashFlowSection />} />
         <Route path="invoices" element={<InvoicesSection />} />
         <Route path="operations" element={<OperationsSection />} />
-        <Route path="documents" element={<PlaceholderSection title="المستندات" description="مرفقات وأدلة المشروع." />} />
+        <Route path="documents" element={<DocumentsSection />} />
         <Route path={legacySection.path} element={<LegacyBudgetSection />} />
       </Route>
       <Route
