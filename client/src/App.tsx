@@ -24,6 +24,7 @@ import { ProgressSection } from "./project/sections/ProgressSection";
 import { ForecastSection } from "./project/sections/ForecastSection";
 import { CashFlowSection } from "./project/sections/CashFlowSection";
 import { IpcSection } from "./project/sections/IpcSection";
+import { InvoicesSection } from "./project/sections/InvoicesSection";
 import { OperationsSection } from "./project/sections/OperationsSection";
 import { LegacyBudgetSection } from "./project/sections/LegacyBudgetSection";
 import { PlaceholderSection } from "./project/sections/PlaceholderSection";
@@ -73,7 +74,7 @@ export default function App() {
         <Route path="ipc" element={<IpcSection />} />
         <Route path="forecast" element={<ForecastSection />} />
         <Route path="cash-flow" element={<CashFlowSection />} />
-        <Route path="invoices" element={<PlaceholderSection title="الفواتير" description="فواتير هذا المشروع تحديداً." />} />
+        <Route path="invoices" element={<InvoicesSection />} />
         <Route path="operations" element={<OperationsSection />} />
         <Route path="documents" element={<PlaceholderSection title="المستندات" description="مرفقات وأدلة المشروع." />} />
         <Route path={legacySection.path} element={<LegacyBudgetSection />} />

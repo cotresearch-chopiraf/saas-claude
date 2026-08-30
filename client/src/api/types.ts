@@ -593,6 +593,10 @@ export interface Invoice {
   id: string;
   companyId: string;
   quoteId: string | null;
+  // Additive Phase 2E fields (nullable — most historical invoices predate
+  // project/contract allocation and remain valid, unallocated invoices).
+  projectId: string | null;
+  contractId: string | null;
   invoiceNumber: string;
   clientName: string;
   clientAddress: string | null;

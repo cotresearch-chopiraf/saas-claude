@@ -25,6 +25,7 @@ import { calculateTax } from "../lib/compliance/engine.js";
 
 export const invoicesRouter = Router();
 export const publicInvoicesRouter = Router();
+export const projectInvoicesRouter = Router({ mergeParams: true });
 
 // Invoicing is an optional module — a company that switched it off in
 // settings gets a clean 403 instead of the feature quietly still working.
@@ -44,6 +45,48 @@ invoicesRouter.use(async (req, res, next) => {
 invoicesRouter.get("/", async (req, res) => {
   const rows = await db.query.invoices.findMany({
     where: eq(invoices.companyId, req.companyId!),
+    orderBy: (i, { desc }) => [desc(i.createdAt)],
+  });
+
+  const withTotals = await Promise.all(
+    rows.map(async (invoice) => {
+      const items = await db.query.invoiceItems.findMany({ where: eq(invoiceItems.invoiceId, invoice.id) });
+      const totals = computeTotals(items.map((item) => Number(item.amount)), Number(invoice.taxRatePercent));
+      return { ...invoice, ...totals };
+    }),
+  );
+  res.json(withTotals);
+});
+
+// --- MIDAD UI-09: project-scoped invoices (Phase 2E's own gap, closed) ---
+// Same tenant/ownership-scoping pattern as every other project sub-resource
+// (contracts.ts, boq.ts, measurements.ts, ipcs.ts, ...): verify the project
+// belongs to the caller's company before any route below runs. Reuses the
+// exact same "compute totals per invoice via computeTotals()" logic as the
+// company-wide GET / above — never a second, independent derivation.
+projectInvoicesRouter.use(async (req: Request<{ projectId: string }>, res: Response, next: NextFunction) => {
+  const project = await db.query.projects.findFirst({
+    where: and(eq(projects.id, req.params.projectId), eq(projects.companyId, req.companyId!)),
+  });
+  if (!project) return res.status(404).json({ error: "المشروع غير موجود" });
+  next();
+});
+
+// Same optional-module gate as invoicesRouter above — a company that
+// disabled invoicing gets the same clean 403 here, not a quiet bypass via
+// the project-scoped path.
+projectInvoicesRouter.use(async (req, res, next) => {
+  const company = await db.query.companies.findFirst({ where: eq(companies.id, req.companyId!) });
+  const flags = { ...defaultFeatureFlags, ...(company?.featureFlags as CompanyFeatureFlags) };
+  if (!flags.invoicing) {
+    return res.status(403).json({ error: "ميزة الفوترة معطّلة لهذه الشركة — يمكن تفعيلها من الإعدادات" });
+  }
+  next();
+});
+
+projectInvoicesRouter.get("/", async (req: Request<{ projectId: string }>, res: Response) => {
+  const rows = await db.query.invoices.findMany({
+    where: and(eq(invoices.companyId, req.companyId!), eq(invoices.projectId, req.params.projectId)),
     orderBy: (i, { desc }) => [desc(i.createdAt)],
   });
 

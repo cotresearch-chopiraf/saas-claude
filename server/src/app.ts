@@ -15,7 +15,7 @@ import { changeOrdersRouter } from "./routes/changeOrders.js";
 import { dailyLogsRouter } from "./routes/dailyLogs.js";
 import { companyRouter } from "./routes/company.js";
 import { quotesRouter, publicQuotesRouter } from "./routes/quotes.js";
-import { invoicesRouter, publicInvoicesRouter } from "./routes/invoices.js";
+import { invoicesRouter, publicInvoicesRouter, projectInvoicesRouter } from "./routes/invoices.js";
 import { complianceRouter } from "./routes/compliance.js";
 import { contractsRouter } from "./routes/contracts.js";
 import { costCodesRouter } from "./routes/costCodes.js";
@@ -54,6 +54,7 @@ export function buildApp() {
   app.use("/api/projects/:projectId/ipcs", requireAuth, ipcsRouter);
   app.use("/api/projects/:projectId/forecast", requireAuth, forecastRouter);
   app.use("/api/projects/:projectId/cash-flow", requireAuth, cashflowRouter);
+  app.use("/api/projects/:projectId/invoices", requireAuth, projectInvoicesRouter);
   app.use("/api/cost-codes", requireAuth, costCodesRouter);
   app.use("/api/suppliers", requireAuth, suppliersRouter);
   app.use("/api/company", requireAuth, companyRouter);

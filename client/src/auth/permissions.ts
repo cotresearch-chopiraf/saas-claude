@@ -24,6 +24,8 @@ export const OWNER_ONLY_ACTIONS = [
   "measurement.approve",
   "ipc.manage",
   "forecast.manage",
+  "invoice.send",
+  "invoice.markPaid",
 ] as const;
 
 export type PermissionAction = (typeof OWNER_ONLY_ACTIONS)[number];
