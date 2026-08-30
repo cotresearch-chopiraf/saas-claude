@@ -31,6 +31,26 @@ export interface SupportSession {
   expiresAt: string;
 }
 
+export type SupportSessionStatus = "active" | "expired" | "revoked";
+
+export interface SupportSessionSummary {
+  id: string;
+  targetCompanyId: string;
+  targetCompanyName: string | null;
+  reason: string;
+  createdAt: string;
+  expiresAt: string;
+  revokedAt: string | null;
+  status: SupportSessionStatus;
+}
+
+export interface SupportSessionListPage {
+  sessions: SupportSessionSummary[];
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+}
+
 export interface SupportActivityEvent {
   id: string;
   action: string;

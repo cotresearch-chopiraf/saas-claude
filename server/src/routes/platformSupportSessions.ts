@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { companies, supportSessions } from "../db/schema.js";
 import { recordAuditEvent, listCompanyActivity } from "../lib/audit.js";
@@ -69,6 +69,68 @@ platformSupportSessionsRouter.post("/", async (req, res) => {
     reason: session.reason,
     createdAt: session.createdAt,
     expiresAt: session.expiresAt,
+  });
+});
+
+const listQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+
+function deriveStatus(session: { revokedAt: Date | null; expiresAt: Date }): "active" | "expired" | "revoked" {
+  if (session.revokedAt) return "revoked";
+  return session.expiresAt.getTime() > Date.now() ? "active" : "expired";
+}
+
+// "My active sessions" — self-scoped to the authenticated operator only.
+// Deliberately: no platformOperatorId/operatorId/companyId accepted from
+// the client at all (not even to ignore-then-fall-back-safely — the query
+// below never references req.query for scoping, only req.platformOperatorId,
+// so there is no parameter here that could widen or redirect the scope no
+// matter what a client sends). Newest-first, matching the one ordering
+// convention every other list route in this codebase already uses
+// (routes/platformOrganizations.ts, lib/audit.ts's listCompanyActivity) —
+// introducing a status-grouped ordering would be the first of its kind in
+// the codebase, and isn't needed: sessions are short-lived (30 minutes), so
+// newest-first already surfaces active ones at the top in practice.
+platformSupportSessionsRouter.get("/", async (req, res) => {
+  const parsed = listQuerySchema.safeParse(req.query);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
+  const { limit, offset } = parsed.data;
+
+  const rows = await db.query.supportSessions.findMany({
+    where: eq(supportSessions.platformOperatorId, req.platformOperatorId!),
+    orderBy: (s, { desc }) => [desc(s.createdAt), desc(s.id)],
+    limit: limit + 1,
+    offset,
+  });
+  const hasMore = rows.length > limit;
+  const page = hasMore ? rows.slice(0, limit) : rows;
+
+  // One batch lookup for company names, not N+1 — no relation is declared
+  // between supportSessions and companies in db/schema.ts (adding one is
+  // unnecessary here and was deliberately avoided rather than touching the
+  // shared schema file for a plain read-only join).
+  const companyIds = [...new Set(page.map((s) => s.targetCompanyId))];
+  const companyRows = companyIds.length
+    ? await db.query.companies.findMany({ where: inArray(companies.id, companyIds), columns: { id: true, name: true } })
+    : [];
+  const companyNameById = new Map(companyRows.map((c) => [c.id, c.name]));
+
+  res.json({
+    sessions: page.map((s) => ({
+      id: s.id,
+      targetCompanyId: s.targetCompanyId,
+      targetCompanyName: companyNameById.get(s.targetCompanyId) ?? null,
+      reason: s.reason,
+      createdAt: s.createdAt,
+      expiresAt: s.expiresAt,
+      revokedAt: s.revokedAt,
+      status: deriveStatus(s),
+    })),
+    limit,
+    offset,
+    hasMore,
   });
 });
 

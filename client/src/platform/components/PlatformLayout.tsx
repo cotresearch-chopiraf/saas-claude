@@ -17,6 +17,9 @@ export function PlatformLayout({ children }: { children: ReactNode }) {
           </Link>
           {operator && (
             <div className="flex items-center gap-4 text-sm text-stone-300">
+              <Link to="/platform/support-sessions" className="hover:text-white">
+                جلسات الدعم
+              </Link>
               <span>{operator.name}</span>
               <button onClick={logout} className="text-stone-400 hover:text-white">
                 تسجيل الخروج

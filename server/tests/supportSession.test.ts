@@ -47,6 +47,9 @@ function readActivity(token: string, sessionId: string, qs = "") {
     .get(`/api/platform/support-sessions/${sessionId}/activity${qs}`)
     .set("Authorization", `Bearer ${token}`);
 }
+function listSessions(token: string, qs = "") {
+  return request(app).get(`/api/platform/support-sessions${qs}`).set("Authorization", `Bearer ${token}`);
+}
 
 let ownerAToken: string;
 let companyAId: string;
@@ -251,5 +254,111 @@ describe("operator deactivation revokes access immediately", () => {
   it("20. tenant users remain completely unaffected by all of the above", async () => {
     const res = await request(app).get("/api/customers").set("Authorization", `Bearer ${ownerAToken}`);
     expect(res.status).toBe(200);
+  });
+});
+
+describe("listing my sessions", () => {
+  it("21. an operator's list includes only their own sessions, never another operator's", async () => {
+    const mine = await createSession(operatorAToken, companyAId, "operator A's own session");
+    const theirs = await createSession(operatorBToken, companyBId, "operator B's own session");
+
+    const resA = await listSessions(operatorAToken, "?limit=100");
+    expect(resA.status).toBe(200);
+    const idsA = resA.body.sessions.map((s: { id: string }) => s.id);
+    expect(idsA).toContain(mine.body.id);
+    expect(idsA).not.toContain(theirs.body.id);
+
+    const resB = await listSessions(operatorBToken, "?limit=100");
+    const idsB = resB.body.sessions.map((s: { id: string }) => s.id);
+    expect(idsB).toContain(theirs.body.id);
+    expect(idsB).not.toContain(mine.body.id);
+  });
+
+  it("22. unsupported operator-id-shaped query parameters cannot widen scope", async () => {
+    const mine = await createSession(operatorAToken, companyAId);
+    const theirs = await createSession(operatorBToken, companyBId);
+
+    const res = await listSessions(operatorAToken, `?platformOperatorId=${theirs.body.id}&operatorId=all&companyId=${companyBId}`);
+    expect(res.status).toBe(200);
+    const ids = res.body.sessions.map((s: { id: string }) => s.id);
+    expect(ids).toContain(mine.body.id);
+    expect(ids).not.toContain(theirs.body.id);
+  });
+
+  it("23. unauthenticated request is rejected", async () => {
+    const res = await request(app).get("/api/platform/support-sessions");
+    expect(res.status).toBe(401);
+  });
+
+  it("24. a tenant JWT is rejected", async () => {
+    const res = await listSessions(ownerAToken);
+    expect(res.status).toBe(401);
+  });
+
+  it("25. an active session is classified correctly", async () => {
+    const created = await createSession(operatorAToken, companyAId);
+    const res = await listSessions(operatorAToken, "?limit=100");
+    const row = res.body.sessions.find((s: { id: string }) => s.id === created.body.id);
+    expect(row.status).toBe("active");
+    expect(row.revokedAt).toBeNull();
+  });
+
+  it("26. an expired session is classified correctly", async () => {
+    const created = await createSession(operatorAToken, companyAId);
+    await db.update(supportSessions).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(supportSessions.id, created.body.id));
+    const res = await listSessions(operatorAToken, "?limit=100");
+    const row = res.body.sessions.find((s: { id: string }) => s.id === created.body.id);
+    expect(row.status).toBe("expired");
+  });
+
+  it("27. a revoked session is classified correctly", async () => {
+    const created = await createSession(operatorAToken, companyAId);
+    await revokeSession(operatorAToken, created.body.id);
+    const res = await listSessions(operatorAToken, "?limit=100");
+    const row = res.body.sessions.find((s: { id: string }) => s.id === created.body.id);
+    expect(row.status).toBe("revoked");
+    expect(row.revokedAt).toBeTruthy();
+  });
+
+  it("28. pagination and hasMore work correctly", async () => {
+    await createSession(operatorAToken, companyAId, "session for pagination one");
+    await createSession(operatorAToken, companyAId, "session for pagination two");
+
+    const page1 = await listSessions(operatorAToken, "?limit=1&offset=0");
+    expect(page1.status).toBe(200);
+    expect(page1.body.sessions).toHaveLength(1);
+    expect(page1.body.hasMore).toBe(true);
+
+    const full = await listSessions(operatorAToken, "?limit=100");
+    const lastPage = await listSessions(operatorAToken, `?limit=100&offset=${full.body.sessions.length}`);
+    expect(lastPage.body.sessions).toEqual([]);
+    expect(lastPage.body.hasMore).toBe(false);
+  });
+
+  it("29. the target organization's real name is returned safely", async () => {
+    const created = await createSession(operatorAToken, companyAId);
+    const res = await listSessions(operatorAToken, "?limit=100");
+    const row = res.body.sessions.find((s: { id: string }) => s.id === created.body.id);
+    expect(row.targetCompanyName).toBe("Support Test Co A");
+  });
+
+  it("30. the response field allowlist stays minimal — no unrelated company fields leak through", async () => {
+    await createSession(operatorAToken, companyAId);
+    const res = await listSessions(operatorAToken, "?limit=1");
+    const [row] = res.body.sessions;
+    expect(Object.keys(row).sort()).toEqual(
+      ["createdAt", "expiresAt", "id", "reason", "revokedAt", "status", "targetCompanyId", "targetCompanyName"].sort(),
+    );
+    expect(JSON.stringify(res.body)).not.toMatch(/taxId|address|phone|logoPath|featureFlags|passwordHash|platformOperatorId/i);
+  });
+
+  it("31. an operator with no sessions gets an honest empty list", async () => {
+    const email = uniqueEmail("support-operator-empty");
+    await createOperator(email, "operatorpass000");
+    const token = await platformLogin(email, "operatorpass000");
+    const res = await listSessions(token);
+    expect(res.status).toBe(200);
+    expect(res.body.sessions).toEqual([]);
+    expect(res.body.hasMore).toBe(false);
   });
 });

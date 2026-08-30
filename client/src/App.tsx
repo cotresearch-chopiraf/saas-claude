@@ -21,6 +21,7 @@ import { usePlatformAuth } from "./platform/auth/PlatformAuthContext";
 import { PlatformLogin } from "./platform/pages/PlatformLogin";
 import { PlatformOrganizations } from "./platform/pages/PlatformOrganizations";
 import { PlatformSupportSession } from "./platform/pages/PlatformSupportSession";
+import { PlatformSupportSessions } from "./platform/pages/PlatformSupportSessions";
 import { ProjectWorkspace } from "./project/ProjectWorkspace";
 import { OverviewSection } from "./project/sections/OverviewSection";
 import { ContractSection } from "./project/sections/ContractSection";
@@ -181,6 +182,14 @@ export default function App() {
         element={
           <PlatformProtectedRoute>
             <PlatformOrganizations />
+          </PlatformProtectedRoute>
+        }
+      />
+      <Route
+        path="/platform/support-sessions"
+        element={
+          <PlatformProtectedRoute>
+            <PlatformSupportSessions />
           </PlatformProtectedRoute>
         }
       />
