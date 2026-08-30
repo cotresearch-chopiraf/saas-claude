@@ -707,3 +707,18 @@ export interface ProjectDocument {
   version: number;
   previousVersionId: string | null;
 }
+
+// MIDAD Phase 3 — mirrors server/src/routes/subcontractIpcDocuments.ts's
+// toDocumentResponse exactly. Same shape as ProjectDocument (a separate
+// interface, not a reuse, since the two are independent entity types on
+// the backend).
+export interface SubcontractIpcDocument {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  size: number;
+  uploadedAt: string;
+  uploadedByName: string | null;
+  version: number;
+  previousVersionId: string | null;
+}

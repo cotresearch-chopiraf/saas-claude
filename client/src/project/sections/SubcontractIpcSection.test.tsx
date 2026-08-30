@@ -1,9 +1,9 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "../../auth/AuthContext";
 import { SubcontractIpcSection } from "./SubcontractIpcSection";
-import type { CommitmentWithLines, Supplier, SubcontractIpc, SubcontractIpcWithLines } from "../../api/types";
+import type { CommitmentWithLines, SubcontractIpcDocument, Supplier, SubcontractIpc, SubcontractIpcWithLines } from "../../api/types";
 
 vi.mock("../context", () => ({
   useProjectContext: () => ({ project: null, projectId: "p1" }),
@@ -184,7 +184,25 @@ const fixtureIpcCertified: SubcontractIpcWithLines = {
   ],
 };
 
-function mockApi(role: "owner" | "member", ipcs: SubcontractIpc[], detailByIpcId: Record<string, SubcontractIpcWithLines> = {}) {
+// Globally unique fixture — the evidence list can render several documents
+// simultaneously.
+const fixtureEvidenceDoc: SubcontractIpcDocument = {
+  id: "sipcdoc-alpha-1",
+  fileName: "صورة-تنفيذ-الطوب.jpg",
+  mimeType: "image/jpeg",
+  size: 812_004,
+  uploadedAt: "2026-02-10T00:00:00.000Z",
+  uploadedByName: "أحمد المالك",
+  version: 1,
+  previousVersionId: null,
+};
+
+function mockApi(
+  role: "owner" | "member",
+  ipcs: SubcontractIpc[],
+  detailByIpcId: Record<string, SubcontractIpcWithLines> = {},
+  documentsByIpcId: Record<string, SubcontractIpcDocument[]> = {},
+) {
   vi.mocked(apiFetch).mockImplementation((path: unknown, reqOpts?: RequestInit) => {
     const p = String(path);
     const method = reqOpts?.method ?? "GET";
@@ -200,6 +218,10 @@ function mockApi(role: "owner" | "member", ipcs: SubcontractIpc[], detailByIpcId
     if (p === "/projects/p1/subcontract-ipcs" && method === "GET") {
       return Promise.resolve(ipcs);
     }
+    const documentsMatch = p.match(/^\/projects\/p1\/subcontract-ipcs\/([^/]+)\/documents$/);
+    if (documentsMatch && method === "GET") {
+      return Promise.resolve(documentsByIpcId[documentsMatch[1]] ?? []);
+    }
     const detailMatch = p.match(/^\/projects\/p1\/subcontract-ipcs\/([^/]+)$/);
     if (detailMatch && method === "GET" && detailByIpcId[detailMatch[1]]) {
       return Promise.resolve(detailByIpcId[detailMatch[1]]);
@@ -207,6 +229,13 @@ function mockApi(role: "owner" | "member", ipcs: SubcontractIpc[], detailByIpcId
     return Promise.reject(new Error(`unexpected apiFetch call in test: ${p} ${method}`));
   });
 }
+
+beforeEach(() => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(() => Promise.reject(new Error("unexpected global fetch call in test"))),
+  );
+});
 
 function renderSection() {
   return render(
@@ -425,5 +454,108 @@ describe("<SubcontractIpcSection/>", () => {
     expect(certifyCallCount).toBe(1);
     resolveCertify(fixtureIpcCertified);
     await waitFor(() => expect(screen.getByText("مصدَّقة")).toBeInTheDocument());
+  });
+});
+
+function evidenceFile(name = "site-photo.jpg", size = 1024, type = "image/jpeg"): File {
+  return new File([new Uint8Array(size)], name, { type });
+}
+
+// MIDAD Phase 3 — Subcontractor IPC Evidence. The evidence block is
+// purely additive to the detail view already exercised above — these
+// tests exist only to prove its own list/upload/download/RBAC behavior,
+// never re-testing the IPC lifecycle itself.
+describe("<SubcontractIpcSection/> — Evidence (Phase 3)", () => {
+  it("owner sees the evidence upload control on an IPC's detail", async () => {
+    mockApi("owner", [fixtureIpcDraft], { "sipc-draft-1": fixtureIpcDraftDetail }, {});
+    renderSection();
+    await waitFor(() => expect(screen.getByText("#1")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("عرض"));
+    await waitFor(() => expect(screen.getByText("مرفقات الشهادة")).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "رفع مرفق" })).toBeInTheDocument();
+  });
+
+  it("RBAC: a member does NOT see the upload control, but can see the evidence list (read is member-open)", async () => {
+    mockApi("member", [fixtureIpcDraft], { "sipc-draft-1": fixtureIpcDraftDetail }, { "sipc-draft-1": [fixtureEvidenceDoc] });
+    renderSection();
+    await waitFor(() => expect(screen.getByText("#1")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("عرض"));
+    await waitFor(() => expect(screen.getByText(fixtureEvidenceDoc.fileName)).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: "رفع مرفق" })).not.toBeInTheDocument();
+  });
+
+  it("renders evidence documents returned by the backend for this IPC", async () => {
+    mockApi("owner", [fixtureIpcDraft], { "sipc-draft-1": fixtureIpcDraftDetail }, { "sipc-draft-1": [fixtureEvidenceDoc] });
+    renderSection();
+    await waitFor(() => expect(screen.getByText("#1")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("عرض"));
+    await waitFor(() => expect(screen.getByText(fixtureEvidenceDoc.fileName)).toBeInTheDocument());
+    expect(screen.getByText("أحمد المالك")).toBeInTheDocument();
+  });
+
+  it("shows an honest empty state when this IPC has no evidence yet", async () => {
+    mockApi("owner", [fixtureIpcDraft], { "sipc-draft-1": fixtureIpcDraftDetail }, {});
+    renderSection();
+    await waitFor(() => expect(screen.getByText("#1")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("عرض"));
+    await waitFor(() => expect(screen.getByText("لا توجد مرفقات لهذه الشهادة بعد")).toBeInTheDocument());
+  });
+
+  it("rejects an unsupported file type client-side, before any request is sent", async () => {
+    mockApi("owner", [fixtureIpcDraft], { "sipc-draft-1": fixtureIpcDraftDetail }, {});
+    renderSection();
+    await waitFor(() => expect(screen.getByText("#1")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("عرض"));
+    await waitFor(() => expect(screen.getByText("مرفقات الشهادة")).toBeInTheDocument());
+
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const badFile = new File(["exe content"], "installer.exe", { type: "application/x-msdownload" });
+    fireEvent.change(input, { target: { files: [badFile] } });
+
+    expect(screen.getByText(/نوع الملف غير مسموح به/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "رفع مرفق" })).toBeDisabled();
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+  });
+
+  it("a successful upload refreshes the evidence list with the backend's own response", async () => {
+    mockApi("owner", [fixtureIpcDraft], { "sipc-draft-1": fixtureIpcDraftDetail }, {});
+    renderSection();
+    await waitFor(() => expect(screen.getByText("#1")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("عرض"));
+    await waitFor(() => expect(screen.getByText("لا توجد مرفقات لهذه الشهادة بعد")).toBeInTheDocument());
+
+    const uploaded: SubcontractIpcDocument = { ...fixtureEvidenceDoc, id: "sipcdoc-new-9" };
+    vi.mocked(fetch).mockImplementation((url: unknown) => {
+      const u = String(url);
+      if (u === "/api/projects/p1/subcontract-ipcs/sipc-draft-1/documents") {
+        return Promise.resolve(new Response(JSON.stringify(uploaded), { status: 201 })) as unknown as Promise<Response>;
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${u}`));
+    });
+    mockApi("owner", [fixtureIpcDraft], { "sipc-draft-1": fixtureIpcDraftDetail }, { "sipc-draft-1": [uploaded] });
+
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [evidenceFile()] } });
+    fireEvent.click(screen.getByRole("button", { name: "رفع مرفق" }));
+
+    await waitFor(() => expect(screen.getByText(uploaded.fileName)).toBeInTheDocument());
+  });
+
+  it("the download action fetches the authenticated binary route with the current project/ipc/document id", async () => {
+    mockApi("owner", [fixtureIpcDraft], { "sipc-draft-1": fixtureIpcDraftDetail }, { "sipc-draft-1": [fixtureEvidenceDoc] });
+    renderSection();
+    await waitFor(() => expect(screen.getByText("#1")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("عرض"));
+    await waitFor(() => expect(screen.getByText(fixtureEvidenceDoc.fileName)).toBeInTheDocument());
+
+    vi.mocked(fetch).mockResolvedValue(new Response(new Blob(["jpg-bytes"]), { status: 200 }));
+    fireEvent.click(screen.getByRole("button", { name: "تنزيل" }));
+
+    await waitFor(() =>
+      expect(vi.mocked(fetch)).toHaveBeenCalledWith(
+        `/api/projects/p1/subcontract-ipcs/sipc-draft-1/documents/${fixtureEvidenceDoc.id}`,
+        expect.objectContaining({ headers: { Authorization: "Bearer fake-token" } }),
+      ),
+    );
   });
 });

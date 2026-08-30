@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { PageHeader } from "../../ui/PageHeader";
 import { Card } from "../../ui/Card";
@@ -9,7 +9,7 @@ import { ErrorState } from "../../ui/ErrorState";
 import { ConfirmDialog } from "../../ui/ConfirmDialog";
 import { Skeleton } from "../../ui/Skeleton";
 import { Can } from "../../auth/Can";
-import { formatQuantity, formatMoney, formatDate, formatDateTime } from "../../lib/format";
+import { formatQuantity, formatMoney, formatDate, formatDateTime, formatFileSize } from "../../lib/format";
 import { getCommitment } from "../../api/commitments";
 import { listSuppliers } from "../../api/suppliers";
 import {
@@ -23,12 +23,18 @@ import {
   rejectSubcontractIpc,
   certifySubcontractIpc,
 } from "../../api/subcontractIpcs";
+import {
+  listSubcontractIpcDocuments,
+  uploadSubcontractIpcDocument,
+  downloadSubcontractIpcDocument,
+} from "../../api/subcontractIpcDocuments";
 import { ApiError } from "../../api/client";
 import type {
   CommitmentLine,
   CommitmentWithLines,
   Supplier,
   SubcontractIpc,
+  SubcontractIpcDocument,
   SubcontractIpcLine,
   SubcontractIpcStatus,
   SubcontractIpcWithLines,
@@ -437,6 +443,10 @@ function SubcontractIpcDetail({
         }
       />
 
+      <div className="mt-5">
+        <SubcontractIpcEvidence projectId={projectId} ipcId={ipcId} />
+      </div>
+
       <ConfirmDialog
         open={pendingAction !== null}
         title={pendingAction ? confirmCopy[pendingAction].title : ""}
@@ -447,6 +457,143 @@ function SubcontractIpcDetail({
         onCancel={() => setPendingAction(null)}
       />
     </Card>
+  );
+}
+
+// MIDAD Phase 3 — Subcontractor IPC Evidence. Purely additive attachments
+// for this IPC (site photos, delivery notes, subcontractor invoices) —
+// never a financial figure, never affects grossValue/retentionAmount/
+// netCertified, and available regardless of the IPC's status (evidence can
+// legitimately be attached before, during, or after certification). Read
+// (list/download) is member-open; upload requires subcontractIpc.manage,
+// the same permission every other mutation on this IPC already requires.
+// No delete — the storage layer has no delete capability at all.
+const EVIDENCE_ALLOWED_MIME_TYPES = new Set([
+  "application/pdf",
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+]);
+const EVIDENCE_MAX_SIZE = 10 * 1024 * 1024;
+const EVIDENCE_ACCEPT_ATTR = ".pdf,.png,.jpg,.jpeg,.webp,.doc,.docx,.xls,.xlsx";
+
+function SubcontractIpcEvidence({ projectId, ipcId }: { projectId: string; ipcId: string }) {
+  const [documents, setDocuments] = useState<SubcontractIpcDocument[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  function load() {
+    setError(null);
+    setDocuments(null);
+    listSubcontractIpcDocuments(projectId, ipcId)
+      .then(setDocuments)
+      .catch((err) => setError(err instanceof Error ? err.message : "تعذّر تحميل مرفقات الشهادة"));
+  }
+  useEffect(load, [projectId, ipcId]);
+
+  function onFileChange(e: ChangeEvent<HTMLInputElement>) {
+    setUploadError(null);
+    const file = e.target.files?.[0] ?? null;
+    setSelectedFile(file);
+    if (!file) {
+      setValidationError(null);
+      return;
+    }
+    if (!EVIDENCE_ALLOWED_MIME_TYPES.has(file.type)) {
+      setValidationError("نوع الملف غير مسموح به. الأنواع المسموحة: PDF، صور (PNG, JPEG, WEBP)، مستندات Word أو Excel");
+      return;
+    }
+    if (file.size > EVIDENCE_MAX_SIZE) {
+      setValidationError("حجم الملف يتجاوز الحد الأقصى المسموح به (10 ميجابايت)");
+      return;
+    }
+    setValidationError(null);
+  }
+
+  async function onUpload() {
+    if (!selectedFile || validationError || uploading) return;
+    setUploading(true);
+    setUploadError(null);
+    try {
+      await uploadSubcontractIpcDocument(projectId, ipcId, selectedFile);
+      setSelectedFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      load();
+    } catch (err) {
+      setUploadError(err instanceof ApiError ? err.message : "تعذّر رفع الملف");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  const columns: FinancialColumn<SubcontractIpcDocument>[] = [
+    {
+      key: "fileName",
+      header: "اسم الملف",
+      render: (d) => (
+        <span className="block max-w-xs truncate" title={d.fileName}>
+          {d.fileName}
+        </span>
+      ),
+    },
+    { key: "size", header: "الحجم", align: "end", render: (d) => formatFileSize(d.size) },
+    { key: "uploadedAt", header: "تاريخ الرفع", render: (d) => formatDate(d.uploadedAt) },
+    { key: "uploadedByName", header: "بواسطة", render: (d) => d.uploadedByName ?? "—" },
+  ];
+
+  return (
+    <div>
+      <h3 className="mb-3 font-semibold text-stone-800">مرفقات الشهادة</h3>
+
+      <Can permission="subcontractIpc.manage">
+        <div className="mb-4 rounded-md border border-stone-200 p-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept={EVIDENCE_ACCEPT_ATTR}
+              onChange={onFileChange}
+              className="text-sm text-stone-600 file:mr-3 file:rounded-md file:border-0 file:bg-stone-100 file:px-3 file:py-1.5 file:text-sm file:text-stone-700"
+            />
+            <Button size="sm" onClick={onUpload} disabled={!selectedFile || !!validationError || uploading}>
+              {uploading ? "جارٍ الرفع..." : "رفع مرفق"}
+            </Button>
+          </div>
+          {validationError && <p className="mt-2 text-xs text-danger-600">{validationError}</p>}
+          {uploadError && (
+            <div className="mt-3">
+              <ErrorState message={uploadError} />
+            </div>
+          )}
+        </div>
+      </Can>
+
+      <FinancialTable
+        columns={columns}
+        rows={documents}
+        rowKey={(d) => d.id}
+        error={documents === null ? error : null}
+        onRetry={load}
+        emptyMessage="لا توجد مرفقات لهذه الشهادة بعد"
+        rowActions={(d) => (
+          <button
+            type="button"
+            onClick={() => downloadSubcontractIpcDocument(projectId, ipcId, d.id, d.fileName)}
+            className="text-sm text-primary hover:underline"
+          >
+            تنزيل
+          </button>
+        )}
+      />
+    </div>
   );
 }
 
