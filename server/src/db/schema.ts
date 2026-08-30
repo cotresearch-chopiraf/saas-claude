@@ -9,6 +9,7 @@ import {
   jsonb,
   pgEnum,
   uniqueIndex,
+  index,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { relations, sql } from "drizzle-orm";
@@ -1032,6 +1033,13 @@ export const commitments = pgTable("commitments", {
   description: text("description"),
   originalAmount: numeric("original_amount", { precision: 14, scale: 2 }),
   revisedAmount: numeric("revised_amount", { precision: 14, scale: 2 }),
+  // MIDAD Phase 2 — Subcontractor IPC foundation. The authoritative
+  // retention percentage for THIS commitment — deliberately separate from
+  // contracts.retentionPercent (that governs the owner/client contract's
+  // own billing, a different financial direction entirely). Nullable:
+  // most existing commitments predate this field and remain valid with no
+  // retention withheld (0, not an error) until a value is set.
+  retentionPercent: numeric("retention_percent", { precision: 5, scale: 2 }),
   currency: text("currency").notNull().default("SAR"),
   createdBy: uuid("created_by")
     .notNull()
@@ -1321,6 +1329,163 @@ export const ipcsRelations = relations(ipcs, ({ one, many }) => ({
 export const ipcLinesRelations = relations(ipcLines, ({ one }) => ({
   ipc: one(ipcs, { fields: [ipcLines.ipcId], references: [ipcs.id] }),
   boqItem: one(boqItems, { fields: [ipcLines.boqItemId], references: [boqItems.id] }),
+}));
+
+// =============================================================================
+// MIDAD Phase 2 — Subcontractor IPC.
+//
+// A payable certification instrument against a `commitments` row of
+// `type = "subcontract"` — the payment-direction twin of Owner IPC's
+// billing-direction certification, and NOT the same ledger. Owner IPC
+// answers "how much am I billing the client, capped by measured/approved
+// BOQ quantity"; Subcontractor IPC answers "how much do I owe this
+// subcontractor, capped by what was actually committed to them." These
+// two questions must never share a capacity pool, even when a commitment
+// line happens to reference the same boqItemId an Owner IPC also bills
+// against — see the Architecture Gate report for the full reasoning. No
+// route in this domain reads ipcs/ipcLines, and no route in ipcs.ts reads
+// this domain — enforced by construction (separate tables, separate
+// ledger queries), not by convention alone.
+//
+// The commitment itself remains the single contractual ceiling (no
+// parallel `subcontracts` table — see commitments.type = "subcontract").
+// A commitment line may be either a quantity/rate line (ceiling =
+// commitmentLine.quantity) or an amount-only line (ceiling =
+// commitmentLine.amount, no quantity/rate exists to multiply) — both
+// paths are modeled on subcontractIpcLines directly, never inferred.
+// =============================================================================
+
+export const subcontractIpcStatusEnum = pgEnum("subcontract_ipc_status", [
+  "draft",
+  "submitted",
+  "approved",
+  "certified",
+  "rejected",
+]);
+
+export const subcontractIpcs = pgTable(
+  "subcontract_ipcs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    commitmentId: uuid("commitment_id")
+      .notNull()
+      .references(() => commitments.id, { onDelete: "cascade" }),
+    // Atomically claimed PER COMMITMENT (matching ipcs.ipcNumber's
+    // per-contract scope, not commitments.commitmentNumber's company-wide
+    // scope) — "the Nth certificate for THIS subcontract." Two different
+    // commitments may both have IPC number 1.
+    ipcNumber: integer("ipc_number").notNull(),
+    status: subcontractIpcStatusEnum("status").notNull().default("draft"),
+    periodStart: date("period_start").notNull(),
+    periodEnd: date("period_end").notNull(),
+    notes: text("notes"),
+    // Frozen once, atomically, at certify() — never independently
+    // editable, never recomputed on read. All null until then.
+    grossValue: numeric("gross_value", { precision: 14, scale: 2 }),
+    // The retention PERCENTAGE actually used, read live from
+    // commitments.retentionPercent at certify() and frozen here — a later
+    // change to the commitment's retention rate never rewrites an
+    // already-certified subcontractor IPC's snapshot.
+    retentionPercent: numeric("retention_percent", { precision: 5, scale: 2 }),
+    retentionAmount: numeric("retention_amount", { precision: 14, scale: 2 }),
+    // Always 0 in this phase — no advance-recovery schedule/cap/period
+    // exists anywhere in this schema for a subcontract, same deliberate
+    // non-invention as ipcs.advanceRecoveryAmount.
+    advanceRecoveryAmount: numeric("advance_recovery_amount", { precision: 14, scale: 2 }),
+    // Always 0 in this phase — reserved, not wired to any input.
+    otherDeductions: numeric("other_deductions", { precision: 14, scale: 2 }),
+    netCertified: numeric("net_certified", { precision: 14, scale: 2 }),
+    currency: text("currency").notNull().default("SAR"),
+    createdBy: uuid("created_by")
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    submittedBy: uuid("submitted_by").references(() => users.id),
+    submittedAt: timestamp("submitted_at"),
+    approvedBy: uuid("approved_by").references(() => users.id),
+    approvedAt: timestamp("approved_at"),
+    certifiedBy: uuid("certified_by").references(() => users.id),
+    certifiedAt: timestamp("certified_at"),
+    rejectedBy: uuid("rejected_by").references(() => users.id),
+    rejectedAt: timestamp("rejected_at"),
+    rejectionReason: text("rejection_reason"),
+  },
+  (table) => ({
+    companyIdx: index("subcontract_ipcs_company_idx").on(table.companyId),
+    projectIdx: index("subcontract_ipcs_project_idx").on(table.projectId),
+    commitmentIdx: index("subcontract_ipcs_commitment_idx").on(table.commitmentId),
+    statusIdx: index("subcontract_ipcs_status_idx").on(table.status),
+  }),
+);
+
+export const subcontractIpcLines = pgTable(
+  "subcontract_ipc_lines",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    subcontractIpcId: uuid("subcontract_ipc_id")
+      .notNull()
+      .references(() => subcontractIpcs.id, { onDelete: "cascade" }),
+    // Must belong to the SAME subcontractIpc.commitmentId — same
+    // ownership discipline as ipcLines.boqItemId belonging to the same
+    // ipc.boqRevisionId. This is the certifiable ceiling, never a BOQ
+    // item directly (see the section comment above).
+    commitmentLineId: uuid("commitment_line_id")
+      .notNull()
+      .references(() => commitmentLines.id),
+    description: text("description"),
+    // Quantity/rate path — set only when the referenced commitment line
+    // itself carries a quantity+rate; NULL for an amount-only line. Set
+    // once at line-add time, never changed afterward (a correction means
+    // removing and re-adding the line while still draft/rejected).
+    currentQuantity: numeric("current_quantity", { precision: 14, scale: 3 }),
+    // Frozen from the commitment line's own rate at line-add time — NULL
+    // for an amount-only line.
+    rate: numeric("rate", { precision: 14, scale: 2 }),
+    // Always set, regardless of path: quantity*rate (quantity/rate path,
+    // server-computed) or the directly entered certification amount
+    // (amount-only path, input — never derived from a fake quantity/rate).
+    currentValue: numeric("current_value", { precision: 14, scale: 2 }).notNull(),
+    // Certification-time snapshot of THIS COMMITMENT LINE's own
+    // previously-certified / cumulative state — scoped strictly to
+    // subcontract_ipc_lines joined to subcontract_ipcs.status='certified'
+    // for this same commitmentLineId. Quantity fields are NULL for an
+    // amount-only line (no quantity concept exists there); the value
+    // fields are always populated after certify(), since currentValue
+    // always exists on both paths.
+    previousCertifiedQuantity: numeric("previous_certified_quantity", { precision: 14, scale: 3 }),
+    cumulativeQuantity: numeric("cumulative_quantity", { precision: 14, scale: 3 }),
+    previousCertifiedValue: numeric("previous_certified_value", { precision: 14, scale: 2 }),
+    cumulativeValue: numeric("cumulative_value", { precision: 14, scale: 2 }),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    companyIdx: index("subcontract_ipc_lines_company_idx").on(table.companyId),
+    ipcIdx: index("subcontract_ipc_lines_ipc_idx").on(table.subcontractIpcId),
+    commitmentLineIdx: index("subcontract_ipc_lines_commitment_line_idx").on(table.commitmentLineId),
+  }),
+);
+
+export const subcontractIpcsRelations = relations(subcontractIpcs, ({ one, many }) => ({
+  company: one(companies, { fields: [subcontractIpcs.companyId], references: [companies.id] }),
+  project: one(projects, { fields: [subcontractIpcs.projectId], references: [projects.id] }),
+  commitment: one(commitments, { fields: [subcontractIpcs.commitmentId], references: [commitments.id] }),
+  lines: many(subcontractIpcLines),
+}));
+
+export const subcontractIpcLinesRelations = relations(subcontractIpcLines, ({ one }) => ({
+  subcontractIpc: one(subcontractIpcs, { fields: [subcontractIpcLines.subcontractIpcId], references: [subcontractIpcs.id] }),
+  commitmentLine: one(commitmentLines, { fields: [subcontractIpcLines.commitmentLineId], references: [commitmentLines.id] }),
 }));
 
 // =============================================================================

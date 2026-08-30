@@ -201,6 +201,11 @@ export interface Commitment {
   description: string | null;
   originalAmount: string | null;
   revisedAmount: string | null;
+  // MIDAD Phase 2 — Subcontractor IPC foundation. Nullable: most existing
+  // commitments predate this field. The authoritative retention rate for
+  // THIS commitment — never contracts.retentionPercent, a different
+  // financial direction entirely.
+  retentionPercent: string | null;
   currency: string;
   createdBy: string;
   createdAt: string;
@@ -485,6 +490,80 @@ export interface IpcCreateResult {
   id: string;
   ipc_number: number;
   status: IpcStatus;
+  created_at: string;
+}
+
+// MIDAD Phase 2 — Subcontractor IPC. A completely separate certification
+// ledger from Owner IPC (Ipc/IpcLine above) — see
+// server/src/routes/subcontractIpcs.ts. Certified against a
+// commitments/commitmentLines row (type="subcontract"), never against a
+// BOQ item directly.
+export type SubcontractIpcStatus = "draft" | "submitted" | "approved" | "certified" | "rejected";
+
+export interface SubcontractIpc {
+  id: string;
+  companyId: string;
+  projectId: string;
+  commitmentId: string;
+  ipcNumber: number;
+  status: SubcontractIpcStatus;
+  periodStart: string;
+  periodEnd: string;
+  notes: string | null;
+  grossValue: string | null;
+  // The retention PERCENTAGE actually used, frozen at certify() — read
+  // live from commitments.retentionPercent, never contracts.retentionPercent.
+  retentionPercent: string | null;
+  retentionAmount: string | null;
+  advanceRecoveryAmount: string | null;
+  otherDeductions: string | null;
+  netCertified: string | null;
+  currency: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  submittedBy: string | null;
+  submittedAt: string | null;
+  approvedBy: string | null;
+  approvedAt: string | null;
+  certifiedBy: string | null;
+  certifiedAt: string | null;
+  rejectedBy: string | null;
+  rejectedAt: string | null;
+  rejectionReason: string | null;
+}
+
+export interface SubcontractIpcLine {
+  id: string;
+  companyId: string;
+  subcontractIpcId: string;
+  commitmentLineId: string;
+  description: string | null;
+  // Quantity/rate path fields — null for an amount-only commitment line.
+  currentQuantity: string | null;
+  rate: string | null;
+  // Always set on both paths: quantity*rate (server-computed) or the
+  // directly entered certification amount.
+  currentValue: string;
+  previousCertifiedQuantity: string | null;
+  cumulativeQuantity: string | null;
+  previousCertifiedValue: string | null;
+  cumulativeValue: string | null;
+  sortOrder: number;
+  createdAt: string;
+}
+
+export interface SubcontractIpcWithLines extends SubcontractIpc {
+  lines: SubcontractIpcLine[];
+}
+
+// POST /subcontract-ipcs's own response is a raw SQL INSERT...RETURNING
+// (same commitment-row-locked MAX+1 numbering discipline as ipcs.ts's own
+// IpcCreateResult) — deliberately narrower than SubcontractIpc.
+export interface SubcontractIpcCreateResult {
+  id: string;
+  ipc_number: number;
+  status: SubcontractIpcStatus;
   created_at: string;
 }
 

@@ -24,6 +24,7 @@ import { ProgressSection } from "./project/sections/ProgressSection";
 import { ForecastSection } from "./project/sections/ForecastSection";
 import { CashFlowSection } from "./project/sections/CashFlowSection";
 import { IpcSection } from "./project/sections/IpcSection";
+import { SubcontractIpcSection } from "./project/sections/SubcontractIpcSection";
 import { InvoicesSection } from "./project/sections/InvoicesSection";
 import { DocumentsSection } from "./project/sections/DocumentsSection";
 import { OperationsSection } from "./project/sections/OperationsSection";
@@ -77,6 +78,11 @@ export default function App() {
         <Route path="invoices" element={<InvoicesSection />} />
         <Route path="operations" element={<OperationsSection />} />
         <Route path="documents" element={<DocumentsSection />} />
+        {/* Contextual, not part of projectSections/the sidebar nav —
+            entered only from an eligible active subcontract commitment in
+            ProcurementSection, same as legacySection's own precedent for a
+            workspace route outside the main nav list. */}
+        <Route path="subcontract-ipcs/:commitmentId" element={<SubcontractIpcSection />} />
         <Route path={legacySection.path} element={<LegacyBudgetSection />} />
       </Route>
       <Route

@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
 import { PageHeader } from "../../ui/PageHeader";
 import { Card } from "../../ui/Card";
 import { Badge } from "../../ui/Badge";
@@ -417,6 +418,18 @@ function CommitmentDetail({
             )}
           </div>
         </Can>
+        {/* MIDAD Phase 2 — Subcontractor IPC. Read-open (matches every
+            domain's read-access precedent), so visible to any member, not
+            wrapped in <Can> — the mutation controls on the destination
+            screen itself remain owner-gated. */}
+        {commitment.type === "subcontract" && canAmend && (
+          <Link
+            to={`/projects/${projectId}/subcontract-ipcs/${commitment.id}`}
+            className="text-sm text-primary hover:underline"
+          >
+            شهادات الدفع للمقاول الباطن
+          </Link>
+        )}
       </div>
 
       {error && (

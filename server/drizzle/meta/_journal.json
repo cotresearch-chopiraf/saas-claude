@@ -99,6 +99,13 @@
       "when": 1788002343605,
       "tag": "0013_pretty_sue_storm",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1788093620113,
+      "tag": "0014_fixed_blade",
+      "breakpoints": true
     }
   ]
 }

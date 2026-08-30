@@ -25,6 +25,7 @@ import { suppliersRouter } from "./routes/suppliers.js";
 import { commitmentsRouter } from "./routes/commitments.js";
 import { measurementsRouter } from "./routes/measurements.js";
 import { ipcsRouter } from "./routes/ipcs.js";
+import { subcontractIpcsRouter } from "./routes/subcontractIpcs.js";
 import { forecastRouter } from "./routes/forecast.js";
 import { cashflowRouter } from "./routes/cashflow.js";
 import { documentsRouter } from "./routes/documents.js";
@@ -53,6 +54,7 @@ export function buildApp() {
   app.use("/api/projects/:projectId/commitments", requireAuth, commitmentsRouter);
   app.use("/api/projects/:projectId/measurements", requireAuth, measurementsRouter);
   app.use("/api/projects/:projectId/ipcs", requireAuth, ipcsRouter);
+  app.use("/api/projects/:projectId/subcontract-ipcs", requireAuth, subcontractIpcsRouter);
   app.use("/api/projects/:projectId/forecast", requireAuth, forecastRouter);
   app.use("/api/projects/:projectId/cash-flow", requireAuth, cashflowRouter);
   app.use("/api/projects/:projectId/invoices", requireAuth, projectInvoicesRouter);

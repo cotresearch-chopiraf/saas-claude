@@ -106,6 +106,14 @@ export const PERMISSIONS = {
   // posture as every other financial record creation in this matrix:
   // owner-only.
   "forecast.manage": ["owner"],
+
+  // --- MIDAD Phase 2 — Subcontractor IPC ---
+  // A payable certification instrument against a subcontract commitment —
+  // the same class of action as ipc.manage above (a line defines a
+  // monetary figure the moment it's added), so it follows the identical
+  // fully-owner-gated-end-to-end posture, not Measurement's member-open
+  // one. Read access is unrestricted, same as every domain.
+  "subcontractIpc.manage": ["owner"],
 } as const satisfies Record<string, readonly Role[]>;
 
 export type PermissionAction = keyof typeof PERMISSIONS;

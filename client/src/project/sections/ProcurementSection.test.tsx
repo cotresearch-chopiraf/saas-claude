@@ -43,6 +43,7 @@ function makeCommitment(overrides: Partial<Commitment>): Commitment {
     description: "توريد حديد التسليح",
     originalAmount: null,
     revisedAmount: null,
+    retentionPercent: null,
     currency: "SAR",
     createdBy: "u1",
     createdAt: "2026-01-01T00:00:00.000Z",
