@@ -35,6 +35,12 @@ export function requestLogMiddleware(req: Request, res: Response, next: NextFunc
       // (only middleware/platformAuth.ts's platformAuth ever sets this);
       // never populated alongside userId/companyId on the same request.
       platformOperatorId: req.platformOperatorId,
+      // MIDAD Phase D2 — undefined unless requireSupportSession granted
+      // this exact request a valid, unexpired, unrevoked session; lets a
+      // support-scoped read be correlated (by requestId) with which
+      // tenant it touched without ever logging tenant data itself.
+      supportSessionId: req.supportSessionId,
+      supportTargetCompanyId: req.supportTargetCompanyId,
     });
   });
   next();

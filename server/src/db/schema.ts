@@ -1652,3 +1652,38 @@ export const platformOperators = pgTable("platform_operators", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
+
+// ============================================================================
+// MIDAD Phase D2 — Platform Admin / Support Access
+// ============================================================================
+// A support session is an explicit, time-limited, revocable grant for ONE
+// platform operator to read ONE tenant's data — never a standing
+// capability. Deliberately its own DB row, not encoded into (or replacing)
+// the platform JWT from D1: a JWT alone can't be revoked before its own
+// expiry, and D2's whole premise is that access must be revocable
+// immediately (middleware/requireSupportSession.ts re-checks this row from
+// the database on every request it gates, the same discipline
+// platformAuth/requireAuth already established for operator/user status).
+// References ONLY platform_operators and companies — never users, never
+// any tenant table's own columns; creating this table does not modify
+// either of those tables' definitions.
+export const supportSessions = pgTable("support_sessions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  platformOperatorId: uuid("platform_operator_id")
+    .notNull()
+    .references(() => platformOperators.id),
+  // Bound permanently at creation — no route anywhere lets this be
+  // changed after the fact. This is the entire mechanism that prevents a
+  // "companyId = *" wildcard: every read this session ever authorizes is
+  // scoped to this one column's value, read from the database, never from
+  // client input.
+  targetCompanyId: uuid("target_company_id")
+    .notNull()
+    .references(() => companies.id),
+  // Required, not optional: an unexplained support session is exactly the
+  // kind of thing this table exists to make impossible.
+  reason: text("reason").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  expiresAt: timestamp("expires_at").notNull(),
+  revokedAt: timestamp("revoked_at"),
+});

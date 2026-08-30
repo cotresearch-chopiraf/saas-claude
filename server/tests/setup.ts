@@ -17,7 +17,7 @@ export async function resetDb() {
       contracts, cost_codes, boq_revisions, boq_items, budget_revisions,
       audit_events, files, suppliers, commitments, commitment_lines,
       measurements, measurement_lines, ipcs, ipc_lines, forecast_snapshots,
-      platform_operators
+      platform_operators, support_sessions
     RESTART IDENTITY CASCADE
   `);
 }

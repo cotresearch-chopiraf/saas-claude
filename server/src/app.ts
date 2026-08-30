@@ -34,6 +34,7 @@ import { documentsRouter } from "./routes/documents.js";
 import { auditEventsRouter } from "./routes/auditEvents.js";
 import { platformAuthRouter } from "./routes/platformAuth.js";
 import { platformOrganizationsRouter } from "./routes/platformOrganizations.js";
+import { platformSupportSessionsRouter } from "./routes/platformSupportSessions.js";
 import { requireAuth } from "./middleware/auth.js";
 import { platformAuth } from "./middleware/platformAuth.js";
 import { uploadsDir } from "./lib/uploads.js";
@@ -96,6 +97,11 @@ export function buildApp() {
   // ever passes through requireAuth or sets req.userId/req.companyId.
   app.use("/api/platform/auth", platformAuthRouter);
   app.use("/api/platform/organizations", platformAuth, platformOrganizationsRouter);
+  // MIDAD Phase D2 — requireSupportSession (applied per-route inside this
+  // router, only on the one route that actually reads tenant data) runs
+  // after platformAuth, so req.platformOperatorId is already set when it
+  // looks up the session's ownership.
+  app.use("/api/platform/support-sessions", platformAuth, platformSupportSessionsRouter);
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   app.use((err: Error, req: express.Request, res: express.Response, _next: express.NextFunction) => {
