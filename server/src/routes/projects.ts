@@ -2,11 +2,25 @@ import { Router } from "express";
 import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { projects } from "../db/schema.js";
+import { customers, projects } from "../db/schema.js";
 import { requirePermission } from "../lib/permissions.js";
 import { logger } from "../lib/logger.js";
 
 export const projectsRouter = Router();
+
+// customerId is optional and, when supplied, must belong to the caller's
+// own company — a foreign or nonexistent id is rejected rather than
+// silently accepted or silently dropped. Never infers/derives clientName
+// from the linked customer, or vice versa — see db/schema.ts's comment on
+// projects.customerId.
+async function validateCustomerId(companyId: string, customerId: string | undefined): Promise<{ error: string } | { ok: true }> {
+  if (customerId === undefined) return { ok: true };
+  const customer = await db.query.customers.findFirst({
+    where: and(eq(customers.id, customerId), eq(customers.companyId, companyId)),
+  });
+  if (!customer) return { error: "العميل المحدد غير موجود" };
+  return { ok: true };
+}
 
 projectsRouter.get("/", async (req, res) => {
   const rows = await db.query.projects.findMany({
@@ -19,6 +33,10 @@ projectsRouter.get("/", async (req, res) => {
 const projectSchema = z.object({
   name: z.string().min(2, "اسم المشروع قصير جداً"),
   clientName: z.string().optional(),
+  // Optional link to the Customer entity (MIDAD Phase A') — entirely
+  // independent of clientName above; supplying one never implies or
+  // requires the other.
+  customerId: z.string().uuid().optional(),
   address: z.string().optional(),
   budgetTotal: z.coerce.number().nonnegative().default(0),
   startDate: z.string().optional(),
@@ -29,7 +47,10 @@ projectsRouter.post("/", async (req, res) => {
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.issues[0].message });
   }
-  const { name, clientName, address, budgetTotal, startDate } = parsed.data;
+  const { name, clientName, customerId, address, budgetTotal, startDate } = parsed.data;
+
+  const customerCheck = await validateCustomerId(req.companyId!, customerId);
+  if ("error" in customerCheck) return res.status(400).json({ error: customerCheck.error });
 
   const [project] = await db
     .insert(projects)
@@ -37,6 +58,7 @@ projectsRouter.post("/", async (req, res) => {
       companyId: req.companyId!,
       name,
       clientName,
+      customerId,
       address,
       budgetTotal: String(budgetTotal),
       startDate,
@@ -70,6 +92,9 @@ projectsRouter.get("/:id", async (req, res) => {
 const updateSchema = z.object({
   name: z.string().min(2, "اسم المشروع قصير جداً").optional(),
   clientName: z.string().optional(),
+  // undefined = leave the current link untouched; null = explicitly clear
+  // it; a uuid = set/replace it (validated below).
+  customerId: z.string().uuid().nullable().optional(),
   address: z.string().optional(),
   startDate: z.string().optional(),
   status: z.enum(["active", "on_hold", "completed"]).optional(),
@@ -82,6 +107,11 @@ projectsRouter.patch("/:id", async (req, res) => {
   const parsed = updateSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.issues[0].message });
+  }
+
+  if (parsed.data.customerId) {
+    const customerCheck = await validateCustomerId(req.companyId!, parsed.data.customerId);
+    if ("error" in customerCheck) return res.status(400).json({ error: customerCheck.error });
   }
 
   // A body containing only fields this schema doesn't recognize (e.g. a

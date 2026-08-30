@@ -69,6 +69,12 @@ export const PERMISSIONS = {
   // A supplier directory is company-sensitive master data, same posture
   // as costCode.manage / company.manage.
   "supplier.manage": ["owner"],
+  // --- MIDAD Phase A' — Customer entity ---
+  // Same posture as supplier.manage — company-sensitive master data (a
+  // customer directory), same shape class, same reasoning. Read access
+  // (GET) is unrestricted, matching every master-data domain in this
+  // matrix; only create/update requires owner.
+  "customer.manage": ["owner"],
 
   // --- MIDAD Phase 2B — Progress / Measurement ---
   // Unlike Commitment, Measurement is site-level operational evidence

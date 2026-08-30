@@ -21,6 +21,7 @@ export const OWNER_ONLY_ACTIONS = [
   "budgetRevision.manage",
   "commitment.manage",
   "supplier.manage",
+  "customer.manage",
   "measurement.approve",
   "ipc.manage",
   "forecast.manage",

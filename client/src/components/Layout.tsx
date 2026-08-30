@@ -23,6 +23,7 @@ export function Layout({ children, fullWidth = false }: { children: ReactNode; f
                 <Link to="/" className="hover:text-primary">المشاريع</Link>
                 <Link to="/quotes" className="hover:text-primary">عروض الأسعار</Link>
                 <Link to="/invoices" className="hover:text-primary">الفواتير</Link>
+                <Link to="/customers" className="hover:text-primary">العملاء</Link>
                 <Link to="/suppliers" className="hover:text-primary">الموردون</Link>
                 <Link to="/team" className="hover:text-primary">الفريق</Link>
                 <Link to="/compliance" className="hover:text-primary">الامتثال الضريبي</Link>

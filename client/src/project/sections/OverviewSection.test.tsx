@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { AuthProvider } from "../../auth/AuthContext";
 import { OverviewSection } from "./OverviewSection";
 import type { BoqRevision, BudgetSummary, CashFlowResult, Contract, ForecastResult, Project } from "../../api/types";
@@ -11,6 +12,7 @@ vi.mock("../context", () => ({
       companyId: "co1",
       name: "مشروع تجريبي",
       clientName: "عميل تجريبي",
+      customerId: null,
       address: null,
       status: "active",
       budgetTotal: "0.00",
@@ -219,9 +221,11 @@ function mockApi(
 
 function renderSection() {
   return render(
-    <AuthProvider>
-      <OverviewSection />
-    </AuthProvider>,
+    <MemoryRouter>
+      <AuthProvider>
+        <OverviewSection />
+      </AuthProvider>
+    </MemoryRouter>,
   );
 }
 
@@ -232,6 +236,13 @@ describe("<OverviewSection/> (Executive Dashboard)", () => {
     await waitFor(() => expect(screen.getByText(/246,813\.57|246813\.57/)).toBeInTheDocument());
     expect(screen.getByText(/251,975\.42|251975\.42/)).toBeInTheDocument();
     expect(screen.getByText("C-1")).toBeInTheDocument();
+  });
+
+  it("MIDAD Phase A': no customer-profile link renders when the project has no linked customer (customerId: null)", async () => {
+    mockApi("owner");
+    renderSection();
+    await waitFor(() => expect(screen.getByText("C-1")).toBeInTheDocument());
+    expect(screen.queryByText("عرض ملف العميل")).not.toBeInTheDocument();
   });
 
   it("Main contract selection: picks contractType === 'main', not array order (amendment listed first)", async () => {

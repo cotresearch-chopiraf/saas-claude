@@ -11,6 +11,8 @@ import { PublicQuote } from "./pages/PublicQuote";
 import { Invoices } from "./pages/Invoices";
 import { PublicInvoice } from "./pages/PublicInvoice";
 import { Suppliers } from "./pages/Suppliers";
+import { Customers } from "./pages/Customers";
+import { CustomerDetail } from "./pages/CustomerDetail";
 import { Team } from "./pages/Team";
 import { Settings } from "./pages/Settings";
 import { Compliance } from "./pages/Compliance";
@@ -107,6 +109,22 @@ export default function App() {
         element={
           <ProtectedRoute>
             <Suppliers />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/customers"
+        element={
+          <ProtectedRoute>
+            <Customers />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/customers/:id"
+        element={
+          <ProtectedRoute>
+            <CustomerDetail />
           </ProtectedRoute>
         }
       />

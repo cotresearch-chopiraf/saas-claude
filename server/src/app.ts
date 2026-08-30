@@ -22,6 +22,7 @@ import { costCodesRouter } from "./routes/costCodes.js";
 import { boqRouter } from "./routes/boq.js";
 import { budgetRevisionsRouter } from "./routes/budgetRevisions.js";
 import { suppliersRouter } from "./routes/suppliers.js";
+import { customersRouter } from "./routes/customers.js";
 import { commitmentsRouter } from "./routes/commitments.js";
 import { measurementsRouter } from "./routes/measurements.js";
 import { ipcsRouter } from "./routes/ipcs.js";
@@ -63,6 +64,7 @@ export function buildApp() {
   app.use("/api/projects/:projectId/documents", requireAuth, documentsRouter);
   app.use("/api/cost-codes", requireAuth, costCodesRouter);
   app.use("/api/suppliers", requireAuth, suppliersRouter);
+  app.use("/api/customers", requireAuth, customersRouter);
   app.use("/api/company", requireAuth, companyRouter);
   app.use("/api/quotes", requireAuth, quotesRouter);
   app.use("/api/public/quotes", publicQuotesRouter);

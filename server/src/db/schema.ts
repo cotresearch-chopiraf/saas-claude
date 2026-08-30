@@ -129,6 +129,15 @@ export const projects = pgTable("projects", {
     .references(() => companies.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   clientName: text("client_name"),
+  // MIDAD Phase A' — optional link to the first-class Customer entity
+  // (defined further below in this file). Deliberately additive and
+  // independent of clientName: existing/new projects may keep using the
+  // free-text clientName exactly as before, set customerId instead, both,
+  // or neither — this route never auto-populates one from the other.
+  // set null on delete: there is no delete route for customers today, but
+  // the FK stays defensively non-blocking, matching the same pattern used
+  // for invoices.projectId/contractId.
+  customerId: uuid("customer_id").references((): AnyPgColumn => customers.id, { onDelete: "set null" }),
   address: text("address"),
   status: projectStatusEnum("status").notNull().default("active"),
   // LEGACY, non-authoritative. Predates Contract/BOQ/BudgetItems entirely
@@ -561,6 +570,10 @@ export const projectsRelations = relations(projects, ({ one, many }) => ({
   company: one(companies, {
     fields: [projects.companyId],
     references: [companies.id],
+  }),
+  customer: one(customers, {
+    fields: [projects.customerId],
+    references: [customers.id],
   }),
   budgetItems: many(budgetItems),
   expenses: many(expenses),
@@ -1082,6 +1095,46 @@ export const commitmentLines = pgTable("commitment_lines", {
 export const suppliersRelations = relations(suppliers, ({ one, many }) => ({
   company: one(companies, { fields: [suppliers.companyId], references: [companies.id] }),
   commitments: many(commitments),
+}));
+
+// --- Customers ---
+// MIDAD Phase A' — the real product gap this closes: before this table,
+// "who the client is" existed only as free-text (projects.clientName,
+// invoices.clientName, quotes.clientName) with no unified profile and no
+// way to see every project belonging to the same client. This table is
+// deliberately minimal (name/contact/tax id only, same shape class as
+// suppliers) — not a CRM, not a sales pipeline. clientName on
+// projects/invoices/quotes is NEVER removed, NEVER auto-populated from
+// this table, and NEVER required to match it — this is a purely additive
+// entity a project MAY optionally link to (projects.customerId above).
+// Explicitly out of scope for this slice: invoices/quotes linkage (left
+// for a future, separately-scoped slice so this one stays small and
+// leaves the tested Invoice/Quote routes untouched).
+export const customerStatusEnum = pgEnum("customer_status", ["active", "inactive"]);
+
+export const customers = pgTable("customers", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  contactName: text("contact_name"),
+  taxId: text("tax_id"),
+  email: text("email"),
+  phone: text("phone"),
+  address: text("address"),
+  notes: text("notes"),
+  status: customerStatusEnum("status").notNull().default("active"),
+  createdBy: uuid("created_by")
+    .notNull()
+    .references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const customersRelations = relations(customers, ({ one, many }) => ({
+  company: one(companies, { fields: [customers.companyId], references: [companies.id] }),
+  projects: many(projects),
 }));
 
 export const commitmentsRelations = relations(commitments, ({ one, many }) => ({

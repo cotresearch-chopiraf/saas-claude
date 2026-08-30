@@ -20,6 +20,10 @@ export interface Project {
   companyId: string;
   name: string;
   clientName: string | null;
+  // MIDAD Phase A' — optional link to a first-class Customer, fully
+  // independent of clientName (never derived from it, never required to
+  // match it). null means no customer is linked.
+  customerId: string | null;
   address: string | null;
   status: ProjectStatus;
   budgetTotal: string;
@@ -172,6 +176,36 @@ export interface Supplier {
   createdBy: string;
   createdAt: string;
   updatedAt: string;
+}
+
+// MIDAD Phase A' — mirrors server/src/routes/customers.ts exactly. Same
+// shape class/discipline as Supplier above (company-wide master data, no
+// delete endpoint — "removal" is only ever a status change to
+// "inactive"). Deliberately unrelated to Supplier (a different direction:
+// who we bill, not who bills us).
+export type CustomerStatus = "active" | "inactive";
+
+export interface Customer {
+  id: string;
+  companyId: string;
+  name: string;
+  contactName: string | null;
+  taxId: string | null;
+  email: string | null;
+  phone: string | null;
+  address: string | null;
+  notes: string | null;
+  status: CustomerStatus;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// GET /customers/:id's response — the customer plus its linked projects
+// (read-only, id/name/status only), never a second source of truth for a
+// project's own fields.
+export interface CustomerWithProjects extends Customer {
+  projects: Array<{ id: string; name: string; status: ProjectStatus }>;
 }
 
 // --- MIDAD UI-03A: Commitment (Purchase Order / Subcontract) ---

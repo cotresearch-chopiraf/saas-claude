@@ -2,7 +2,8 @@ import { FormEvent, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Layout } from "../components/Layout";
 import { apiFetch } from "../api/client";
-import type { Project } from "../api/types";
+import { listCustomers } from "../api/customers";
+import type { Customer, Project } from "../api/types";
 
 const statusLabel: Record<Project["status"], string> = {
   active: "نشط",
@@ -83,8 +84,19 @@ export function Dashboard() {
 function NewProjectForm({ onCreated }: { onCreated: () => void }) {
   const [name, setName] = useState("");
   const [clientName, setClientName] = useState("");
+  // MIDAD Phase A' — an entirely optional, independent link to a
+  // first-class Customer. Never required, never derived from/synced with
+  // clientName above — a project may set either, both, or neither.
+  const [customerId, setCustomerId] = useState("");
+  const [customers, setCustomers] = useState<Customer[]>([]);
   const [budgetTotal, setBudgetTotal] = useState("");
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    listCustomers()
+      .then(setCustomers)
+      .catch(() => setCustomers([]));
+  }, []);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -92,7 +104,7 @@ function NewProjectForm({ onCreated }: { onCreated: () => void }) {
     try {
       await apiFetch("/projects", {
         method: "POST",
-        body: JSON.stringify({ name, clientName, budgetTotal: budgetTotal || 0 }),
+        body: JSON.stringify({ name, clientName, customerId: customerId || undefined, budgetTotal: budgetTotal || 0 }),
       });
       onCreated();
     } catch (err) {
@@ -116,6 +128,18 @@ function NewProjectForm({ onCreated }: { onCreated: () => void }) {
         onChange={(e) => setClientName(e.target.value)}
         className="rounded-md border border-stone-300 px-3 py-2 text-sm"
       />
+      <select
+        value={customerId}
+        onChange={(e) => setCustomerId(e.target.value)}
+        className="rounded-md border border-stone-300 px-3 py-2 text-sm"
+      >
+        <option value="">ربط بعميل (اختياري)</option>
+        {customers.map((c) => (
+          <option key={c.id} value={c.id}>
+            {c.name}
+          </option>
+        ))}
+      </select>
       <input
         type="number"
         min="0"

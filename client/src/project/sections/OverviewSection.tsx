@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { Link } from "react-router-dom";
 import { PageHeader } from "../../ui/PageHeader";
 import { Card } from "../../ui/Card";
 import { Badge } from "../../ui/Badge";
@@ -111,7 +112,19 @@ export function OverviewSection() {
       <PageHeader
         title="نظرة عامة"
         subtitle={project.clientName ?? undefined}
-        actions={<Badge tone={statusTone[project.status]}>{statusLabel[project.status]}</Badge>}
+        actions={
+          <div className="flex items-center gap-3">
+            {/* MIDAD Phase A' — purely additive: shown only when a
+                Customer is linked, never replaces or requires clientName
+                above (the two fields are fully independent). */}
+            {project.customerId && (
+              <Link to={`/customers/${project.customerId}`} className="text-sm text-primary hover:underline">
+                عرض ملف العميل
+              </Link>
+            )}
+            <Badge tone={statusTone[project.status]}>{statusLabel[project.status]}</Badge>
+          </div>
+        }
       />
 
       {error && (

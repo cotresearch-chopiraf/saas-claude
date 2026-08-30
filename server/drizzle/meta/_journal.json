@@ -106,6 +106,13 @@
       "when": 1788093620113,
       "tag": "0014_fixed_blade",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1788115032513,
+      "tag": "0015_clear_warbound",
+      "breakpoints": true
     }
   ]
 }
