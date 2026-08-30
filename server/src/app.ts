@@ -34,15 +34,27 @@ import { documentsRouter } from "./routes/documents.js";
 import { requireAuth } from "./middleware/auth.js";
 import { uploadsDir } from "./lib/uploads.js";
 import { logger } from "./lib/logger.js";
+import { requestIdMiddleware } from "./middleware/requestId.js";
+import { errorEnvelopeMiddleware } from "./middleware/errorEnvelope.js";
+import { requestLogMiddleware } from "./middleware/requestLog.js";
+import { healthRouter } from "./routes/health.js";
 
 export function buildApp() {
   const app = express();
+  // MIDAD Phase B — mounted first, ahead of cors/json parsing, so every
+  // request gets a correlation id and a diagnostic trace regardless of how
+  // far it gets (including a rejected CORS preflight or a malformed JSON
+  // body). See each middleware's own file for what it does.
+  app.use(requestIdMiddleware);
+  app.use(errorEnvelopeMiddleware);
+  app.use(requestLogMiddleware);
   app.use(cors());
   app.use(express.json());
   // Local-disk logo storage — see lib/uploads.ts for why this is a stopgap.
   app.use("/uploads", express.static(uploadsDir));
 
   app.get("/api/health", (_req, res) => res.json({ ok: true }));
+  app.use("/api/health", healthRouter);
 
   app.use("/api/auth", authRouter);
   app.use("/api/projects", requireAuth, projectsRouter);
@@ -78,6 +90,7 @@ export function buildApp() {
       return res.status(400).json({ error: err.message });
     }
     logger.error("unhandled_error", {
+      requestId: req.requestId,
       message: err.message,
       name: err.name,
       path: req.path,
