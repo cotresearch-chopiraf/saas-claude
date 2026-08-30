@@ -31,6 +31,10 @@ export function requestLogMiddleware(req: Request, res: Response, next: NextFunc
       durationMs: Date.now() - start,
       userId: req.userId,
       companyId: req.companyId,
+      // MIDAD Phase D1 — undefined for every existing tenant request
+      // (only middleware/platformAuth.ts's platformAuth ever sets this);
+      // never populated alongside userId/companyId on the same request.
+      platformOperatorId: req.platformOperatorId,
     });
   });
   next();

@@ -32,7 +32,10 @@ import { forecastRouter } from "./routes/forecast.js";
 import { cashflowRouter } from "./routes/cashflow.js";
 import { documentsRouter } from "./routes/documents.js";
 import { auditEventsRouter } from "./routes/auditEvents.js";
+import { platformAuthRouter } from "./routes/platformAuth.js";
+import { platformOrganizationsRouter } from "./routes/platformOrganizations.js";
 import { requireAuth } from "./middleware/auth.js";
+import { platformAuth } from "./middleware/platformAuth.js";
 import { uploadsDir } from "./lib/uploads.js";
 import { logger } from "./lib/logger.js";
 import { requestIdMiddleware } from "./middleware/requestId.js";
@@ -85,6 +88,14 @@ export function buildApp() {
   app.use("/api/public/invoices", publicInvoicesRouter);
   app.use("/api/compliance", requireAuth, complianceRouter);
   app.use("/api/audit-events", requireAuth, auditEventsRouter);
+
+  // MIDAD Phase D1 — PLATFORM_SCOPE, structurally separate from every
+  // route above: platformAuthRouter is unauthenticated (it IS the login
+  // surface, mirroring authRouter's own mount above); platformOrganizations
+  // is gated by platformAuth, never requireAuth — no route in this pair
+  // ever passes through requireAuth or sets req.userId/req.companyId.
+  app.use("/api/platform/auth", platformAuthRouter);
+  app.use("/api/platform/organizations", platformAuth, platformOrganizationsRouter);
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   app.use((err: Error, req: express.Request, res: express.Response, _next: express.NextFunction) => {

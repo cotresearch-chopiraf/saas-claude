@@ -1618,3 +1618,37 @@ export const forecastSnapshotsRelations = relations(forecastSnapshots, ({ one })
   company: one(companies, { fields: [forecastSnapshots.companyId], references: [companies.id] }),
   project: one(projects, { fields: [forecastSnapshots.projectId], references: [projects.id] }),
 }));
+
+// ============================================================================
+// MIDAD Phase D1 — Platform Operator Foundation
+// ============================================================================
+// Deliberately placed last and deliberately isolated: this table has NO
+// column referencing companies/users/projects/anything above it, and
+// nothing above it references this table. That is the point — see the
+// Phase D architectural decision report (approved by the Product Owner as
+// Phase D1) for the full reasoning: every tenant table in this schema
+// assumes a row belongs to exactly one company (companies.id is NOT NULL
+// on every one of them), and the JWT payload every tenant route trusts is
+// {userId, companyId}. A platform operator must NOT be pinned to a tenant
+// at all, so it cannot safely be "a user with an elevated role" — it needs
+// to be a genuinely separate identity, checked by a genuinely separate
+// authentication path (lib/platformJwt.ts, middleware/platformAuth.ts),
+// never touching req.userId/req.companyId or the "users"/"companies"
+// tables' rows.
+export const platformOperatorStatusEnum = pgEnum("platform_operator_status", ["active", "deactivated"]);
+// Exactly one role for now, per Phase D1's explicit scope — deliberately
+// not "platform_owner"/"support"/"operations": those remain unresolved
+// Product Owner decisions (see the Phase D report), not something to
+// pre-invent here just because an enum makes it easy to add values later.
+export const platformOperatorRoleEnum = pgEnum("platform_operator_role", ["platform_operator"]);
+
+export const platformOperators = pgTable("platform_operators", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  email: text("email").notNull().unique(),
+  passwordHash: text("password_hash").notNull(),
+  name: text("name").notNull(),
+  role: platformOperatorRoleEnum("role").notNull().default("platform_operator"),
+  status: platformOperatorStatusEnum("status").notNull().default("active"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
