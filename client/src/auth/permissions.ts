@@ -35,6 +35,12 @@ export const OWNER_ONLY_ACTIONS = [
   // every entry here is a UI-only mirror of an already-authoritative
   // server-side name.
   "compliance.manage",
+  // MIDAD Phase A — same precedent as compliance.manage above: mirrors
+  // server/src/lib/permissions.ts's pre-existing "company.manage" (already
+  // gating /company/settings, /company/invites, etc.) so the new role-change
+  // /deactivate/reactivate controls on the Team page can be hidden from
+  // non-owners the same way every other owner-only control already is.
+  "company.manage",
 ] as const;
 
 export type PermissionAction = (typeof OWNER_ONLY_ACTIONS)[number];

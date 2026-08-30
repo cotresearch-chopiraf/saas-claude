@@ -1,12 +1,14 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, ne } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { companies, companyInvites, defaultFeatureFlags, users, type CompanyFeatureFlags } from "../db/schema.js";
 import { generateToken, hashToken } from "../lib/tokens.js";
 import { sendMail } from "../lib/mailer.js";
 import { handleLogoUpload } from "../lib/uploads.js";
 import { requirePermission } from "../lib/permissions.js";
+import { recordAuditEvent } from "../lib/audit.js";
+import { logger } from "../lib/logger.js";
 import { uploadFile, publicUrlFor } from "../lib/storage/index.js";
 
 export const companyRouter = Router();
@@ -96,9 +98,99 @@ companyRouter.post("/logo", requireOwner, handleLogoUpload, async (req, res) => 
 companyRouter.get("/members", async (req, res) => {
   const rows = await db.query.users.findMany({
     where: eq(users.companyId, req.companyId!),
-    columns: { id: true, name: true, email: true, role: true, createdAt: true },
+    columns: { id: true, name: true, email: true, role: true, status: true, createdAt: true },
   });
   res.json(rows);
+});
+
+// MIDAD Phase A — role change / deactivate / reactivate, folded into one
+// route (mirrors the exact same PATCH-with-optional-status pattern
+// suppliers.ts/customers.ts already use for their own active/inactive
+// toggle). Owner-gated via the SAME company.manage permission every other
+// member-management action in this file already requires — no new
+// permission, matching "preserve existing owner/member semantics unless
+// discovery proves a change is required."
+const updateMemberSchema = z.object({
+  role: z.enum(["owner", "member"]).optional(),
+  status: z.enum(["active", "deactivated"]).optional(),
+});
+
+companyRouter.patch("/members/:id", requireOwner, async (req: Request<{ id: string }>, res: Response) => {
+  const existing = await db.query.users.findFirst({
+    where: and(eq(users.id, req.params.id), eq(users.companyId, req.companyId!)),
+  });
+  if (!existing) return res.status(404).json({ error: "العضو غير موجود" });
+
+  const parsed = updateMemberSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
+  if (Object.keys(parsed.data).length === 0) return res.json(existing);
+
+  // Safety invariant, not a product decision: a company with zero active
+  // owners can never again manage itself (no one left who can invite, set
+  // roles, or reactivate anyone) — an unrecoverable state through this API.
+  // Only checked when this specific change would actually remove an active
+  // owner (demoting one, or deactivating one) — never blocks any other
+  // change, including a member deactivating/promoting themselves when
+  // other owners exist.
+  const removesActiveOwner =
+    existing.role === "owner" &&
+    existing.status === "active" &&
+    ((parsed.data.role !== undefined && parsed.data.role !== "owner") ||
+      (parsed.data.status !== undefined && parsed.data.status !== "active"));
+
+  if (removesActiveOwner) {
+    const otherActiveOwners = await db.query.users.findMany({
+      where: and(
+        eq(users.companyId, req.companyId!),
+        eq(users.role, "owner"),
+        eq(users.status, "active"),
+        ne(users.id, existing.id),
+      ),
+      columns: { id: true },
+    });
+    if (otherActiveOwners.length === 0) {
+      return res.status(409).json({ error: "لا يمكن أن تبقى الشركة بدون مالك واحد نشط على الأقل" });
+    }
+  }
+
+  const updated = await db.transaction(async (tx) => {
+    const [row] = await tx.update(users).set(parsed.data).where(eq(users.id, existing.id)).returning();
+
+    if (parsed.data.role !== undefined && parsed.data.role !== existing.role) {
+      await recordAuditEvent(tx, {
+        companyId: req.companyId!,
+        actorUserId: req.userId!,
+        action: "user.roleChanged",
+        entityType: "user",
+        entityId: existing.id,
+        beforeValue: { role: existing.role },
+        afterValue: { role: row.role },
+      });
+    }
+    if (parsed.data.status !== undefined && parsed.data.status !== existing.status) {
+      await recordAuditEvent(tx, {
+        companyId: req.companyId!,
+        actorUserId: req.userId!,
+        action: "user.statusChanged",
+        entityType: "user",
+        entityId: existing.id,
+        beforeValue: { status: existing.status },
+        afterValue: { status: row.status },
+      });
+      if (row.status === "deactivated") {
+        logger.warn("destructive_mutation", {
+          action: "user.deactivate",
+          actorUserId: req.userId,
+          companyId: req.companyId,
+          targetUserId: existing.id,
+        });
+      }
+    }
+
+    return row;
+  });
+
+  res.json({ id: updated.id, name: updated.name, email: updated.email, role: updated.role, status: updated.status, createdAt: updated.createdAt });
 });
 
 companyRouter.get("/invites", requireOwner, async (req, res) => {

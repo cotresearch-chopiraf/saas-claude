@@ -669,12 +669,14 @@ export interface PublicQuote {
 }
 
 export type CompanyRole = "owner" | "member";
+export type CompanyMemberStatus = "active" | "deactivated";
 
 export interface CompanyMember {
   id: string;
   name: string;
   email: string;
   role: CompanyRole;
+  status: CompanyMemberStatus;
   createdAt: string;
 }
 

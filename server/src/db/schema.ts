@@ -38,6 +38,15 @@ export const taskStatusEnum = pgEnum("task_status", [
 ]);
 
 export const userRoleEnum = pgEnum("user_role", ["owner", "member"]);
+// MIDAD Phase A — explicit account status, additive. Every user predates
+// this column and defaults to "active" — no backfill/migration logic
+// needed. See middleware/auth.ts's requireAuth for the enforcement point:
+// this is re-read from the database on every authenticated request (the
+// exact same "DB is authoritative every request" discipline
+// lib/permissions.ts's getUserRole already established for role), so a
+// deactivation takes effect on the user's very next request, not only
+// after their existing JWT (7-day lifetime) happens to expire.
+export const userStatusEnum = pgEnum("user_status", ["active", "deactivated"]);
 
 export const changeOrderStatusEnum = pgEnum("change_order_status", [
   "pending",
@@ -119,6 +128,7 @@ export const users = pgTable("users", {
   passwordHash: text("password_hash").notNull(),
   name: text("name").notNull(),
   role: userRoleEnum("role").notNull().default("owner"),
+  status: userStatusEnum("status").notNull().default("active"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

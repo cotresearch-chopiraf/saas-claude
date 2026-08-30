@@ -113,6 +113,13 @@
       "when": 1788115032513,
       "tag": "0015_clear_warbound",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1788116478698,
+      "tag": "0016_unusual_mac_gargan",
+      "breakpoints": true
     }
   ]
 }
