@@ -17,6 +17,10 @@ import { Team } from "./pages/Team";
 import { Settings } from "./pages/Settings";
 import { Compliance } from "./pages/Compliance";
 import { Activity } from "./pages/Activity";
+import { usePlatformAuth } from "./platform/auth/PlatformAuthContext";
+import { PlatformLogin } from "./platform/pages/PlatformLogin";
+import { PlatformOrganizations } from "./platform/pages/PlatformOrganizations";
+import { PlatformSupportSession } from "./platform/pages/PlatformSupportSession";
 import { ProjectWorkspace } from "./project/ProjectWorkspace";
 import { OverviewSection } from "./project/sections/OverviewSection";
 import { ContractSection } from "./project/sections/ContractSection";
@@ -39,6 +43,16 @@ function ProtectedRoute({ children }: { children: JSX.Element }) {
   const { user, loading } = useAuth();
   if (loading) return null;
   if (!user) return <Navigate to="/login" replace />;
+  return children;
+}
+
+// Deliberately its own guard, not a parameterized version of
+// ProtectedRoute: reads usePlatformAuth(), never useAuth() — a tenant
+// session must never satisfy a platform route and vice versa, on the
+// client exactly as on the server.
+function PlatformProtectedRoute({ children }: { children: JSX.Element }) {
+  const { operator } = usePlatformAuth();
+  if (!operator) return <Navigate to="/platform/login" replace />;
   return children;
 }
 
@@ -159,6 +173,23 @@ export default function App() {
           <ProtectedRoute>
             <Activity />
           </ProtectedRoute>
+        }
+      />
+      <Route path="/platform/login" element={<PlatformLogin />} />
+      <Route
+        path="/platform/organizations"
+        element={
+          <PlatformProtectedRoute>
+            <PlatformOrganizations />
+          </PlatformProtectedRoute>
+        }
+      />
+      <Route
+        path="/platform/support-sessions/:id"
+        element={
+          <PlatformProtectedRoute>
+            <PlatformSupportSession />
+          </PlatformProtectedRoute>
         }
       />
     </Routes>
