@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
-import { listCompanyActivity } from "../lib/audit.js";
+import { listCompanyActivity, sanitizeAuditValue } from "../lib/audit.js";
 
 // MIDAD Phase C — Activity Timeline read API. audit_events is the one and
 // only audit store (see lib/audit.ts) — this route only reads it, scoped
@@ -16,28 +16,6 @@ import { listCompanyActivity } from "../lib/audit.js";
 // already trusted to see everything that happened in their own company,
 // just not to mutate it.
 export const auditEventsRouter = Router();
-
-const SENSITIVE_KEY_PATTERN = /password|token|secret|authorization|credential|apikey/i;
-
-// audit_events.beforeValue/afterValue/metadata are free-form JSONB with no
-// schema enforcement — nothing written today puts a credential in them
-// (verified by inspecting every recordAuditEvent call site in this
-// codebase), but a general company-wide viewer must stay safe by
-// construction, not by an audit of today's call sites holding forever.
-// This only redacts VALUES under suspicious KEY NAMES; it never drops a
-// whole event or field just because it exists.
-function sanitize(value: unknown): unknown {
-  if (value === null || value === undefined) return value;
-  if (Array.isArray(value)) return value.map(sanitize);
-  if (typeof value === "object") {
-    const out: Record<string, unknown> = {};
-    for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
-      out[key] = SENSITIVE_KEY_PATTERN.test(key) ? "[محجوب]" : sanitize(val);
-    }
-    return out;
-  }
-  return value;
-}
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
@@ -73,9 +51,9 @@ auditEventsRouter.get("/", async (req: Request, res: Response) => {
       actorEmail: e.actor?.email ?? null,
       reason: e.reason,
       source: e.source,
-      beforeValue: sanitize(e.beforeValue),
-      afterValue: sanitize(e.afterValue),
-      metadata: sanitize(e.metadata),
+      beforeValue: sanitizeAuditValue(e.beforeValue),
+      afterValue: sanitizeAuditValue(e.afterValue),
+      metadata: sanitizeAuditValue(e.metadata),
       createdAt: e.createdAt,
     })),
     limit,

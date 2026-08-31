@@ -12,7 +12,7 @@ export function PlatformLogin() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  if (operator) return <Navigate to="/platform/organizations" replace />;
+  if (operator) return <Navigate to="/platform" replace />;
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -20,7 +20,7 @@ export function PlatformLogin() {
     setSubmitting(true);
     try {
       await login(email, password);
-      navigate("/platform/organizations", { replace: true });
+      navigate("/platform", { replace: true });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "تعذّر تسجيل الدخول");
     } finally {

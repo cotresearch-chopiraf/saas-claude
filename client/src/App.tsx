@@ -19,6 +19,7 @@ import { Compliance } from "./pages/Compliance";
 import { Activity } from "./pages/Activity";
 import { usePlatformAuth } from "./platform/auth/PlatformAuthContext";
 import { PlatformLogin } from "./platform/pages/PlatformLogin";
+import { PlatformDashboard } from "./platform/pages/PlatformDashboard";
 import { PlatformOrganizations } from "./platform/pages/PlatformOrganizations";
 import { PlatformSupportSession } from "./platform/pages/PlatformSupportSession";
 import { PlatformSupportSessions } from "./platform/pages/PlatformSupportSessions";
@@ -177,6 +178,14 @@ export default function App() {
         }
       />
       <Route path="/platform/login" element={<PlatformLogin />} />
+      <Route
+        path="/platform"
+        element={
+          <PlatformProtectedRoute>
+            <PlatformDashboard />
+          </PlatformProtectedRoute>
+        }
+      />
       <Route
         path="/platform/organizations"
         element={

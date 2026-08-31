@@ -12,11 +12,17 @@ export function PlatformLayout({ children }: { children: ReactNode }) {
     <div className="min-h-screen bg-stone-50" dir="rtl">
       <header className="border-b border-stone-200 bg-stone-800">
         <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3 px-6 py-4">
-          <Link to="/platform/organizations" className="text-lg font-bold text-white">
+          <Link to="/platform" className="text-lg font-bold text-white">
             لوحة تشغيل المنصة
           </Link>
           {operator && (
             <div className="flex items-center gap-4 text-sm text-stone-300">
+              <Link to="/platform" className="hover:text-white">
+                لوحة التحكم
+              </Link>
+              <Link to="/platform/organizations" className="hover:text-white">
+                المؤسسات
+              </Link>
               <Link to="/platform/support-sessions" className="hover:text-white">
                 جلسات الدعم
               </Link>

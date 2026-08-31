@@ -66,3 +66,21 @@ export interface SupportActivityPage {
   offset: number;
   hasMore: boolean;
 }
+
+export interface PlatformActivityEvent {
+  id: string;
+  action: string;
+  entityType: string;
+  entityId: string;
+  companyId: string;
+  companyName: string | null;
+  reason: string | null;
+  createdAt: string;
+}
+
+export interface PlatformActivityPage {
+  events: PlatformActivityEvent[];
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+}

@@ -1,4 +1,4 @@
-import { eq, and, gte, lte } from "drizzle-orm";
+import { eq, and, gte, lte, sql } from "drizzle-orm";
 import { auditEvents } from "../db/schema.js";
 import { db } from "../db/client.js";
 
@@ -18,6 +18,29 @@ import { db } from "../db/client.js";
 
 export interface DbLike {
   insert: typeof db.insert;
+}
+
+// Shared with every audit reader (routes/auditEvents.ts, and the platform
+// activity reader below) so there is exactly one redaction implementation
+// to keep safe, not two that can silently drift apart. beforeValue/
+// afterValue/metadata are free-form JSONB with no schema enforcement —
+// nothing written today puts a credential in them, but any general-purpose
+// audit viewer must stay safe by construction, not by an audit of today's
+// call sites holding forever. Only redacts VALUES under suspicious KEY
+// NAMES; never drops a whole event or field just because it exists.
+const SENSITIVE_KEY_PATTERN = /password|token|secret|authorization|credential|apikey/i;
+
+export function sanitizeAuditValue(value: unknown): unknown {
+  if (value === null || value === undefined) return value;
+  if (Array.isArray(value)) return value.map(sanitizeAuditValue);
+  if (typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
+      out[key] = SENSITIVE_KEY_PATTERN.test(key) ? "[محجوب]" : sanitizeAuditValue(val);
+    }
+    return out;
+  }
+  return value;
 }
 
 export interface AuditEventInput {
@@ -109,5 +132,42 @@ export async function listCompanyActivity(
     limit,
     offset,
     with: { actor: { columns: { id: true, name: true, email: true } } },
+  });
+}
+
+// MIDAD Admin Dashboard — a third, deliberately separate read path over the
+// SAME audit_events table (still no second store, still writes only via
+// recordAuditEvent above). Every other reader in this file scopes by
+// companyId because it answers "what happened inside my company". This one
+// answers a structurally different question — "what have I, this platform
+// operator, done" — so it intentionally has NO companyId filter at all and
+// instead scopes by source + the operator id recorded in metadata at write
+// time (see routes/platformSupportSessions.ts's recordAuditEvent calls).
+//
+// This is safe specifically because platform_admin rows are the ONLY rows
+// ever written with source: "platform_admin", and every one of them already
+// carries metadata.platformOperatorId (set at write time from the verified
+// req.platformOperatorId — never client-suppliable). A tenant's own
+// business audit trail (source: "api"/default, a real actorUserId) can
+// never match this filter, so this route can never surface a company's
+// internal activity — only the platform layer's own record of its own
+// actions. No new table, no new column, no migration.
+export interface ListPlatformOperatorActivityPage {
+  limit: number;
+  offset: number;
+}
+
+export async function listPlatformOperatorActivity(
+  platformOperatorId: string,
+  { limit, offset }: ListPlatformOperatorActivityPage,
+) {
+  return db.query.auditEvents.findMany({
+    where: and(
+      eq(auditEvents.source, "platform_admin"),
+      sql`${auditEvents.metadata}->>'platformOperatorId' = ${platformOperatorId}`,
+    ),
+    orderBy: (e, { desc }) => [desc(e.createdAt), desc(e.id)],
+    limit,
+    offset,
   });
 }

@@ -36,6 +36,7 @@ import { auditEventsRouter } from "./routes/auditEvents.js";
 import { platformAuthRouter } from "./routes/platformAuth.js";
 import { platformOrganizationsRouter } from "./routes/platformOrganizations.js";
 import { platformSupportSessionsRouter } from "./routes/platformSupportSessions.js";
+import { platformAuditEventsRouter } from "./routes/platformAuditEvents.js";
 import { requireAuth } from "./middleware/auth.js";
 import { platformAuth } from "./middleware/platformAuth.js";
 import { uploadsDir } from "./lib/uploads.js";
@@ -115,6 +116,10 @@ export function buildApp() {
   // after platformAuth, so req.platformOperatorId is already set when it
   // looks up the session's ownership.
   app.use("/api/platform/support-sessions", platformAuth, platformSupportSessionsRouter);
+  // MIDAD Admin Dashboard — self-scoped to req.platformOperatorId only (see
+  // routes/platformAuditEvents.ts and lib/audit.ts's
+  // listPlatformOperatorActivity); never a second audit store.
+  app.use("/api/platform/audit-events", platformAuth, platformAuditEventsRouter);
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   app.use((err: Error, req: express.Request, res: express.Response, _next: express.NextFunction) => {
