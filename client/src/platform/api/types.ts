@@ -84,3 +84,48 @@ export interface PlatformActivityPage {
   offset: number;
   hasMore: boolean;
 }
+
+// MIDAD Admin Dashboard — ZATCA operations (Slice 3), matching
+// server/src/routes/platformZatca.ts exactly. Never a shape that could
+// carry secretRef/binarySecurityToken — the server route never selects
+// those columns in the first place.
+export interface PlatformZatcaExpiringCertificate {
+  egsUnitId: string;
+  companyId: string;
+  companyName: string | null;
+  environment: string;
+  certificateExpiresAt: string;
+}
+
+export interface PlatformZatcaFailedCheck {
+  id: string;
+  companyId: string;
+  companyName: string | null;
+  egsUnitId: string;
+  action: string;
+  detail: unknown;
+  createdAt: string;
+}
+
+export interface PlatformZatcaSubmission {
+  id: string;
+  companyId: string;
+  companyName: string | null;
+  egsUnitId: string;
+  environment: string;
+  state: string;
+  documentTypeCode: string;
+  zatcaErrorCode: string | null;
+  zatcaErrorMessage: string | null;
+  createdAt: string;
+  respondedAt: string | null;
+}
+
+export interface PlatformZatcaSummary {
+  totalEgsUnits: number;
+  byStatus: Record<string, number>;
+  byEnvironment: Record<string, number>;
+  expiringCertificates: PlatformZatcaExpiringCertificate[];
+  recentFailedChecks: PlatformZatcaFailedCheck[];
+  recentSubmissions: PlatformZatcaSubmission[];
+}

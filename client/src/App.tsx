@@ -16,11 +16,13 @@ import { CustomerDetail } from "./pages/CustomerDetail";
 import { Team } from "./pages/Team";
 import { Settings } from "./pages/Settings";
 import { Compliance } from "./pages/Compliance";
+import { ZatcaSettings } from "./pages/ZatcaSettings";
 import { Activity } from "./pages/Activity";
 import { usePlatformAuth } from "./platform/auth/PlatformAuthContext";
 import { PlatformLogin } from "./platform/pages/PlatformLogin";
 import { PlatformDashboard } from "./platform/pages/PlatformDashboard";
 import { PlatformOrganizations } from "./platform/pages/PlatformOrganizations";
+import { PlatformZatca } from "./platform/pages/PlatformZatca";
 import { PlatformSupportSession } from "./platform/pages/PlatformSupportSession";
 import { PlatformSupportSessions } from "./platform/pages/PlatformSupportSessions";
 import { ProjectWorkspace } from "./project/ProjectWorkspace";
@@ -170,6 +172,14 @@ export default function App() {
         }
       />
       <Route
+        path="/zatca"
+        element={
+          <ProtectedRoute>
+            <ZatcaSettings />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/activity"
         element={
           <ProtectedRoute>
@@ -191,6 +201,14 @@ export default function App() {
         element={
           <PlatformProtectedRoute>
             <PlatformOrganizations />
+          </PlatformProtectedRoute>
+        }
+      />
+      <Route
+        path="/platform/zatca"
+        element={
+          <PlatformProtectedRoute>
+            <PlatformZatca />
           </PlatformProtectedRoute>
         }
       />

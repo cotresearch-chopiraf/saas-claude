@@ -26,6 +26,9 @@ export function PlatformLayout({ children }: { children: ReactNode }) {
               <Link to="/platform/support-sessions" className="hover:text-white">
                 جلسات الدعم
               </Link>
+              <Link to="/platform/zatca" className="hover:text-white">
+                ZATCA
+              </Link>
               <span>{operator.name}</span>
               <button onClick={logout} className="text-stone-400 hover:text-white">
                 تسجيل الخروج

@@ -41,6 +41,11 @@ export const OWNER_ONLY_ACTIONS = [
   // /deactivate/reactivate controls on the Team page can be hidden from
   // non-owners the same way every other owner-only control already is.
   "company.manage",
+  // MIDAD ZATCA e-invoicing (Slice 3) — mirrors server/src/lib/permissions.ts's
+  // "zatca.configure" / "zatca.submit", same precedent as compliance.manage
+  // above.
+  "zatca.configure",
+  "zatca.submit",
 ] as const;
 
 export type PermissionAction = (typeof OWNER_ONLY_ACTIONS)[number];

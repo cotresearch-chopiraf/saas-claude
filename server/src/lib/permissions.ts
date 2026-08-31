@@ -120,6 +120,16 @@ export const PERMISSIONS = {
   // fully-owner-gated-end-to-end posture, not Measurement's member-open
   // one. Read access is unrestricted, same as every domain.
   "subcontractIpc.manage": ["owner"],
+
+  // --- MIDAD ZATCA e-invoicing (Slice 3) ---
+  // Configuring a tenant's ZATCA identity/EGS units and submitting to a
+  // government system are both trust-boundary actions in the same class as
+  // company.manage/compliance.manage — owner-only. Read access (GET
+  // config/status/submissions) is unrestricted, same as every other
+  // domain in this matrix; only mutation and the outbound "contact ZATCA"
+  // action are gated.
+  "zatca.configure": ["owner"],
+  "zatca.submit": ["owner"],
 } as const satisfies Record<string, readonly Role[]>;
 
 export type PermissionAction = keyof typeof PERMISSIONS;

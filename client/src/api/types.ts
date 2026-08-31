@@ -914,3 +914,63 @@ export interface ComplianceAuditEvent {
   metadata: Record<string, unknown> | null;
   createdAt: string;
 }
+
+// MIDAD ZATCA e-invoicing (Slice 3) — server/src/routes/zatca.ts. Every
+// field here is exactly what the backend returns; this page never derives
+// or fabricates a status the server didn't send. Note there is
+// deliberately no "zatcaConnected: boolean" anywhere — status/csidStatus
+// are the real, multi-value state, never collapsed to a boolean.
+export interface ZatcaTenantIdentity {
+  legalName: string | null;
+  address: string | null;
+  vatNumber: string | null;
+  commercialRegistration: string | null;
+}
+
+export type ZatcaEnvironment = "simulation" | "production";
+export type ZatcaEgsStatus = "not_onboarded" | "onboarding" | "active" | "revoked" | "deactivated";
+export type ZatcaCsidStatus = "none" | "compliance_pending" | "compliance_issued" | "production_issued" | "expired" | "revoked";
+
+export interface ZatcaEgsUnit {
+  id: string;
+  name: string;
+  environment: ZatcaEnvironment;
+  status: ZatcaEgsStatus;
+  csidStatus: ZatcaCsidStatus;
+  certificateExpiresAt: string | null;
+  lastCommunicationAt: string | null;
+  hasCredential: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ZatcaConfig {
+  identity: ZatcaTenantIdentity;
+  egsUnits: ZatcaEgsUnit[];
+}
+
+export interface ZatcaVerifyConnectionResult {
+  connected: boolean;
+  reason: "not_connected" | "credential_rejected" | "connected";
+  detail?: string;
+  correlationId?: string;
+  checkedAt?: string;
+  egsUnit: ZatcaEgsUnit;
+}
+
+export interface ZatcaSubmission {
+  id: string;
+  companyId: string;
+  egsUnitId: string;
+  invoiceId: string | null;
+  documentTypeCode: string;
+  subtype: string;
+  icv: number;
+  environment: ZatcaEnvironment;
+  state: string;
+  zatcaStatus: string | null;
+  zatcaErrorCode: string | null;
+  zatcaErrorMessage: string | null;
+  createdAt: string;
+  respondedAt: string | null;
+}

@@ -33,6 +33,8 @@ import { forecastRouter } from "./routes/forecast.js";
 import { cashflowRouter } from "./routes/cashflow.js";
 import { documentsRouter } from "./routes/documents.js";
 import { auditEventsRouter } from "./routes/auditEvents.js";
+import { zatcaRouter } from "./routes/zatca.js";
+import { platformZatcaRouter } from "./routes/platformZatca.js";
 import { platformAuthRouter } from "./routes/platformAuth.js";
 import { platformOrganizationsRouter } from "./routes/platformOrganizations.js";
 import { platformSupportSessionsRouter } from "./routes/platformSupportSessions.js";
@@ -103,6 +105,9 @@ export function buildApp() {
   app.use("/api/public/invoices", publicInvoicesRouter);
   app.use("/api/compliance", requireAuth, complianceRouter);
   app.use("/api/audit-events", requireAuth, auditEventsRouter);
+  // MIDAD ZATCA e-invoicing (Slice 3) — tenant-scoped configuration and
+  // connection API. See routes/zatca.ts's own file comment.
+  app.use("/api/zatca", requireAuth, zatcaRouter);
 
   // MIDAD Phase D1 — PLATFORM_SCOPE, structurally separate from every
   // route above: platformAuthRouter is unauthenticated (it IS the login
@@ -120,6 +125,9 @@ export function buildApp() {
   // routes/platformAuditEvents.ts and lib/audit.ts's
   // listPlatformOperatorActivity); never a second audit store.
   app.use("/api/platform/audit-events", platformAuth, platformAuditEventsRouter);
+  // MIDAD ZATCA Admin Dashboard (Slice 3) — read-only, sanitized, never a
+  // secret or raw credential value. See routes/platformZatca.ts.
+  app.use("/api/platform/zatca", platformAuth, platformZatcaRouter);
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   app.use((err: Error, req: express.Request, res: express.Response, _next: express.NextFunction) => {
