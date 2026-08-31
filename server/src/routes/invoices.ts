@@ -221,50 +221,60 @@ invoicesRouter.post("/", async (req, res) => {
     }
   }
 
-  const [invoice] = await db
-    .insert(invoices)
-    .values({
+  // Parent insert, audit event, and line items must land together or not at
+  // all — the same db.transaction pattern every other financial-creation
+  // route in this codebase already uses (contracts.ts, boq.ts,
+  // commitments.ts, measurements.ts, ipcs.ts). Without it, a failure between
+  // the parent insert and the line-items insert would leave a permanently
+  // orphaned, item-less invoice with no delete route to remove it.
+  const invoice = await db.transaction(async (tx) => {
+    const [created] = await tx
+      .insert(invoices)
+      .values({
+        companyId: req.companyId!,
+        quoteId: parsed.data.quoteId,
+        projectId: relationship.projectId,
+        contractId: relationship.contractId,
+        invoiceNumber,
+        clientName: parsed.data.clientName,
+        clientAddress: parsed.data.clientAddress,
+        clientTaxId: parsed.data.clientTaxId,
+        taxRatePercent: String(taxRatePercent),
+        taxCategory,
+        ruleVersionId,
+        overrideReference,
+        language: parsed.data.language,
+        publicToken: generateToken(),
+        issueDate,
+        dueDate: parsed.data.dueDate,
+      })
+      .returning();
+
+    // New for the Phase 2E foundation: invoices previously only wrote to the
+    // structured log (see send/mark-paid below, unchanged) — the
+    // project/contract relationship is financially meaningful enough that it
+    // must be reconstructable via the canonical audit_events table, matching
+    // every other domain's creation-event precedent.
+    await recordAuditEvent(tx, {
       companyId: req.companyId!,
-      quoteId: parsed.data.quoteId,
-      projectId: relationship.projectId,
-      contractId: relationship.contractId,
-      invoiceNumber,
-      clientName: parsed.data.clientName,
-      clientAddress: parsed.data.clientAddress,
-      clientTaxId: parsed.data.clientTaxId,
-      taxRatePercent: String(taxRatePercent),
-      taxCategory,
-      ruleVersionId,
-      overrideReference,
-      language: parsed.data.language,
-      publicToken: generateToken(),
-      issueDate,
-      dueDate: parsed.data.dueDate,
-    })
-    .returning();
+      actorUserId: req.userId!,
+      action: "invoice.created",
+      entityType: "invoice",
+      entityId: created.id,
+      afterValue: created,
+      metadata: { projectId: relationship.projectId ?? null, contractId: relationship.contractId ?? null, quoteId: parsed.data.quoteId ?? null },
+    });
 
-  // New for the Phase 2E foundation: invoices previously only wrote to the
-  // structured log (see send/mark-paid below, unchanged) — the
-  // project/contract relationship is financially meaningful enough that it
-  // must be reconstructable via the canonical audit_events table, matching
-  // every other domain's creation-event precedent.
-  await recordAuditEvent(db, {
-    companyId: req.companyId!,
-    actorUserId: req.userId!,
-    action: "invoice.created",
-    entityType: "invoice",
-    entityId: invoice.id,
-    afterValue: invoice,
-    metadata: { projectId: relationship.projectId ?? null, contractId: relationship.contractId ?? null, quoteId: parsed.data.quoteId ?? null },
+    await tx.insert(invoiceItems).values(
+      parsed.data.items.map((item) => ({
+        invoiceId: created.id,
+        description: item.description,
+        amount: String(item.amount),
+      })),
+    );
+
+    return created;
   });
-
-  await db.insert(invoiceItems).values(
-    parsed.data.items.map((item) => ({
-      invoiceId: invoice.id,
-      description: item.description,
-      amount: String(item.amount),
-    })),
-  );
 
   res.status(201).json(invoice);
 });

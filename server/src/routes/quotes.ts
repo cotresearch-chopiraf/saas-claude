@@ -82,30 +82,39 @@ quotesRouter.post("/", async (req, res) => {
     // the compliance status endpoint is where that gap gets surfaced.
   }
 
-  const [quote] = await db
-    .insert(quotes)
-    .values({
-      companyId: req.companyId!,
-      quoteNumber: await nextQuoteNumber(req.companyId!),
-      clientName: parsed.data.clientName,
-      clientEmail: parsed.data.clientEmail || undefined,
-      projectName: parsed.data.projectName,
-      language: parsed.data.language,
-      taxRatePercent: taxRatePercent !== undefined ? String(taxRatePercent) : undefined,
-      taxCategory,
-      ruleVersionId,
-      overrideReference,
-      publicToken: generateToken(),
-    })
-    .returning();
+  // Parent insert and line items must land together or not at all — the
+  // same db.transaction pattern every other financial-creation route in
+  // this codebase already uses (contracts.ts, boq.ts, commitments.ts,
+  // invoices.ts). Without it, a failure between the two inserts would
+  // leave a permanently orphaned, item-less quote.
+  const quote = await db.transaction(async (tx) => {
+    const [created] = await tx
+      .insert(quotes)
+      .values({
+        companyId: req.companyId!,
+        quoteNumber: await nextQuoteNumber(req.companyId!),
+        clientName: parsed.data.clientName,
+        clientEmail: parsed.data.clientEmail || undefined,
+        projectName: parsed.data.projectName,
+        language: parsed.data.language,
+        taxRatePercent: taxRatePercent !== undefined ? String(taxRatePercent) : undefined,
+        taxCategory,
+        ruleVersionId,
+        overrideReference,
+        publicToken: generateToken(),
+      })
+      .returning();
 
-  await db.insert(quoteItems).values(
-    parsed.data.items.map((item) => ({
-      quoteId: quote.id,
-      description: item.description,
-      amount: String(item.amount),
-    })),
-  );
+    await tx.insert(quoteItems).values(
+      parsed.data.items.map((item) => ({
+        quoteId: created.id,
+        description: item.description,
+        amount: String(item.amount),
+      })),
+    );
+
+    return created;
+  });
 
   res.status(201).json(quote);
 });
