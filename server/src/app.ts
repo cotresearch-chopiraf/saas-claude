@@ -6,6 +6,7 @@
 import "express-async-errors";
 import express from "express";
 import cors from "cors";
+import helmet from "helmet";
 import multer from "multer";
 import { authRouter } from "./routes/auth.js";
 import { projectsRouter } from "./routes/projects.js";
@@ -43,6 +44,7 @@ import { requestIdMiddleware } from "./middleware/requestId.js";
 import { errorEnvelopeMiddleware } from "./middleware/errorEnvelope.js";
 import { requestLogMiddleware } from "./middleware/requestLog.js";
 import { healthRouter } from "./routes/health.js";
+import { buildCorsOptions } from "./lib/corsOrigins.js";
 
 export function buildApp() {
   const app = express();
@@ -53,7 +55,18 @@ export function buildApp() {
   app.use(requestIdMiddleware);
   app.use(errorEnvelopeMiddleware);
   app.use(requestLogMiddleware);
-  app.use(cors());
+  // Production launch hardening — no CSP: this server never serves HTML (it
+  // is a pure JSON API plus PDF/logo binary responses), so a document-level
+  // policy like CSP has nothing to apply to and forcing one on would be
+  // exactly the kind of blind policy this hardening pass was told not to
+  // add. Every other Helmet default (X-Content-Type-Options, Referrer-Policy,
+  // frameguard, etc.) is safe here and left on.
+  app.use(helmet({ contentSecurityPolicy: false }));
+  // CORS_ORIGIN is unset by default (local dev, CI, and every existing test
+  // never set it), so this is cors(undefined) — identical to the previous
+  // cors() call, zero behavior change until a real deployment sets it to
+  // its actual frontend origin(s). See lib/corsOrigins.ts.
+  app.use(cors(buildCorsOptions(process.env.CORS_ORIGIN)));
   app.use(express.json());
   // Local-disk logo storage — see lib/uploads.ts for why this is a stopgap.
   app.use("/uploads", express.static(uploadsDir));
