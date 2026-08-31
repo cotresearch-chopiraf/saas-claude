@@ -134,6 +134,13 @@
       "when": 1788128800127,
       "tag": "0018_tiny_wolfsbane",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1788202320860,
+      "tag": "0019_naive_scourge",
+      "breakpoints": true
     }
   ]
 }

@@ -10,6 +10,7 @@ import {
   pgEnum,
   uniqueIndex,
   index,
+  check,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { relations, sql } from "drizzle-orm";
@@ -1687,3 +1688,163 @@ export const supportSessions = pgTable("support_sessions", {
   expiresAt: timestamp("expires_at").notNull(),
   revokedAt: timestamp("revoked_at"),
 });
+
+// --- ZATCA e-invoicing — multi-tenant EGS/submission persistence (Slice 2) ---
+// Every table below is tenant-scoped via companyId, the same discipline as
+// every other table in this file. This slice is persistence-only: no route
+// wires into these tables yet (that is a later, separately-gated slice),
+// no FATOORA API call exists anywhere in the codebase, and no column here
+// ever holds a real secret — secretRef is an opaque reference into a
+// not-yet-built secret store. See server/src/lib/zatca/domain/ for the
+// tenant-scoped read/write functions and docs/ZATCA_IMPLEMENTATION_STATUS.md
+// for exactly what is and isn't implemented.
+//
+// ICV is a dedicated per-(company, EGS unit) counter — deliberately never
+// companies.next_invoice_number, whose own gap risk (documented in the
+// ZATCA discovery report: claimed before its enclosing invoice-creation
+// transaction commits) would violate ZATCA's no-gap ICV requirement if
+// reused. Nothing below reads or writes next_invoice_number.
+
+export const zatcaEnvironmentEnum = pgEnum("zatca_environment", ["simulation", "production"]);
+
+export const zatcaEgsStatusEnum = pgEnum("zatca_egs_status", [
+  "not_onboarded",
+  "onboarding",
+  "active",
+  "revoked",
+  "deactivated",
+]);
+
+export const zatcaCsidStatusEnum = pgEnum("zatca_csid_status", [
+  "none",
+  "compliance_pending",
+  "compliance_issued",
+  "production_issued",
+  "expired",
+  "revoked",
+]);
+
+export const zatcaSubmissionStateEnum = pgEnum("zatca_submission_state", [
+  "not_submitted",
+  "ready_for_submission",
+  "submitting",
+  "submitted",
+  "cleared",
+  "reported",
+  "rejected",
+  "retry_required",
+  "compliance_pending",
+  "compliance_failed",
+]);
+
+// UBL/ZATCA document type codes: 388 = Tax Invoice (standard or
+// simplified, distinguished by the `subtype` column below), 381 = Credit
+// Note, 383 = Debit Note.
+export const zatcaDocumentTypeEnum = pgEnum("zatca_document_type", ["388", "381", "383"]);
+
+// One row per EGS (E-invoicing Generation Solution) unit a company has
+// registered. secretRef must never hold an actual private key, CSID
+// secret, or certificate material — see the file-level comment above.
+export const zatcaEgsUnits = pgTable(
+  "zatca_egs_units",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    environment: zatcaEnvironmentEnum("environment").notNull(),
+    status: zatcaEgsStatusEnum("status").notNull().default("not_onboarded"),
+    onboardingStatus: text("onboarding_status"),
+    csidStatus: zatcaCsidStatusEnum("csid_status").notNull().default("none"),
+    certificateExpiresAt: timestamp("certificate_expires_at"),
+    secretRef: text("secret_ref"),
+    // The PIH chain pointer for this EGS: the hash of the most recently
+    // submitted document. Read/updated only under a row lock (SELECT ...
+    // FOR UPDATE on this row) by a future submission function — this
+    // slice adds no submission trigger anywhere, only the read/update-
+    // under-lock primitive in domain/pih.ts.
+    lastDocumentHash: text("last_document_hash"),
+    lastCommunicationAt: timestamp("last_communication_at"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    companyIdx: index("zatca_egs_units_company_idx").on(table.companyId),
+  }),
+);
+
+// A dedicated ICV (Invoice Counter Value) per (company, EGS unit) — see
+// the file-level comment for why this is never companies.next_invoice_number.
+export const zatcaIcvCounters = pgTable(
+  "zatca_icv_counters",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    egsUnitId: uuid("egs_unit_id")
+      .notNull()
+      .references(() => zatcaEgsUnits.id, { onDelete: "cascade" }),
+    value: integer("value").notNull().default(0),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    oneCounterPerEgs: uniqueIndex("zatca_icv_counters_company_egs_unique").on(table.companyId, table.egsUnitId),
+  }),
+);
+
+// The full lifecycle record of one ZATCA submission attempt. Exactly one
+// of invoiceId/creditNoteId/debitNoteId may be populated — enforced by a
+// real DB CHECK constraint, not just application code, since this is a
+// genuine data-integrity invariant. creditNoteId/debitNoteId have no FK
+// yet (those tables don't exist until a later slice) — plain nullable
+// uuid columns for now.
+export const zatcaSubmissions = pgTable(
+  "zatca_submissions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    egsUnitId: uuid("egs_unit_id")
+      .notNull()
+      .references(() => zatcaEgsUnits.id, { onDelete: "cascade" }),
+    invoiceId: uuid("invoice_id").references(() => invoices.id, { onDelete: "cascade" }),
+    creditNoteId: uuid("credit_note_id"),
+    debitNoteId: uuid("debit_note_id"),
+    documentTypeCode: zatcaDocumentTypeEnum("document_type_code").notNull(),
+    subtype: text("subtype").notNull(),
+    zatcaUuid: uuid("uuid").notNull().unique(),
+    icv: integer("icv").notNull(),
+    pih: text("pih").notNull(),
+    documentHash: text("document_hash").notNull(),
+    environment: zatcaEnvironmentEnum("environment").notNull(),
+    state: zatcaSubmissionStateEnum("state").notNull().default("not_submitted"),
+    zatcaStatus: text("zatca_status"),
+    zatcaErrorCode: text("zatca_error_code"),
+    zatcaErrorMessage: text("zatca_error_message"),
+    warnings: jsonb("warnings"),
+    requestId: text("request_id"),
+    correlationId: text("correlation_id"),
+    retryCount: integer("retry_count").notNull().default(0),
+    submittedAt: timestamp("submitted_at"),
+    respondedAt: timestamp("responded_at"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    companyIdx: index("zatca_submissions_company_idx").on(table.companyId),
+    egsUnitIdx: index("zatca_submissions_egs_unit_idx").on(table.egsUnitId),
+    invoiceIdx: index("zatca_submissions_invoice_idx").on(table.invoiceId),
+    exactlyOneDocumentReference: check(
+      "zatca_submissions_exactly_one_document_reference",
+      sql`(
+        (CASE WHEN ${table.invoiceId} IS NOT NULL THEN 1 ELSE 0 END) +
+        (CASE WHEN ${table.creditNoteId} IS NOT NULL THEN 1 ELSE 0 END) +
+        (CASE WHEN ${table.debitNoteId} IS NOT NULL THEN 1 ELSE 0 END)
+      ) = 1`,
+    ),
+  }),
+);
