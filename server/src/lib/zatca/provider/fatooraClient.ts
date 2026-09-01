@@ -25,9 +25,12 @@ import { randomUUID } from "node:crypto";
 import { logger } from "../../logger.js";
 import {
   ZatcaAuthenticationError,
+  ZatcaAuthorizationError,
+  ZatcaDuplicateError,
   ZatcaExternalServiceError,
   ZatcaConfigurationError,
   ZatcaNetworkError,
+  ZatcaRateLimitedError,
   ZatcaValidationError,
 } from "../errors.js";
 import type { ResolvedZatcaCredential, ZatcaEnvironmentName } from "./types.js";
@@ -156,14 +159,30 @@ export async function fatooraRequest(
 ): Promise<FatooraResponse> {
   const result = await doFetch(method, path, body, credential, config);
 
-  if (result.status === 401 || result.status === 403) {
-    throw new ZatcaAuthenticationError(`ZATCA rejected the configured credential (status ${result.status}, correlationId: ${result.correlationId})`);
+  // Slice 5 — each branch below maps ONLY standard HTTP status semantics
+  // (RFC 7231/6585) to a category; none of them parse or guess a
+  // ZATCA-specific response-body field. See errors.ts's class comments.
+  if (result.status === 401) {
+    throw new ZatcaAuthenticationError(`ZATCA rejected the configured credential (status 401, correlationId: ${result.correlationId})`);
+  }
+  if (result.status === 403) {
+    throw new ZatcaAuthorizationError(
+      `The configured credential is not authorized for this operation (status 403, correlationId: ${result.correlationId})`,
+    );
+  }
+  if (result.status === 429) {
+    throw new ZatcaRateLimitedError(`ZATCA rate-limited this request (status 429, correlationId: ${result.correlationId})`);
   }
   if (result.status >= 500) {
     throw new ZatcaExternalServiceError(`ZATCA is unavailable (status ${result.status}, correlationId: ${result.correlationId})`);
   }
   if (!result.bodyWasValidJson) {
     throw new ZatcaExternalServiceError(`ZATCA returned a non-JSON response (status ${result.status}, correlationId: ${result.correlationId})`);
+  }
+  if (result.status === 409) {
+    throw new ZatcaDuplicateError(
+      `ZATCA reported a conflict (status 409, correlationId: ${result.correlationId}) — commonly indicates this document was already submitted; exact ZATCA semantics for 409 are unverified against the primary specification`,
+    );
   }
   if (result.status >= 400) {
     throw new ZatcaValidationError(`ZATCA rejected the request (status ${result.status}, correlationId: ${result.correlationId})`);

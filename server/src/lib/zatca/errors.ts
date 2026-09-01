@@ -1,9 +1,13 @@
-// Structured ZATCA error taxonomy (Slice 3). Every error the provider
-// layer, secret store, or /api/zatca/* routes raise is one of these six
-// categories — never a raw Error — so callers (routes, Admin Dashboard,
-// audit) can handle "the tenant hasn't finished setup" (configuration)
-// differently from "ZATCA itself is down" (network/external_service)
-// without string-matching messages.
+// Structured ZATCA error taxonomy (Slice 3, extended Slice 5). Every error
+// the provider layer, secret store, or /api/zatca/* routes raise is one of
+// these categories — never a raw Error — so callers (routes, Admin
+// Dashboard, audit) can handle "the tenant hasn't finished setup"
+// (configuration) differently from "ZATCA itself is down" (network/
+// external_service) without string-matching messages. Slice 5 split
+// authorization/duplicate/rate_limited out of the generic authentication/
+// validation buckets using only standard HTTP semantics (RFC 7231/6585) —
+// never a ZATCA-specific response-body guess (see
+// docs/zatca/SPECIFICATION-VERIFICATION.md).
 //
 // `message` on every subclass here must already be safe to return in an
 // API response, render in the UI, write to a log line, or store in an
@@ -15,7 +19,10 @@
 export type ZatcaErrorCategory =
   | "configuration"
   | "authentication"
+  | "authorization"
   | "validation"
+  | "duplicate"
+  | "rate_limited"
   | "network"
   | "external_service"
   | "internal"
@@ -53,6 +60,19 @@ export class ZatcaAuthenticationError extends ZatcaError {
   }
 }
 
+// Slice 5 — HTTP 403: the credential was authenticated but is not
+// permitted to perform this action (e.g. a Compliance CSID used against a
+// Production-only endpoint). Standard HTTP semantics (RFC 7231 §6.5.3),
+// not a ZATCA-specific guess — deliberately distinct from 401
+// "authentication" so a caller can tell "this credential is invalid" from
+// "this credential is valid but not allowed to do this."
+export class ZatcaAuthorizationError extends ZatcaError {
+  constructor(message: string) {
+    super("authorization", message);
+    this.name = "ZatcaAuthorizationError";
+  }
+}
+
 // ZATCA received the request and rejected the document/content itself
 // (business-rule or schema violation, document rejected). Not retryable
 // as-is — the document must change first.
@@ -60,6 +80,30 @@ export class ZatcaValidationError extends ZatcaError {
   constructor(message: string) {
     super("validation", message);
     this.name = "ZatcaValidationError";
+  }
+}
+
+// Slice 5 — HTTP 409: standard HTTP semantics for "conflicts with the
+// current state of the resource" (RFC 7231 §6.5.8), commonly used by
+// submission-style APIs to signal an already-processed/duplicate request.
+// This is a generic HTTP interpretation, not a verified ZATCA-specific
+// response field — see docs/zatca/SPECIFICATION-VERIFICATION.md. Not
+// retryable: resubmitting the identical request will not change a
+// genuine conflict.
+export class ZatcaDuplicateError extends ZatcaError {
+  constructor(message: string) {
+    super("duplicate", message);
+    this.name = "ZatcaDuplicateError";
+  }
+}
+
+// Slice 5 — HTTP 429: standard HTTP semantics (RFC 6585 §4). Distinct
+// from generic "validation" so callers can back off and retry rather than
+// treating it as a permanent rejection.
+export class ZatcaRateLimitedError extends ZatcaError {
+  constructor(message: string) {
+    super("rate_limited", message, { retryable: true });
+    this.name = "ZatcaRateLimitedError";
   }
 }
 
@@ -115,6 +159,12 @@ export function httpStatusForZatcaError(err: ZatcaError): number {
       return 400;
     case "authentication":
       return 502;
+    case "authorization":
+      return 502;
+    case "duplicate":
+      return 409;
+    case "rate_limited":
+      return 429;
     case "network":
       return 504;
     case "external_service":

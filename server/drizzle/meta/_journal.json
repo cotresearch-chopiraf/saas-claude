@@ -141,6 +141,13 @@
       "when": 1788202320860,
       "tag": "0019_naive_scourge",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1788289137468,
+      "tag": "0020_left_celestials",
+      "breakpoints": true
     }
   ]
 }

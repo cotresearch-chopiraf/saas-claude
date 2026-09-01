@@ -199,6 +199,19 @@ function SimulationCard({ simulationUnits, onChanged }: { simulationUnits: Zatca
   const [submitOutcome, setSubmitOutcome] = useState<{ error?: string; category?: string; state?: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Slice 5 fix: useState's initializer only runs once at mount, so
+  // creating the tenant's first simulation EGS unit while already on this
+  // page (no reload) left egsUnitId permanently "" and the Prepare button
+  // permanently disabled — found via real browser testing, not a unit
+  // test. Re-syncs whenever the current selection no longer names a real
+  // unit in the list (covers both "list was empty" and "selected unit was
+  // deactivated/removed").
+  useEffect(() => {
+    if (!simulationUnits.some((u) => u.id === egsUnitId)) {
+      setEgsUnitId(simulationUnits[0]?.id ?? "");
+    }
+  }, [simulationUnits, egsUnitId]);
+
   useEffect(() => {
     apiFetch<Invoice[]>("/invoices")
       .then(setInvoices)

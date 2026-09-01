@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX IF NOT EXISTS "zatca_submissions_egs_unit_invoice_unique" ON "zatca_submissions" USING btree ("company_id","egs_unit_id","invoice_id");

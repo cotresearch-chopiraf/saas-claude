@@ -1838,6 +1838,21 @@ export const zatcaSubmissions = pgTable(
     companyIdx: index("zatca_submissions_company_idx").on(table.companyId),
     egsUnitIdx: index("zatca_submissions_egs_unit_idx").on(table.egsUnitId),
     invoiceIdx: index("zatca_submissions_invoice_idx").on(table.invoiceId),
+    // Slice 5 — closes a real concurrency gap found while testing: the
+    // application-level "does a submission already exist for this
+    // (company, EGS unit, invoice)?" check in domain/submissions.ts's
+    // findSubmissionForInvoice() is a check-then-act race under genuine
+    // concurrent requests (two parallel /prepare calls can both pass the
+    // check before either has inserted its row). Postgres NULLs are never
+    // equal to each other in a unique index, so this only constrains rows
+    // that actually reference an invoice — credit/debit-note rows
+    // (invoice_id NULL) are unaffected and unlimited, matching the
+    // exactly-one-document-reference check below.
+    oneSubmissionPerInvoicePerEgsUnit: uniqueIndex("zatca_submissions_egs_unit_invoice_unique").on(
+      table.companyId,
+      table.egsUnitId,
+      table.invoiceId,
+    ),
     exactlyOneDocumentReference: check(
       "zatca_submissions_exactly_one_document_reference",
       sql`(

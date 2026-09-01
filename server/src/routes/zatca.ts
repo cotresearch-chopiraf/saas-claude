@@ -47,6 +47,17 @@ export const zatcaRouter = Router();
 const requireConfigure = requirePermission("zatca.configure");
 const requireSubmit = requirePermission("zatca.submit");
 
+// Slice 5 — detects a Postgres unique-violation (23505) on
+// zatca_submissions_egs_unit_invoice_unique specifically, never any other
+// constraint violation. A raw `pg` DatabaseError propagates through
+// drizzle unchanged, carrying `code`/`constraint` — this is standard
+// node-postgres error shape, not a ZATCA-specific assumption.
+function isDuplicateSubmissionRaceError(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const e = err as { code?: unknown; constraint?: unknown };
+  return e.code === "23505" && e.constraint === "zatca_submissions_egs_unit_invoice_unique";
+}
+
 interface EgsUnitRow {
   id: string;
   name: string;
@@ -442,6 +453,17 @@ zatcaRouter.post(
       });
     } catch (err) {
       if (err instanceof EgsUnitNotFoundError) return res.status(404).json({ error: "وحدة الفوترة الإلكترونية غير موجودة" });
+      if (isDuplicateSubmissionRaceError(err)) {
+        // Slice 5 — a genuinely concurrent request won the race and
+        // already inserted the submission for this exact (company, EGS
+        // unit, invoice) tuple; this request's own ICV claim and PIH
+        // advance were rolled back along with the whole failed
+        // transaction (see schema.ts's zatca_submissions_egs_unit_invoice_unique
+        // comment), so nothing was wasted. Return the winner's row, same
+        // as the pre-check idempotent-return path above.
+        const existing = await findSubmissionForInvoice(req.companyId!, req.params.id, req.params.invoiceId);
+        if (existing) return res.json({ submission: existing, alreadyExists: true });
+      }
       throw err;
     }
 

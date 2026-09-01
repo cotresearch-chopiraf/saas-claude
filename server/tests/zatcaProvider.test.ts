@@ -3,9 +3,12 @@ import http from "node:http";
 import { FatooraProvider } from "../src/lib/zatca/provider/fatooraProvider.js";
 import {
   ZatcaAuthenticationError,
+  ZatcaAuthorizationError,
   ZatcaConfigurationError,
+  ZatcaDuplicateError,
   ZatcaExternalServiceError,
   ZatcaNetworkError,
+  ZatcaRateLimitedError,
   ZatcaValidationError,
 } from "../src/lib/zatca/errors.js";
 
@@ -156,15 +159,53 @@ describe("FatooraProvider document submission", () => {
     await expect(new FatooraProvider("simulation").clearInvoice(credential, document)).rejects.toBeInstanceOf(ZatcaNetworkError);
   }, 15000);
 
-  it.each([404, 409, 429])("throws ZatcaValidationError on a %i response", async (status) => {
+  it("throws ZatcaValidationError on a 404 response", async () => {
     const server = await startMockServer((_req, res) => {
-      res.writeHead(status, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: `status ${status}` }));
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "status 404" }));
     });
     cleanup = server.close;
     setEnv(server.url);
 
     await expect(new FatooraProvider("simulation").clearInvoice(credential, document)).rejects.toBeInstanceOf(ZatcaValidationError);
+  });
+
+  // Slice 5 — 403 (authorization), 409 (duplicate), and 429 (rate_limited)
+  // are now distinct categories from generic validation/authentication —
+  // standard HTTP semantics only, see errors.ts.
+  it("throws ZatcaAuthorizationError on a 403 response, distinct from 401 authentication", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(403, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "forbidden" }));
+    });
+    cleanup = server.close;
+    setEnv(server.url);
+
+    await expect(new FatooraProvider("simulation").clearInvoice(credential, document)).rejects.toBeInstanceOf(ZatcaAuthorizationError);
+  });
+
+  it("throws ZatcaDuplicateError on a 409 response", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(409, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "conflict" }));
+    });
+    cleanup = server.close;
+    setEnv(server.url);
+
+    await expect(new FatooraProvider("simulation").clearInvoice(credential, document)).rejects.toBeInstanceOf(ZatcaDuplicateError);
+  });
+
+  it("throws ZatcaRateLimitedError (retryable) on a 429 response", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(429, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "too many requests" }));
+    });
+    cleanup = server.close;
+    setEnv(server.url);
+
+    const err = await new FatooraProvider("simulation").clearInvoice(credential, document).catch((e) => e);
+    expect(err).toBeInstanceOf(ZatcaRateLimitedError);
+    expect(err.retryable).toBe(true);
   });
 
   it.each([500, 502, 503])("throws ZatcaExternalServiceError on a %i response", async (status) => {
