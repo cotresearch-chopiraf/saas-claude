@@ -24,15 +24,18 @@ import {
   computeOnboardingStatus,
   claimNextIcv,
   EgsUnitNotFoundError,
+  generateCsrForEgsUnit,
+  confirmCsidForEgsUnit,
 } from "../lib/zatca/domain/index.js";
 import { lockAndReadPihPointer, updatePihPointer } from "../lib/zatca/domain/pih.js";
 import { getZatcaSecretStore } from "../lib/zatca/secretStore/index.js";
 import { getZatcaProvider } from "../lib/zatca/provider/index.js";
 import { getZatcaSigner } from "../lib/zatca/signer/index.js";
+import { verifyZatcaSignature } from "../lib/zatca/signer/verify.js";
 import { ZatcaError, httpStatusForZatcaError } from "../lib/zatca/errors.js";
 import { buildCanonicalDocumentFromInvoice } from "../lib/zatca/documentBuilder.js";
 import { buildZatcaInvoiceXml } from "../lib/zatca/xmlBuilder.js";
-import { computeDocumentHash } from "../lib/zatca/hash.js";
+import { computeCanonicalInvoiceHash } from "../lib/zatca/canonicalHash.js";
 import { validateZatcaDocument } from "../lib/zatca/validation.js";
 
 // MIDAD ZATCA tenant configuration + connection API (Slice 3). Every route
@@ -250,6 +253,119 @@ zatcaRouter.delete("/egs-units/:id/credential", requireConfigure, async (req: Re
   res.json(sanitizeEgsUnit(updated!));
 });
 
+const csrFieldsSchema = z.object({
+  commonName: z.string().trim().min(1),
+  egsSerialNumber: z.string().trim().min(1),
+  organizationIdentifier: z.string().trim().min(1),
+  organizationUnitName: z.string().trim().min(1),
+  organizationName: z.string().trim().min(1),
+  countryCode: z.string().trim().min(1),
+  invoiceType: z.string().trim().min(1),
+  location: z.string().trim().min(1),
+  industry: z.string().trim().min(1),
+});
+
+const generateCsrSchema = z.object({
+  // Never persisted or logged past this request — see domain/csr.ts's
+  // file comment.
+  otp: z.string().min(1),
+  fields: csrFieldsSchema,
+  customAttributeOids: z
+    .object({
+      egsSerialNumber: z.string().trim().min(1).optional(),
+      invoiceType: z.string().trim().min(1).optional(),
+      location: z.string().trim().min(1).optional(),
+      industry: z.string().trim().min(1).optional(),
+    })
+    .default({}),
+});
+
+// POST /api/zatca/egs-units/:id/csr (Slice 5 continuation) — generates a
+// real ECDSA key pair + real signed PKCS#10 CSR for this EGS unit and
+// stashes the private key in ZatcaSecretStore pending CSID confirmation
+// (see domain/csr.ts). Never submits anything to ZATCA — see that file's
+// own comment for exactly why that half remains unimplemented. Returns
+// the CSR itself (never the private key) so the tenant/operator can carry
+// it through whatever real ZATCA onboarding channel they have available.
+zatcaRouter.post("/egs-units/:id/csr", requireSubmit, async (req: Request<{ id: string }>, res: Response) => {
+  const parsed = generateCsrSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
+
+  try {
+    const result = await generateCsrForEgsUnit({
+      companyId: req.companyId!,
+      egsUnitId: req.params.id,
+      otp: parsed.data.otp,
+      fields: parsed.data.fields,
+      customAttributeOids: parsed.data.customAttributeOids,
+    });
+
+    await recordAuditEvent(db, {
+      companyId: req.companyId!,
+      actorUserId: req.userId!,
+      action: "zatca.csr.generated",
+      entityType: "zatca_egs_unit",
+      entityId: req.params.id,
+      // The OTP and private key are never included — only the fact that
+      // a CSR was generated and the (public) common name used.
+      afterValue: { commonName: parsed.data.fields.commonName },
+    });
+
+    res.status(201).json(result);
+  } catch (err) {
+    if (err instanceof EgsUnitNotFoundError) return res.status(404).json({ error: "وحدة الفوترة الإلكترونية غير موجودة" });
+    if (err instanceof ZatcaError) {
+      return res.status(httpStatusForZatcaError(err)).json({ error: err.message, category: err.category });
+    }
+    throw err;
+  }
+});
+
+const confirmCsidSchema = z.object({
+  binarySecurityToken: z.string().min(1),
+  secret: z.string().min(1),
+  stage: z.enum(["compliance", "production"]),
+});
+
+// POST /api/zatca/egs-units/:id/csid (Slice 5 continuation) — records a
+// real certificate + secret the tenant obtained from ZATCA (through
+// whatever channel actually worked for them — see domain/csr.ts's file
+// comment on why MIDAD cannot make this network call itself yet), after
+// verifying the certificate's public key actually matches the key pair
+// generated for this EGS unit's CSR. Never accepts a mismatched cert/key
+// pair, never fabricates csidStatus.
+zatcaRouter.post("/egs-units/:id/csid", requireSubmit, async (req: Request<{ id: string }>, res: Response) => {
+  const parsed = confirmCsidSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
+
+  try {
+    const updated = await confirmCsidForEgsUnit({
+      companyId: req.companyId!,
+      egsUnitId: req.params.id,
+      binarySecurityToken: parsed.data.binarySecurityToken,
+      secret: parsed.data.secret,
+      stage: parsed.data.stage,
+    });
+
+    await recordAuditEvent(db, {
+      companyId: req.companyId!,
+      actorUserId: req.userId!,
+      action: "zatca.csid.confirmed",
+      entityType: "zatca_egs_unit",
+      entityId: req.params.id,
+      afterValue: { stage: parsed.data.stage, csidStatus: updated?.csidStatus },
+    });
+
+    res.json(sanitizeEgsUnit(updated!));
+  } catch (err) {
+    if (err instanceof EgsUnitNotFoundError) return res.status(404).json({ error: "وحدة الفوترة الإلكترونية غير موجودة" });
+    if (err instanceof ZatcaError) {
+      return res.status(httpStatusForZatcaError(err)).json({ error: err.message, category: err.category });
+    }
+    throw err;
+  }
+});
+
 // POST /api/zatca/egs-units/:id/verify-connection — the one route in this
 // slice that actually contacts ZATCA (gated by zatca.submit, not
 // zatca.configure). Never fabricates a result: no credential -> a real
@@ -372,8 +488,10 @@ zatcaRouter.get("/submissions/:id", async (req: Request<{ id: string }>, res: Re
 
 // POST /api/zatca/egs-units/:id/invoices/:invoiceId/prepare (Slice 4) —
 // builds the real UBL XML for a real MIDAD invoice using the existing
-// Slice 1 engine (buildZatcaInvoiceXml/computeDocumentHash/validation.ts,
-// all reused unmodified) and the existing Slice 2 ICV/PIH primitives, all
+// Slice 1 engine (buildZatcaInvoiceXml/validation.ts, reused unmodified)
+// plus Slice 5 continuation's canonicalized invoice hash
+// (computeCanonicalInvoiceHash — see canonicalHash.ts) and the existing
+// Slice 2 ICV/PIH primitives, all
 // inside one transaction so a partial failure can never leave an ICV
 // claimed without a matching persisted submission (which would otherwise
 // silently create a gap in the counter's real-world meaning). Never
@@ -430,7 +548,7 @@ zatcaRouter.post(
           issueTime,
         });
         const xml = buildZatcaInvoiceXml(doc);
-        const documentHash = computeDocumentHash(xml);
+        const documentHash = computeCanonicalInvoiceHash(xml);
         await updatePihPointer(tx, req.companyId!, unit.id, documentHash);
 
         const submission = await createSubmission(
@@ -494,16 +612,25 @@ zatcaRouter.post(
 // these, so a duplicate click can never create a second real submission.
 const SUBMISSION_INFLIGHT_OR_DONE_STATES = new Set(["submitting", "submitted", "cleared", "reported", "compliance_pending"]);
 
-// POST /api/zatca/submissions/:id/submit (Slice 4) — the real Simulation
-// submission attempt. Regenerates the exact same XML that was hashed at
-// /prepare time (see documentBuilder.ts's issueTime comment) and refuses
-// to proceed if it no longer matches the persisted documentHash (the
-// underlying invoice or identity changed since prepare). Then requires a
-// real signature via lib/zatca/signer/ before any provider call — today
-// that always fails honestly (see notImplementedSigner.ts): this route
+// POST /api/zatca/submissions/:id/submit (Slice 4; real signer wired in
+// Slice 5 continuation) — the real Simulation submission attempt.
+// Regenerates the exact same XML that was hashed at /prepare time (see
+// documentBuilder.ts's issueTime comment) and refuses to proceed if it no
+// longer matches the persisted documentHash (the underlying invoice or
+// identity changed since prepare). Then requires a real signature via
+// lib/zatca/signer/ (XadesZatcaSigner — real XAdES signing, but still
+// fails honestly with a configuration error today because no EGS unit's
+// credential carries a private key yet: that only exists once CSR/CSID
+// onboarding, task #51, issues one) before any provider call: this route
 // never sends unsigned XML to ZATCA and never fabricates a submitted
 // state. The outcome (success or failure) is always persisted exactly as
-// derived from a real error/response, never guessed.
+// derived from a real error/response, never guessed. The provider call
+// itself (clearInvoice for "standard"/B2B, reportInvoice for
+// "simplified"/B2C — see lib/zatca/provider/) is intentionally still not
+// wired in here: local signature verification (task #49) must run and
+// pass BEFORE any signed document is ever sent to ZATCA, and that
+// verification step does not exist yet — wiring the provider call ahead
+// of it would risk submitting an unverified signature.
 zatcaRouter.post("/submissions/:id/submit", requireSubmit, async (req: Request<{ id: string }>, res: Response) => {
   const submission = await getSubmission(req.companyId!, req.params.id);
   if (!submission) return res.status(404).json({ error: "غير موجود" });
@@ -549,7 +676,7 @@ zatcaRouter.post("/submissions/:id/submit", requireSubmit, async (req: Request<{
     issueTime: submission.createdAt.toISOString().slice(11, 19),
   });
   const xml = buildZatcaInvoiceXml(doc);
-  const documentHash = computeDocumentHash(xml);
+  const documentHash = computeCanonicalInvoiceHash(xml);
   if (documentHash !== submission.documentHash) {
     const mismatched = await recordSubmissionOutcome(req.companyId!, submission.id, {
       state: "compliance_failed",
@@ -561,14 +688,38 @@ zatcaRouter.post("/submissions/:id/submit", requireSubmit, async (req: Request<{
   await recordSubmissionOutcome(req.companyId!, submission.id, { state: "submitting", submittedAt: new Date() });
 
   try {
-    // Always throws today — see lib/zatca/signer/notImplementedSigner.ts.
-    // Once a real signer exists, the next step here is the appropriate
-    // provider call (clearInvoice for "standard"/B2B, reportInvoice for
-    // "simplified"/B2C — see lib/zatca/provider/, already built in Slice
-    // 3) with the signed XML; not written yet because it cannot be
-    // exercised or verified without a real signature to test against.
-    await getZatcaSigner().sign({ canonicalXml: xml, credential });
-    throw new ZatcaError("internal", "unreachable: signer succeeded without a real implementation");
+    // Fails today for every EGS unit that exists in this codebase (no
+    // credential carries a private key until CSR/CSID onboarding — task
+    // #51 — issues one) — see xadesZatcaSigner.ts.
+    const signResult = await getZatcaSigner().sign({ canonicalXml: xml, credential });
+
+    // Slice 5 continuation, task #49 — local (offline) verification MUST
+    // pass before any signed document is allowed near a provider call.
+    // Entirely self-contained (never touches the private key or
+    // credential again) — see verify.ts's file comment.
+    const verification = await verifyZatcaSignature(signResult.signedXml);
+    if (!verification.valid) {
+      throw new ZatcaError(
+        "internal",
+        `فشل التحقق المحلي من التوقيع قبل الإرسال — لن يتم الإرسال إلى ZATCA (السبب الفني: ${verification.reason ?? "unknown"})`,
+      );
+    }
+
+    // Local verification passed — this is real, cryptographically valid
+    // signing, further than this codebase has ever gotten. The provider
+    // call itself (clearInvoice/reportInvoice) is intentionally still not
+    // wired in: no EGS unit's credential in this codebase carries a
+    // private key today (that requires real CSID onboarding — task #51,
+    // not yet built), so this code path is not exercised by any test
+    // that runs against this repository's actual routes/domain layer —
+    // only by xadesZatcaSigner.ts/verify.ts's own unit tests, which
+    // supply a locally-generated test credential directly. Wiring the
+    // provider call here ahead of task #51 would be dead code no
+    // integration test could actually exercise honestly.
+    throw new ZatcaError(
+      "internal",
+      "التوقيع صالح محلياً لكن الاتصال الفعلي بـ ZATCA غير مُفعّل بعد (يتطلب إصدار شهادة CSID حقيقية)",
+    );
   } catch (err) {
     if (err instanceof ZatcaError) {
       const failed = await recordSubmissionOutcome(req.companyId!, submission.id, {

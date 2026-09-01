@@ -12,6 +12,7 @@ import {
   zatcaEgsUnits,
   type zatcaEgsStatusEnum,
   type zatcaEnvironmentEnum,
+  type zatcaCsidStatusEnum,
 } from "../../../db/schema.js";
 
 // The single source of truth for this error — icv.ts and pih.ts both
@@ -85,6 +86,29 @@ export async function updateEgsUnitStatus(
       status,
       updatedAt: new Date(),
       ...(options.lastCommunicationAt ? { lastCommunicationAt: options.lastCommunicationAt } : {}),
+    })
+    .where(and(eq(zatcaEgsUnits.id, egsUnitId), eq(zatcaEgsUnits.companyId, companyId)))
+    .returning();
+  return updated;
+}
+
+// Slice 5 continuation — records a real CSID lifecycle transition (never
+// a client-supplied value; only domain/csr.ts calls this, and only after
+// generating a real CSR or confirming a real certificate — see its own
+// file comment). certificateExpiresAt is set only when a real certificate
+// was just parsed (CSID confirmation), never guessed.
+export async function updateEgsUnitCsidStatus(
+  companyId: string,
+  egsUnitId: string,
+  csidStatus: (typeof zatcaCsidStatusEnum.enumValues)[number],
+  options: { certificateExpiresAt?: Date } = {},
+) {
+  const [updated] = await db
+    .update(zatcaEgsUnits)
+    .set({
+      csidStatus,
+      updatedAt: new Date(),
+      ...(options.certificateExpiresAt ? { certificateExpiresAt: options.certificateExpiresAt } : {}),
     })
     .where(and(eq(zatcaEgsUnits.id, egsUnitId), eq(zatcaEgsUnits.companyId, companyId)))
     .returning();

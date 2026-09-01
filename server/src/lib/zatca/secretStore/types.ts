@@ -9,6 +9,24 @@ export interface ZatcaSecret {
   // onboarding, and its paired secret.
   binarySecurityToken: string;
   secret: string;
+  // Slice 5 continuation — the ECDSA private key MIDAD generated locally
+  // (lib/zatca/csr/keyPair.ts) during CSR/CSID onboarding, and the curve
+  // it's on. Optional: a credential connected via the older manual
+  // "connect credentials" form (routes/zatca.ts's POST .../credential)
+  // never has one, and real XAdES signing refuses to run without it (see
+  // signer/xadesZatcaSigner.ts) rather than fabricate a signature. Never
+  // logged, never returned from an API route — this interface's whole
+  // point is keeping this out of any plaintext DB column.
+  privateKeyPem?: string;
+  curve?: string;
+  // Set only transiently, between CSR generation and CSID confirmation
+  // (domain/csr.ts) — lets confirmCsidForEgsUnit() verify the certificate
+  // ZATCA issued actually matches the key pair MIDAD generated for the
+  // CSR, before ever storing it as this EGS unit's active credential.
+  // Cleared (not carried forward) once CSID is confirmed — a public key
+  // is not secret, but there is no reason to keep it once its one job is
+  // done.
+  publicKeyPem?: string;
 }
 
 export interface ZatcaSecretStore {

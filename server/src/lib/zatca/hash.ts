@@ -10,11 +10,16 @@
 // first document's PIH is Base64(SHA-256(\"0\"))" are cross-corroborated
 // across many independent secondary sources describing ZATCA's Security
 // Features Implementation Standard — unverified against the primary
-// document (blocked from fetching zatca.gov.sa in this environment). The
-// EXACT bytes ZATCA expects to be hashed (e.g. whether certain UBL
-// extension/signature elements are excluded before hashing) could not be
-// confirmed and is intentionally left as the caller's responsibility — see
-// docs/ZATCA_IMPLEMENTATION_STATUS.md.
+// document (blocked from fetching zatca.gov.sa in this environment).
+//
+// This module is the raw hash PRIMITIVE only (plain SHA-256 + Base64 of
+// whatever bytes it's given) — used for the PIH genesis value and any
+// generic chaining need. It intentionally does NOT implement ZATCA's
+// specific invoice-hash contract (remove UBLExtensions/QR reference/
+// Signature, canonicalize, then hash) — that real, XML-aware
+// canonicalization lives in canonicalHash.ts's computeCanonicalInvoiceHash,
+// which is what routes/zatca.ts actually calls when hashing a real
+// invoice document. See docs/zatca/SLICE5_OFFICIAL_SPEC_VERIFICATION.md.
 
 import { createHash } from "crypto";
 

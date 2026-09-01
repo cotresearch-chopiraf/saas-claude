@@ -19,6 +19,15 @@
 // ZATCA clearance/reporting response — never fabricated locally):
 //   6 = XML invoice hash (Base64 SHA-256), 7 = ECDSA signature,
 //   8 = ECDSA public key, 9 = ZATCA certificate signature of the public key.
+//
+// Slice 5 continuation: tags 6-8 are now genuinely derivable from a real
+// XadesZatcaSigner output — see qrCryptographicTags.ts's
+// deriveZatcaQrCryptographicTags/buildZatcaQrTags1Through8. Tag 9 remains
+// impossible to produce (it is ZATCA's own CA signature, not something
+// MIDAD can compute) — buildPhase2QrPayload below still requires it as a
+// non-optional field for exactly that reason, and
+// buildZatcaQrTags1Through8 deliberately never claims to build a
+// "Phase 2" payload since it omits tag 9.
 
 export const ZATCA_QR_TAG = {
   sellerName: 1,

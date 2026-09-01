@@ -8,8 +8,14 @@ import { eq } from "drizzle-orm";
 
 // MIDAD ZATCA Slice 4 — /api/zatca/*/prepare and /submit route tests:
 // idempotency, tenant isolation, authorization, and the honest
-// (never-fabricated) submit outcome given the signing boundary is
-// unimplemented in this environment (see lib/zatca/signer/).
+// (never-fabricated) submit outcome. Slice 5 continuation wired in a real
+// signer (XadesZatcaSigner) — but the "connect credentials" form these
+// tests use (POST .../credential) still only collects
+// binarySecurityToken/secret, never a private key (that only exists once
+// CSR/CSID onboarding — task #51 — issues one), so submit here still
+// fails honestly every time, now for a more specific reason
+// (configuration: no private key) rather than the old blanket
+// not_implemented — see lib/zatca/signer/xadesZatcaSigner.ts.
 
 vi.mock("../src/lib/mailer.js", () => ({ sendMail: vi.fn() }));
 import { sendMail } from "../src/lib/mailer.js";
@@ -219,7 +225,7 @@ describe("POST /api/zatca/submissions/:id/submit", () => {
     expect(res.body.category).toBe("configuration");
   });
 
-  it("NEVER FABRICATES SUCCESS: with a credential connected, submit honestly fails at the signing boundary (not_implemented), never a fake accepted/cleared state", async () => {
+  it("NEVER FABRICATES SUCCESS: with a credential connected but no private key yet, submit honestly fails at the signing boundary (configuration), never a fake accepted/cleared state", async () => {
     const { egsUnitId, submissionId } = await prepareSubmission();
     await request(app)
       .post(`/api/zatca/egs-units/${egsUnitId}/credential`)
@@ -227,8 +233,8 @@ describe("POST /api/zatca/submissions/:id/submit", () => {
       .send({ binarySecurityToken: "tok", secret: "sec" });
 
     const res = await request(app).post(`/api/zatca/submissions/${submissionId}/submit`).set("Authorization", `Bearer ${tokenA}`);
-    expect(res.status).toBe(501);
-    expect(res.body.category).toBe("not_implemented");
+    expect(res.status).toBe(400);
+    expect(res.body.category).toBe("configuration");
     expect(res.body.submission.state).toBe("compliance_failed");
     expect(["cleared", "reported", "accepted", "submitted"]).not.toContain(res.body.submission.state);
   });

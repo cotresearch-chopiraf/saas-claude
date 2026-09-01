@@ -12,9 +12,25 @@ export type ZatcaEnvironmentName = "simulation" | "production";
 // Field names follow ZATCA's own onboarding terminology: the X.509
 // certificate issued during CSID onboarding (binarySecurityToken) paired
 // with its secret, used as HTTP Basic Authentication credentials.
+//
+// privateKeyPem/curve (Slice 5 continuation) — the ECDSA private key
+// MIDAD generated locally (lib/zatca/csr/keyPair.ts) alongside the CSR
+// that produced this credential's certificate. ZATCA never sends this
+// back; it exists here only because ZatcaSecretStore is where MIDAD keeps
+// the whole credential together (private key included) once CSID
+// onboarding (task #51) actually persists one. Optional because every
+// credential created before that exists (the Slice 3 manual
+// "connect credentials" form) has no private key at all — signing with
+// such a credential fails with a clear configuration error, never a
+// fabricated signature. Never logged, never returned from an API route,
+// never written to an ordinary DB column — ZatcaSecretStore's own
+// implementation is what's responsible for keeping it out of plaintext at
+// rest.
 export interface ResolvedZatcaCredential {
   binarySecurityToken: string;
   secret: string;
+  privateKeyPem?: string;
+  curve?: string;
 }
 
 export interface ZatcaConnectionCheckResult {
