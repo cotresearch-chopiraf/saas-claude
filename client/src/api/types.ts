@@ -966,11 +966,59 @@ export interface ZatcaSubmission {
   documentTypeCode: string;
   subtype: string;
   icv: number;
+  documentHash: string;
   environment: ZatcaEnvironment;
   state: string;
   zatcaStatus: string | null;
   zatcaErrorCode: string | null;
   zatcaErrorMessage: string | null;
+  retryCount: number;
   createdAt: string;
   respondedAt: string | null;
+}
+
+// MIDAD ZATCA onboarding (Slice 4) — server/src/lib/zatca/domain/onboarding.ts's
+// computed view, never a second status system. See that file's own
+// comment: status/csidStatus on each EGS unit remain the real, granular
+// source of truth; this is one derived summary of them.
+export type ZatcaOnboardingStatus =
+  | "not_configured"
+  | "configuration_incomplete"
+  | "ready_for_simulation"
+  | "simulation_connected"
+  | "simulation_failed"
+  | "production_not_enabled";
+
+export interface ZatcaOnboardingStatusSummary {
+  status: ZatcaOnboardingStatus;
+  identityComplete: boolean;
+  hasSimulationEgsUnit: boolean;
+  hasProductionEgsUnit: boolean;
+  simulationConnected: boolean;
+  productionConnected: boolean;
+}
+
+export interface ZatcaValidationIssue {
+  code: string;
+  message: string;
+}
+
+export interface ZatcaValidationResult {
+  valid: boolean;
+  errors: ZatcaValidationIssue[];
+  warnings: ZatcaValidationIssue[];
+  sdkVerified: boolean;
+}
+
+export interface ZatcaPrepareResult {
+  submission: ZatcaSubmission;
+  validation: ZatcaValidationResult;
+  alreadyExists: boolean;
+}
+
+export interface ZatcaSubmitResult {
+  submission: ZatcaSubmission;
+  alreadyAttempted?: boolean;
+  error?: string;
+  category?: string;
 }

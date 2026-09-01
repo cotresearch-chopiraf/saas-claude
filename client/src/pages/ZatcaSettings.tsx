@@ -18,9 +18,23 @@ import {
   configureZatcaCredential,
   clearZatcaCredential,
   verifyZatcaConnection,
+  getZatcaOnboardingStatus,
+  prepareZatcaSubmission,
+  submitZatcaSubmission,
+  listAllZatcaSubmissions,
 } from "../api/zatca";
-import { ApiError } from "../api/client";
-import type { ZatcaConfig, ZatcaEgsUnit, ZatcaEnvironment, ZatcaVerifyConnectionResult } from "../api/types";
+import { apiFetch, ApiError } from "../api/client";
+import type {
+  Invoice,
+  ZatcaConfig,
+  ZatcaEgsUnit,
+  ZatcaEnvironment,
+  ZatcaOnboardingStatus,
+  ZatcaOnboardingStatusSummary,
+  ZatcaPrepareResult,
+  ZatcaSubmission,
+  ZatcaVerifyConnectionResult,
+} from "../api/types";
 
 // MIDAD ZATCA e-invoicing settings (Slice 3) — a frontend consumer of
 // server/src/routes/zatca.ts only. This page never claims "ZATCA compliant"
@@ -74,15 +88,61 @@ function isCertificateExpiring(certificateExpiresAt: string | null): boolean {
   return days <= 30;
 }
 
+// Slice 4 — labels for server/src/lib/zatca/domain/onboarding.ts's
+// computed status. Wording deliberately avoids "compliant" anywhere; see
+// this file's header comment.
+const onboardingStatusLabel: Record<ZatcaOnboardingStatus, string> = {
+  not_configured: "لم يبدأ الإعداد بعد",
+  configuration_incomplete: "الإعداد غير مكتمل",
+  ready_for_simulation: "جاهزة لتجربة بيئة المحاكاة",
+  simulation_connected: "متصلة ببيئة المحاكاة",
+  simulation_failed: "فشل الاتصال ببيئة المحاكاة",
+  production_not_enabled: "بيئة الإنتاج غير مفعّلة بعد",
+};
+const onboardingStatusTone: Record<ZatcaOnboardingStatus, "neutral" | "success" | "warning" | "danger"> = {
+  not_configured: "neutral",
+  configuration_incomplete: "warning",
+  ready_for_simulation: "warning",
+  simulation_connected: "success",
+  simulation_failed: "danger",
+  production_not_enabled: "warning",
+};
+
+function OnboardingStatusBanner({ summary }: { summary: ZatcaOnboardingStatusSummary }) {
+  return (
+    <Card className="p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Badge tone={onboardingStatusTone[summary.status]}>{onboardingStatusLabel[summary.status]}</Badge>
+          <span className="text-xs text-stone-400">هذه ليست شهادة امتثال — هي حالة إعداد الاتصال فقط.</span>
+        </div>
+        <div className="flex flex-wrap gap-3 text-xs text-stone-500">
+          <span>الهوية الضريبية: {summary.identityComplete ? "مكتملة" : "غير مكتملة"}</span>
+          <span>بيئة المحاكاة: {summary.simulationConnected ? "متصلة" : summary.hasSimulationEgsUnit ? "غير متصلة" : "غير مُعدّة"}</span>
+          <span>بيئة الإنتاج: {summary.productionConnected ? "متصلة" : summary.hasProductionEgsUnit ? "غير متصلة" : "غير مُعدّة"}</span>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 export function ZatcaSettings() {
   const [config, setConfig] = useState<ZatcaConfig | null>(null);
+  const [onboarding, setOnboarding] = useState<ZatcaOnboardingStatusSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  // Remounts HistoryCard on every load() (identity/EGS/prepare/submit
+  // change) so its own submissions fetch is never stale from a single
+  // mount-only effect — see HistoryCard's own comment.
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
 
   async function load() {
     setError(null);
     try {
-      setConfig(await getZatcaConfig());
+      const [configRes, onboardingRes] = await Promise.all([getZatcaConfig(), getZatcaOnboardingStatus()]);
+      setConfig(configRes);
+      setOnboarding(onboardingRes);
+      setHistoryRefreshKey((k) => k + 1);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "تعذّر تحميل إعدادات الفوترة الإلكترونية");
     } finally {
@@ -101,7 +161,7 @@ export function ZatcaSettings() {
       </Layout>
     );
   }
-  if (error || !config) {
+  if (error || !config || !onboarding) {
     return (
       <Layout>
         <PageHeader title="الفوترة الإلكترونية (ZATCA)" subtitle="ربط شركتك بمنصة فاتورة السعودية للفوترة الإلكترونية." />
@@ -110,14 +170,234 @@ export function ZatcaSettings() {
     );
   }
 
+  const simulationUnits = config.egsUnits.filter((u) => u.environment === "simulation");
+
   return (
     <Layout>
       <PageHeader title="الفوترة الإلكترونية (ZATCA)" subtitle="ربط شركتك بمنصة فاتورة السعودية للفوترة الإلكترونية." />
       <div className="space-y-5">
+        <OnboardingStatusBanner summary={onboarding} />
         <IdentityCard identity={config.identity} onSaved={load} />
         <EgsUnitsCard units={config.egsUnits} onChanged={load} />
+        <SimulationCard simulationUnits={simulationUnits} onChanged={load} />
+        <HistoryCard key={historyRefreshKey} />
       </div>
     </Layout>
+  );
+}
+
+// --- Step 5: Simulation ----------------------------------------------------
+
+function SimulationCard({ simulationUnits, onChanged }: { simulationUnits: ZatcaEgsUnit[]; onChanged: () => void }) {
+  const [invoices, setInvoices] = useState<Invoice[] | null>(null);
+  const [invoicesError, setInvoicesError] = useState<string | null>(null);
+  const [egsUnitId, setEgsUnitId] = useState<string>(simulationUnits[0]?.id ?? "");
+  const [invoiceId, setInvoiceId] = useState<string>("");
+  const [preparing, setPreparing] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [prepareResult, setPrepareResult] = useState<ZatcaPrepareResult | null>(null);
+  const [submitOutcome, setSubmitOutcome] = useState<{ error?: string; category?: string; state?: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    apiFetch<Invoice[]>("/invoices")
+      .then(setInvoices)
+      .catch((err) => setInvoicesError(err instanceof ApiError ? err.message : "تعذّر تحميل الفواتير"));
+  }, []);
+
+  async function onPrepare() {
+    if (!egsUnitId || !invoiceId) return;
+    setError(null);
+    setPrepareResult(null);
+    setSubmitOutcome(null);
+    setPreparing(true);
+    try {
+      setPrepareResult(await prepareZatcaSubmission(egsUnitId, invoiceId));
+      onChanged();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "تعذّر تحضير المستند");
+    } finally {
+      setPreparing(false);
+    }
+  }
+
+  async function onSubmit() {
+    if (!prepareResult) return;
+    setSubmitting(true);
+    setSubmitOutcome(null);
+    try {
+      const result = await submitZatcaSubmission(prepareResult.submission.id);
+      setSubmitOutcome({ state: result.submission.state });
+    } catch (err) {
+      // apiFetch throws ApiError for the 400/404/409/501 outcomes /submit
+      // can return — this is the REAL result (e.g. "not_implemented" at
+      // the signing boundary), never hidden or reworded as success.
+      setSubmitOutcome({ error: err instanceof ApiError ? err.message : "تعذّر الإرسال" });
+    } finally {
+      setSubmitting(false);
+      onChanged(); // refresh onboarding status + History with the real persisted outcome
+    }
+  }
+
+  if (simulationUnits.length === 0) {
+    return (
+      <Card className="p-5">
+        <h2 className="mb-1 font-semibold text-stone-800">٥. بيئة المحاكاة (Simulation)</h2>
+        <EmptyState message="أنشئي وحدة فوترة إلكترونية ببيئة المحاكاة أولاً (الخطوة ٢)." />
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="p-5">
+      <h2 className="mb-1 font-semibold text-stone-800">٥. بيئة المحاكاة (Simulation)</h2>
+      <p className="mb-4 text-sm text-stone-500">
+        اختاري فاتورة ووحدة فوترة إلكترونية لتحضير مستند ZATCA حقيقي (XML + تجزئة + ICV/PIH)، ثم جرّبي إرساله. هذه بيئة
+        اختبار حقيقية — لا تُستخدم بيانات وهمية.
+      </p>
+      <Can permission="zatca.submit">
+        <div className="grid grid-cols-1 gap-3 border-b border-stone-100 pb-4 sm:grid-cols-3">
+          <select
+            value={egsUnitId}
+            onChange={(e) => setEgsUnitId(e.target.value)}
+            className="rounded-md border border-stone-300 px-3 py-2 text-sm"
+          >
+            {simulationUnits.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.name}
+              </option>
+            ))}
+          </select>
+          {invoicesError ? (
+            <div className="sm:col-span-2">
+              <ErrorState message={invoicesError} />
+            </div>
+          ) : (
+            <select
+              value={invoiceId}
+              onChange={(e) => setInvoiceId(e.target.value)}
+              className="rounded-md border border-stone-300 px-3 py-2 text-sm sm:col-span-2"
+            >
+              <option value="">
+                {invoices === null ? "جارٍ تحميل الفواتير..." : invoices.length === 0 ? "لا توجد فواتير" : "اختاري فاتورة"}
+              </option>
+              {(invoices ?? []).map((inv) => (
+                <option key={inv.id} value={inv.id}>
+                  {inv.invoiceNumber} — {inv.clientName}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+      </Can>
+
+      {error && <ErrorState message={error} />}
+
+      <Can permission="zatca.submit">
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button size="sm" disabled={preparing || !egsUnitId || !invoiceId} onClick={onPrepare}>
+            {preparing ? "جارٍ التحضير..." : "توليد المستند (XML) وتحضيره"}
+          </Button>
+          {prepareResult && (
+            <Button size="sm" variant="secondary" disabled={submitting} onClick={onSubmit}>
+              {submitting ? "جارٍ الإرسال..." : "إرسال إلى ZATCA (محاكاة)"}
+            </Button>
+          )}
+        </div>
+      </Can>
+
+      {prepareResult && (
+        <div className="mt-4 rounded-md bg-stone-50 p-3 text-xs text-stone-600">
+          <p>
+            {prepareResult.alreadyExists ? "تم تحضير هذا المستند مسبقاً — تمت إعادة استخدامه (لا تكرار)." : "تم تحضير مستند جديد."}
+          </p>
+          <p className="mt-1">رقم ICV: {prepareResult.submission.icv} · تجزئة المستند: {prepareResult.submission.documentHash.slice(0, 24)}…</p>
+          <p className="mt-1">
+            نتيجة التحقق البنيوي/الحسابي: {prepareResult.validation.valid ? "سليم" : "به أخطاء"} (هذا ليس تحقق SDK رسمي من
+            ZATCA — sdkVerified: {String(prepareResult.validation.sdkVerified)})
+          </p>
+          {prepareResult.validation.errors.length > 0 && (
+            <ul className="mt-1 list-inside list-disc text-danger-700">
+              {prepareResult.validation.errors.map((e) => (
+                <li key={e.code}>{e.message}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {submitOutcome && (
+        <div className="mt-3 rounded-md bg-warning-100 p-3 text-xs text-warning-700">
+          {submitOutcome.error ? (
+            <>
+              <p className="font-medium">لم يتم الإرسال إلى ZATCA فعلياً.</p>
+              <p className="mt-1">{submitOutcome.error}</p>
+            </>
+          ) : (
+            <p>حالة المستند الآن: {submitOutcome.state}</p>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+// --- Step 6: History --------------------------------------------------------
+
+const submissionStateLabel: Record<string, string> = {
+  not_submitted: "لم تُرسل بعد",
+  ready_for_submission: "جاهزة للإرسال",
+  submitting: "جارٍ الإرسال",
+  submitted: "أُرسلت",
+  cleared: "معتمدة (Clearance)",
+  reported: "مُبلَّغة (Reporting)",
+  rejected: "مرفوضة",
+  retry_required: "بحاجة لإعادة محاولة",
+  compliance_pending: "بانتظار فحص الامتثال",
+  compliance_failed: "فشل الإرسال",
+};
+
+// Remounted (via a changing `key`) by the parent's load() on every
+// identity/EGS/prepare/submit change — its own effect only fetches once
+// per mount, so without that remount a freshly prepared/submitted
+// submission would not appear until a manual page reload.
+function HistoryCard() {
+  const [submissions, setSubmissions] = useState<ZatcaSubmission[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  function load() {
+    setSubmissions(null);
+    setError(null);
+    listAllZatcaSubmissions()
+      .then(setSubmissions)
+      .catch((err) => setError(err instanceof ApiError ? err.message : "تعذّر تحميل سجل الإرسالات"));
+  }
+  useEffect(load, []);
+
+  return (
+    <Card className="p-5">
+      <h2 className="mb-1 font-semibold text-stone-800">٦. سجل إرسالات ZATCA</h2>
+      <p className="mb-4 text-sm text-stone-500">آخر المستندات التي تم تحضيرها أو محاولة إرسالها، بحالتها الحقيقية فقط.</p>
+      {error && <ErrorState message={error} onRetry={load} />}
+      {!error && !submissions && <Skeleton rows={3} />}
+      {!error && submissions && submissions.length === 0 && <EmptyState message="لا توجد إرسالات بعد." />}
+      {!error && submissions && submissions.length > 0 && (
+        <div className="space-y-2">
+          {submissions.map((s) => (
+            <div key={s.id} className="rounded-lg border border-stone-200 p-3 text-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="font-medium text-stone-800">ICV #{s.icv} · {s.environment === "production" ? "إنتاج" : "محاكاة"}</span>
+                <Badge tone={s.state === "compliance_failed" || s.state === "rejected" ? "danger" : s.state === "cleared" || s.state === "reported" ? "success" : "neutral"}>
+                  {submissionStateLabel[s.state] ?? s.state}
+                </Badge>
+              </div>
+              <p className="mt-1 text-xs text-stone-400">{formatDateTime(s.createdAt)} · محاولات: {s.retryCount}</p>
+              {s.zatcaErrorMessage && <p className="mt-1 text-xs text-danger-700">{s.zatcaErrorMessage}</p>}
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
   );
 }
 

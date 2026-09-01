@@ -145,6 +145,60 @@ describe("FatooraProvider document submission", () => {
 
     await expect(new FatooraProvider("simulation").clearInvoice(credential, document)).rejects.toBeInstanceOf(ZatcaNetworkError);
   }, 10000);
+
+  it("throws ZatcaNetworkError on connection refused (no server listening)", async () => {
+    setEnv("http://127.0.0.1:1"); // port 1 -- nothing listens there
+    await expect(new FatooraProvider("simulation").clearInvoice(credential, document)).rejects.toBeInstanceOf(ZatcaNetworkError);
+  });
+
+  it("throws ZatcaNetworkError on DNS resolution failure", async () => {
+    setEnv("http://this-host-does-not-resolve.invalid");
+    await expect(new FatooraProvider("simulation").clearInvoice(credential, document)).rejects.toBeInstanceOf(ZatcaNetworkError);
+  }, 15000);
+
+  it.each([404, 409, 429])("throws ZatcaValidationError on a %i response", async (status) => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(status, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: `status ${status}` }));
+    });
+    cleanup = server.close;
+    setEnv(server.url);
+
+    await expect(new FatooraProvider("simulation").clearInvoice(credential, document)).rejects.toBeInstanceOf(ZatcaValidationError);
+  });
+
+  it.each([500, 502, 503])("throws ZatcaExternalServiceError on a %i response", async (status) => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(status, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: `status ${status}` }));
+    });
+    cleanup = server.close;
+    setEnv(server.url);
+
+    await expect(new FatooraProvider("simulation").clearInvoice(credential, document)).rejects.toBeInstanceOf(ZatcaExternalServiceError);
+  });
+
+  it("NEVER converts an unrecognized 2xx body into success (no clearanceStatus/reportingStatus/status/validationResults at all)", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ somethingElse: "unexpected shape" }));
+    });
+    cleanup = server.close;
+    setEnv(server.url);
+
+    await expect(new FatooraProvider("simulation").clearInvoice(credential, document)).rejects.toBeInstanceOf(ZatcaExternalServiceError);
+  });
+
+  it("NEVER converts an empty 2xx body into success", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end("{}");
+    });
+    cleanup = server.close;
+    setEnv(server.url);
+
+    await expect(new FatooraProvider("simulation").clearInvoice(credential, document)).rejects.toBeInstanceOf(ZatcaExternalServiceError);
+  });
 });
 
 describe("FatooraProvider.checkConnection", () => {

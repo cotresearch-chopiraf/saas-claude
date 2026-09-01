@@ -4,7 +4,19 @@ import { PageHeader, Card, Badge, ErrorState, EmptyState, Skeleton, MetricCard }
 import { ApiError } from "../../api/client";
 import { formatDateTime } from "../../lib/format";
 import { getPlatformZatcaSummary } from "../api/zatca";
-import type { PlatformZatcaSummary } from "../api/types";
+import type { PlatformZatcaOnboardingStatus, PlatformZatcaSummary } from "../api/types";
+
+// Slice 4 — mirrors client/src/pages/ZatcaSettings.tsx's tenant-facing
+// labels for the SAME server-computed status
+// (server/src/lib/zatca/domain/onboarding.ts), never "compliant".
+const onboardingStatusLabel: Record<PlatformZatcaOnboardingStatus, string> = {
+  not_configured: "لم يبدأ الإعداد",
+  configuration_incomplete: "الإعداد غير مكتمل",
+  ready_for_simulation: "جاهزة للمحاكاة",
+  simulation_connected: "متصلة بالمحاكاة",
+  simulation_failed: "فشل الاتصال بالمحاكاة",
+  production_not_enabled: "الإنتاج غير مفعّل",
+};
 
 // MIDAD Admin Dashboard — ZATCA operations (Slice 3). Read-only, real data
 // only — every number here comes straight from GET /api/platform/zatca
@@ -43,6 +55,32 @@ export function PlatformZatca() {
               tone="default"
               hint="إنتاج / محاكاة"
             />
+          </section>
+
+          <section>
+            <h2 className="mb-3 text-sm font-semibold text-stone-700">توزيع حالة الإعداد عبر الشركات</h2>
+            <div className="flex flex-wrap gap-2">
+              {(Object.keys(summary.onboardingByStatus) as PlatformZatcaOnboardingStatus[]).map((status) => (
+                <Badge key={status} tone={summary.onboardingByStatus[status] > 0 ? "info" : "neutral"}>
+                  {onboardingStatusLabel[status]}: {summary.onboardingByStatus[status]}
+                </Badge>
+              ))}
+            </div>
+          </section>
+
+          <section>
+            <h2 className="mb-3 text-sm font-semibold text-stone-700">حالات إرسالات ZATCA (Simulation)</h2>
+            {Object.keys(summary.submissionsByState).length === 0 ? (
+              <EmptyState message="لا توجد إرسالات مسجّلة بعد." />
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(summary.submissionsByState).map(([state, count]) => (
+                  <Badge key={state} tone={state === "rejected" || state === "compliance_failed" ? "danger" : state === "cleared" || state === "reported" ? "success" : "neutral"}>
+                    {state}: {count}
+                  </Badge>
+                ))}
+              </div>
+            )}
           </section>
 
           <section>

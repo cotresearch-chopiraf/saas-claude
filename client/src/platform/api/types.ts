@@ -121,10 +121,23 @@ export interface PlatformZatcaSubmission {
   respondedAt: string | null;
 }
 
+// Slice 4 — mirrors server/src/lib/zatca/domain/onboarding.ts's
+// ZatcaOnboardingStatus exactly (see ../../api/types.ts's tenant-side
+// copy of the same union).
+export type PlatformZatcaOnboardingStatus =
+  | "not_configured"
+  | "configuration_incomplete"
+  | "ready_for_simulation"
+  | "simulation_connected"
+  | "simulation_failed"
+  | "production_not_enabled";
+
 export interface PlatformZatcaSummary {
   totalEgsUnits: number;
   byStatus: Record<string, number>;
   byEnvironment: Record<string, number>;
+  onboardingByStatus: Record<PlatformZatcaOnboardingStatus, number>;
+  submissionsByState: Record<string, number>;
   expiringCertificates: PlatformZatcaExpiringCertificate[];
   recentFailedChecks: PlatformZatcaFailedCheck[];
   recentSubmissions: PlatformZatcaSubmission[];

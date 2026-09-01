@@ -1,7 +1,8 @@
 import { Router } from "express";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { auditEvents, companies } from "../db/schema.js";
+import { computeOnboardingStatus, getZatcaTenantIdentity, type ZatcaOnboardingStatus } from "../lib/zatca/domain/index.js";
 
 // MIDAD Admin Dashboard — ZATCA operations (Slice 3). Mounted behind
 // platformAuth (never requireAuth), the same structurally-separate
@@ -29,6 +30,11 @@ platformZatcaRouter.get("/", async (_req, res) => {
       certificateExpiresAt: true,
       lastCommunicationAt: true,
       createdAt: true,
+      // Selected ONLY to compute the hasCredential boolean below (Slice 4's
+      // onboarding-status distribution) — reduced to a boolean immediately
+      // and never included in any response value; see this file's header
+      // comment on why secretRef must never leave this route.
+      secretRef: true,
     },
     orderBy: (e, { desc }) => [desc(e.createdAt)],
   });
@@ -109,10 +115,54 @@ platformZatcaRouter.get("/", async (_req, res) => {
     },
   });
 
+  // Slice 4 — per-tenant onboarding status distribution, reusing
+  // domain/onboarding.ts's pure computeOnboardingStatus() (the SAME
+  // function routes/zatca.ts's tenant-facing /onboarding-status uses) —
+  // never a second status derivation. Only tenants with at least one EGS
+  // unit are included (a tenant with none is definitionally
+  // not_configured, not worth a full identity fetch to confirm).
+  const unitsByCompany = new Map<string, typeof units>();
+  for (const unit of units) {
+    const list = unitsByCompany.get(unit.companyId) ?? [];
+    list.push(unit);
+    unitsByCompany.set(unit.companyId, list);
+  }
+  const onboardingByStatus: Record<ZatcaOnboardingStatus, number> = {
+    not_configured: 0,
+    configuration_incomplete: 0,
+    ready_for_simulation: 0,
+    simulation_connected: 0,
+    simulation_failed: 0,
+    production_not_enabled: 0,
+  };
+  await Promise.all(
+    [...unitsByCompany.entries()].map(async ([companyId, companyUnits]) => {
+      const identity = await getZatcaTenantIdentity(companyId);
+      const summary = computeOnboardingStatus(
+        identity,
+        companyUnits.map((u) => ({ environment: u.environment, status: u.status, hasCredential: u.secretRef !== null })),
+      );
+      onboardingByStatus[summary.status] += 1;
+    }),
+  );
+
+  // Slice 4 — real submission outcome counts, grouped in SQL (never a
+  // full-table fetch just to count). Genuinely all-zero today since no
+  // route yet auto-submits from invoice creation (Slice 4's /submit is
+  // manually triggered and, in this environment, always ends in
+  // compliance_failed at the signing boundary — see routes/zatca.ts).
+  const stateCounts = await db.execute<{ state: string; count: number }>(
+    sql`SELECT state, COUNT(*)::int AS count FROM zatca_submissions GROUP BY state`,
+  );
+  const submissionsByState: Record<string, number> = {};
+  for (const row of stateCounts.rows) submissionsByState[row.state] = row.count;
+
   res.json({
     totalEgsUnits: units.length,
     byStatus,
     byEnvironment,
+    onboardingByStatus,
+    submissionsByState,
     expiringCertificates,
     recentFailedChecks,
     recentSubmissions: recentSubmissions.map((s) => ({ ...s, companyName: companyNameById.get(s.companyId) ?? null })),

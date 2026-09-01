@@ -18,7 +18,8 @@ export type ZatcaErrorCategory =
   | "validation"
   | "network"
   | "external_service"
-  | "internal";
+  | "internal"
+  | "not_implemented";
 
 export class ZatcaError extends Error {
   readonly category: ZatcaErrorCategory;
@@ -90,6 +91,19 @@ export class ZatcaInternalError extends ZatcaError {
   }
 }
 
+// Slice 4 — a deliberate, documented capability boundary (e.g. XAdES
+// signing, for which no primary ZATCA specification is verifiable in this
+// environment — see lib/zatca/signer/notImplementedSigner.ts). Distinct
+// from "internal" (a bug) — this is not a bug, it is an honest "this
+// exists in the architecture but is not built yet" answer, never a
+// fabricated success.
+export class ZatcaNotImplementedError extends ZatcaError {
+  constructor(message: string) {
+    super("not_implemented", message);
+    this.name = "ZatcaNotImplementedError";
+  }
+}
+
 // One place every route maps a category to an HTTP status — kept separate
 // from lib/errorCodes.ts's existing MIDAD-wide taxonomy (AUTHENTICATION/
 // AUTHORIZATION there mean MIDAD's own login/permission system, which is
@@ -105,6 +119,8 @@ export function httpStatusForZatcaError(err: ZatcaError): number {
       return 504;
     case "external_service":
       return 503;
+    case "not_implemented":
+      return 501;
     case "internal":
     default:
       return 500;

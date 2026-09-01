@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { db } from "../db/client.js";
@@ -15,10 +16,24 @@ import {
   upsertZatcaTenantIdentity,
   getSubmission,
   listSubmissionsForEgsUnit,
+  listSubmissionsForCompany,
+  findSubmissionForInvoice,
+  createSubmission,
+  recordSubmissionOutcome,
+  findOwnedInvoiceWithItems,
+  computeOnboardingStatus,
+  claimNextIcv,
+  EgsUnitNotFoundError,
 } from "../lib/zatca/domain/index.js";
+import { lockAndReadPihPointer, updatePihPointer } from "../lib/zatca/domain/pih.js";
 import { getZatcaSecretStore } from "../lib/zatca/secretStore/index.js";
 import { getZatcaProvider } from "../lib/zatca/provider/index.js";
+import { getZatcaSigner } from "../lib/zatca/signer/index.js";
 import { ZatcaError, httpStatusForZatcaError } from "../lib/zatca/errors.js";
+import { buildCanonicalDocumentFromInvoice } from "../lib/zatca/documentBuilder.js";
+import { buildZatcaInvoiceXml } from "../lib/zatca/xmlBuilder.js";
+import { computeDocumentHash } from "../lib/zatca/hash.js";
+import { validateZatcaDocument } from "../lib/zatca/validation.js";
 
 // MIDAD ZATCA tenant configuration + connection API (Slice 3). Every route
 // runs behind requireAuth (mounted in app.ts) — req.companyId is always
@@ -66,6 +81,24 @@ function sanitizeEgsUnit(unit: EgsUnitRow) {
 zatcaRouter.get("/config", async (req: Request, res: Response) => {
   const [identity, units] = await Promise.all([getZatcaTenantIdentity(req.companyId!), listEgsUnits(req.companyId!)]);
   res.json({ identity, egsUnits: units.map(sanitizeEgsUnit) });
+});
+
+// GET /api/zatca/onboarding-status (Slice 4) — a computed VIEW, never a
+// second persisted state machine (see domain/onboarding.ts's file
+// comment). Distinguishes configuration/simulation/production explicitly
+// rather than collapsing into one boolean — never returns a status
+// implying "ZATCA compliant".
+zatcaRouter.get("/onboarding-status", async (req: Request, res: Response) => {
+  const [identity, units] = await Promise.all([getZatcaTenantIdentity(req.companyId!), listEgsUnits(req.companyId!)]);
+  const summary = computeOnboardingStatus(
+    identity,
+    units.map((u) => ({
+      environment: u.environment,
+      status: u.status,
+      hasCredential: u.secretRef !== null,
+    })),
+  );
+  res.json(summary);
 });
 
 const identitySchema = z.object({
@@ -313,9 +346,227 @@ zatcaRouter.get("/egs-units/:id/submissions", async (req: Request<{ id: string }
   res.json(await listSubmissionsForEgsUnit(req.companyId!, unit.id));
 });
 
+// GET /api/zatca/submissions — company-wide history (the tenant UI's
+// History tab), across every EGS unit.
+zatcaRouter.get("/submissions", async (req: Request, res: Response) => {
+  res.json(await listSubmissionsForCompany(req.companyId!));
+});
+
 // GET /api/zatca/submissions/:id — read-only.
 zatcaRouter.get("/submissions/:id", async (req: Request<{ id: string }>, res: Response) => {
   const submission = await getSubmission(req.companyId!, req.params.id);
   if (!submission) return res.status(404).json({ error: "غير موجود" });
   res.json(submission);
+});
+
+// POST /api/zatca/egs-units/:id/invoices/:invoiceId/prepare (Slice 4) —
+// builds the real UBL XML for a real MIDAD invoice using the existing
+// Slice 1 engine (buildZatcaInvoiceXml/computeDocumentHash/validation.ts,
+// all reused unmodified) and the existing Slice 2 ICV/PIH primitives, all
+// inside one transaction so a partial failure can never leave an ICV
+// claimed without a matching persisted submission (which would otherwise
+// silently create a gap in the counter's real-world meaning). Never
+// signs, never contacts ZATCA — see /submit below for that boundary.
+//
+// IDEMPOTENT per (companyId, egsUnitId, invoiceId): a repeated prepare
+// call for the same tuple returns the submission that already exists
+// instead of claiming a second ICV/PIH slot or creating a duplicate row.
+zatcaRouter.post(
+  "/egs-units/:id/invoices/:invoiceId/prepare",
+  requireSubmit,
+  async (req: Request<{ id: string; invoiceId: string }>, res: Response) => {
+    const unit = await getEgsUnit(req.companyId!, req.params.id);
+    if (!unit) return res.status(404).json({ error: "وحدة الفوترة الإلكترونية غير موجودة" });
+
+    const invoiceData = await findOwnedInvoiceWithItems(req.companyId!, req.params.invoiceId);
+    if (!invoiceData) return res.status(404).json({ error: "الفاتورة غير موجودة" });
+
+    const existing = await findSubmissionForInvoice(req.companyId!, unit.id, req.params.invoiceId);
+    if (existing) {
+      return res.json({ submission: existing, alreadyExists: true });
+    }
+
+    const identity = await getZatcaTenantIdentity(req.companyId!);
+    if (!identity.legalName || !identity.vatNumber || !identity.commercialRegistration) {
+      return res.status(400).json({
+        error: "أكملي بيانات الهوية الضريبية (الرقم الضريبي والسجل التجاري) قبل تحضير مستند ZATCA",
+        category: "configuration",
+      });
+    }
+
+    const zatcaUuid = randomUUID();
+    const issueTime = new Date().toISOString().slice(11, 19);
+    const supplier = {
+      legalName: identity.legalName,
+      address: identity.address,
+      vatNumber: identity.vatNumber,
+      commercialRegistration: identity.commercialRegistration,
+    };
+
+    let result;
+    try {
+      result = await db.transaction(async (tx) => {
+        const previousHash = await lockAndReadPihPointer(tx, req.companyId!, unit.id);
+        const icv = await claimNextIcv(req.companyId!, unit.id, tx);
+
+        const doc = buildCanonicalDocumentFromInvoice({
+          invoice: invoiceData.invoice,
+          items: invoiceData.items,
+          supplier,
+          zatcaUuid,
+          invoiceCounterValue: icv,
+          previousInvoiceHash: previousHash,
+          issueTime,
+        });
+        const xml = buildZatcaInvoiceXml(doc);
+        const documentHash = computeDocumentHash(xml);
+        await updatePihPointer(tx, req.companyId!, unit.id, documentHash);
+
+        const submission = await createSubmission(
+          req.companyId!,
+          {
+            egsUnitId: unit.id,
+            invoiceId: invoiceData.invoice.id,
+            documentTypeCode: doc.documentTypeCode,
+            subtype: doc.subtype,
+            zatcaUuid: doc.uuid,
+            icv,
+            pih: previousHash,
+            documentHash,
+            environment: unit.environment,
+            state: "ready_for_submission",
+          },
+          tx,
+        );
+        return { submission, xml, doc };
+      });
+    } catch (err) {
+      if (err instanceof EgsUnitNotFoundError) return res.status(404).json({ error: "وحدة الفوترة الإلكترونية غير موجودة" });
+      throw err;
+    }
+
+    // Safe structural + arithmetic validation only — sdkVerified is always
+    // false (see validation.ts); never represented as ZATCA-approved.
+    const validation = validateZatcaDocument(result.xml, result.doc);
+
+    await recordAuditEvent(db, {
+      companyId: req.companyId!,
+      actorUserId: req.userId!,
+      action: "zatca.submission.prepared",
+      entityType: "zatca_submission",
+      entityId: result.submission.id,
+      afterValue: {
+        egsUnitId: unit.id,
+        invoiceId: invoiceData.invoice.id,
+        icv: result.submission.icv,
+        documentHash: result.submission.documentHash,
+      },
+    });
+
+    res.status(201).json({ submission: result.submission, validation, alreadyExists: false });
+  },
+);
+
+// Submission states meaning "already in flight or already has a real
+// ZATCA outcome" — /submit is idempotent and refuses to re-attempt any of
+// these, so a duplicate click can never create a second real submission.
+const SUBMISSION_INFLIGHT_OR_DONE_STATES = new Set(["submitting", "submitted", "cleared", "reported", "compliance_pending"]);
+
+// POST /api/zatca/submissions/:id/submit (Slice 4) — the real Simulation
+// submission attempt. Regenerates the exact same XML that was hashed at
+// /prepare time (see documentBuilder.ts's issueTime comment) and refuses
+// to proceed if it no longer matches the persisted documentHash (the
+// underlying invoice or identity changed since prepare). Then requires a
+// real signature via lib/zatca/signer/ before any provider call — today
+// that always fails honestly (see notImplementedSigner.ts): this route
+// never sends unsigned XML to ZATCA and never fabricates a submitted
+// state. The outcome (success or failure) is always persisted exactly as
+// derived from a real error/response, never guessed.
+zatcaRouter.post("/submissions/:id/submit", requireSubmit, async (req: Request<{ id: string }>, res: Response) => {
+  const submission = await getSubmission(req.companyId!, req.params.id);
+  if (!submission) return res.status(404).json({ error: "غير موجود" });
+
+  if (SUBMISSION_INFLIGHT_OR_DONE_STATES.has(submission.state)) {
+    return res.json({ submission, alreadyAttempted: true });
+  }
+
+  const unit = await getEgsUnit(req.companyId!, submission.egsUnitId);
+  if (!unit) return res.status(404).json({ error: "وحدة الفوترة الإلكترونية غير موجودة" });
+  if (!unit.secretRef) {
+    return res.status(400).json({ error: "لم يتم إعداد بيانات الاعتماد لهذه الوحدة", category: "configuration" });
+  }
+  const credential = await getZatcaSecretStore().resolve(req.companyId!, unit.secretRef);
+  if (!credential) {
+    return res.status(400).json({ error: "تعذّر استرجاع بيانات الاعتماد المخزّنة", category: "configuration" });
+  }
+  if (!submission.invoiceId) {
+    return res.status(400).json({ error: "هذا النوع من المستندات غير مدعوم بعد", category: "configuration" });
+  }
+
+  const invoiceData = await findOwnedInvoiceWithItems(req.companyId!, submission.invoiceId);
+  const identity = await getZatcaTenantIdentity(req.companyId!);
+  if (!invoiceData || !identity.legalName || !identity.vatNumber || !identity.commercialRegistration) {
+    return res.status(400).json({
+      error: "تعذّر إعادة توليد المستند — تأكدي من عدم حذف الفاتورة أو بيانات الهوية الضريبية",
+      category: "configuration",
+    });
+  }
+
+  const doc = buildCanonicalDocumentFromInvoice({
+    invoice: invoiceData.invoice,
+    items: invoiceData.items,
+    supplier: {
+      legalName: identity.legalName,
+      address: identity.address,
+      vatNumber: identity.vatNumber,
+      commercialRegistration: identity.commercialRegistration,
+    },
+    zatcaUuid: submission.zatcaUuid,
+    invoiceCounterValue: submission.icv,
+    previousInvoiceHash: submission.pih,
+    issueTime: submission.createdAt.toISOString().slice(11, 19),
+  });
+  const xml = buildZatcaInvoiceXml(doc);
+  const documentHash = computeDocumentHash(xml);
+  if (documentHash !== submission.documentHash) {
+    const mismatched = await recordSubmissionOutcome(req.companyId!, submission.id, {
+      state: "compliance_failed",
+      zatcaErrorMessage: "تغيّرت بيانات الفاتورة أو الهوية الضريبية منذ تحضير هذا المستند — أعيدي التحضير قبل الإرسال",
+    });
+    return res.status(409).json({ error: "المستند لم يعد مطابقاً لما تم تحضيره", submission: mismatched });
+  }
+
+  await recordSubmissionOutcome(req.companyId!, submission.id, { state: "submitting", submittedAt: new Date() });
+
+  try {
+    // Always throws today — see lib/zatca/signer/notImplementedSigner.ts.
+    // Once a real signer exists, the next step here is the appropriate
+    // provider call (clearInvoice for "standard"/B2B, reportInvoice for
+    // "simplified"/B2C — see lib/zatca/provider/, already built in Slice
+    // 3) with the signed XML; not written yet because it cannot be
+    // exercised or verified without a real signature to test against.
+    await getZatcaSigner().sign({ canonicalXml: xml, credential });
+    throw new ZatcaError("internal", "unreachable: signer succeeded without a real implementation");
+  } catch (err) {
+    if (err instanceof ZatcaError) {
+      const failed = await recordSubmissionOutcome(req.companyId!, submission.id, {
+        state: "compliance_failed",
+        zatcaErrorCode: err.category,
+        zatcaErrorMessage: err.message,
+        respondedAt: new Date(),
+        incrementRetryCount: true,
+      });
+      await recordAuditEvent(db, {
+        companyId: req.companyId!,
+        actorUserId: req.userId!,
+        action: "zatca.submission.failed",
+        entityType: "zatca_submission",
+        entityId: submission.id,
+        afterValue: { category: err.category, message: err.message },
+      });
+      logger.warn("zatca_submission_failed", { companyId: req.companyId, submissionId: submission.id, category: err.category });
+      return res.status(httpStatusForZatcaError(err)).json({ error: err.message, category: err.category, submission: failed });
+    }
+    throw err;
+  }
 });

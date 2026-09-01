@@ -6,6 +6,7 @@
 // or on fatooraClient.ts directly.
 
 import { fatooraProbe, fatooraRequest, loadFatooraEndpointConfig } from "./fatooraClient.js";
+import { ZatcaExternalServiceError } from "../errors.js";
 import type {
   ResolvedZatcaCredential,
   ZatcaConnectionCheckResult,
@@ -93,6 +94,12 @@ function buildDocumentBody(input: ZatcaDocumentSubmissionInput): unknown {
 // fatooraRequest() already throws on a non-2xx status; this function is
 // what catches the "200 OK but actually rejected" case so a rejected
 // document is never reported to the caller as cleared/reported.
+//
+// Equally important the other way: a 2xx response whose body carries NONE
+// of the recognized status fields is NOT treated as success either — this
+// function must never convert an unrecognized/ambiguous result into a
+// claimed success. It throws ZatcaExternalServiceError instead, the same
+// category used for "reached ZATCA but got something unusable".
 function normalizeSubmissionResponse(
   res: { body: unknown; correlationId: string },
   successStatus: ZatcaSubmissionResult["status"],
@@ -107,6 +114,12 @@ function normalizeSubmissionResponse(
   const rejected = [clearanceStatus, reportingStatus, validationResults?.status]
     .filter((value): value is string => typeof value === "string")
     .some((value) => /reject|error|fail/i.test(value));
+
+  if (!rejected && rawStatus === undefined && validationResults === undefined) {
+    throw new ZatcaExternalServiceError(
+      `ZATCA returned a response with no recognizable status field (correlationId: ${res.correlationId})`,
+    );
+  }
 
   return {
     status: rejected ? "rejected" : successStatus,
