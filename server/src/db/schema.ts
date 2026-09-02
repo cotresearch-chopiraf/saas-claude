@@ -1837,6 +1837,67 @@ export const zatcaCsrInstances = pgTable(
   }),
 );
 
+// One row per successful Compliance CSID exchange for one specific CSR
+// Instance (Slice L — ZATCA Compliance Lifecycle persistence). Cardinality
+// is CSR Instance (1) -> Compliance Lifecycle (0..1): a CSR Instance may
+// have none yet, but never more than one — enforced by the unique index
+// below, not just application code. This table records ONLY that a
+// Compliance CSID was requested and issued for this CSR — it deliberately
+// does NOT claim compliance testing itself is complete (see
+// domain/complianceCsid.ts's file comment): "Compliance CSID issued" and
+// "all required Compliance Steps passed" are two different, unverified-
+// vs-verified facts, and this table only ever records the former.
+//
+// status: a single-value enum ("issued") rather than a richer
+// pending/issued/failed machine — deliberately, per this slice's own
+// scope: a row is only ever inserted from domain/complianceCsid.ts AFTER
+// the provider call has already succeeded (the provider throws a
+// ZatcaError on any non-success FATOORA response — see
+// provider/fatooraClient.ts's fatooraRequestComplianceCsid — so there is
+// never a "pending" or "failed" in-database state to represent; nothing in
+// this slice ever transitions this column after insert). The column
+// exists (per the approved design) so a future, separately-verified state
+// transition (e.g. a real revocation/supersession rule) can extend this
+// enum without a new column — nothing here invents what that rule is.
+//
+// secretRef: the opaque ZatcaSecretStore reference for the Compliance CSID
+// credential (binarySecurityToken + secret) this exchange produced —
+// never the credential material itself, and a completely independent
+// reference from the owning CSR Instance's own secretRef (see
+// domain/complianceCsid.ts's file comment for why these two secrets must
+// never be conflated: one is the CSR's key pair, the other is the
+// certificate/secret ZATCA issued in exchange for it).
+export const zatcaComplianceLifecycleStatusEnum = pgEnum("zatca_compliance_lifecycle_status", ["issued"]);
+
+export const zatcaComplianceLifecycles = pgTable(
+  "zatca_compliance_lifecycles",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    csrInstanceId: uuid("csr_instance_id")
+      .notNull()
+      .references(() => zatcaCsrInstances.id, { onDelete: "cascade" }),
+    // ZATCA's requestID, normalized to a string by the provider layer —
+    // same String() convention as ZatcaComplianceCsidResult.requestId (see
+    // provider/types.ts) — persisted verbatim, never re-derived.
+    requestId: text("request_id").notNull(),
+    dispositionMessage: text("disposition_message").notNull(),
+    secretRef: text("secret_ref").notNull(),
+    status: zatcaComplianceLifecycleStatusEnum("status").notNull().default("issued"),
+    startedAt: timestamp("started_at").notNull().defaultNow(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    // Enforces the CSR Instance (1) -> Compliance Lifecycle (0..1)
+    // cardinality at the database level, not just in application code.
+    oneLifecyclePerCsrInstance: uniqueIndex("zatca_compliance_lifecycles_csr_instance_unique").on(table.csrInstanceId),
+    companyIdx: index("zatca_compliance_lifecycles_company_idx").on(table.companyId),
+  }),
+);
+
 // A dedicated ICV (Invoice Counter Value) per (company, EGS unit) — see
 // the file-level comment for why this is never companies.next_invoice_number.
 export const zatcaIcvCounters = pgTable(

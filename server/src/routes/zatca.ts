@@ -26,6 +26,7 @@ import {
   EgsUnitNotFoundError,
   generateCsrForEgsUnit,
   confirmCsidForEgsUnit,
+  requestComplianceCsidForEgsUnit,
 } from "../lib/zatca/domain/index.js";
 import { lockAndReadPihPointer, updatePihPointer } from "../lib/zatca/domain/pih.js";
 import { getZatcaSecretStore } from "../lib/zatca/secretStore/index.js";
@@ -362,6 +363,61 @@ zatcaRouter.post("/egs-units/:id/csid", requireSubmit, async (req: Request<{ id:
     });
 
     res.json(sanitizeEgsUnit(updated!));
+  } catch (err) {
+    if (err instanceof EgsUnitNotFoundError) return res.status(404).json({ error: "وحدة الفوترة الإلكترونية غير موجودة" });
+    if (err instanceof ZatcaError) {
+      return res.status(httpStatusForZatcaError(err)).json({ error: err.message, category: err.category });
+    }
+    throw err;
+  }
+});
+
+const requestComplianceCsidSchema = z.object({
+  // Never persisted or logged past this request — same convention as
+  // generateCsrSchema's otp above.
+  otp: z.string().min(1),
+  // The CSR previously returned by POST .../csr's csrDerBase64 field —
+  // this route does not generate or store a CSR itself (see
+  // domain/complianceCsid.ts's file comment).
+  csrBase64: z.string().min(1),
+});
+
+// POST /api/zatca/egs-units/:id/compliance-csid (Slice L) — requests a
+// real Compliance CSID from ZATCA for this EGS unit's current CSR
+// Instance (see domain/complianceCsid.ts) and persists the result as a
+// durable Compliance Lifecycle row. Deliberately does NOT touch this EGS
+// unit's csidStatus or active credential — see that module's own file
+// comment for why that boundary is a deliberate, narrow choice for this
+// slice, not an oversight.
+zatcaRouter.post("/egs-units/:id/compliance-csid", requireSubmit, async (req: Request<{ id: string }>, res: Response) => {
+  const parsed = requestComplianceCsidSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
+
+  try {
+    const lifecycle = await requestComplianceCsidForEgsUnit({
+      companyId: req.companyId!,
+      egsUnitId: req.params.id,
+      otp: parsed.data.otp,
+      csrBase64: parsed.data.csrBase64,
+    });
+
+    await recordAuditEvent(db, {
+      companyId: req.companyId!,
+      actorUserId: req.userId!,
+      action: "zatca.complianceCsid.requested",
+      entityType: "zatca_egs_unit",
+      entityId: req.params.id,
+      // The OTP, credentials, and CSR are never included — only the
+      // durable lifecycle identity and ZATCA's own (non-secret)
+      // disposition text.
+      afterValue: { complianceLifecycleId: lifecycle.id, requestId: lifecycle.requestId, dispositionMessage: lifecycle.dispositionMessage },
+    });
+
+    // The wire response deliberately never includes secretRef or the
+    // database lifecycle id (see domain/complianceCsid.ts's file comment
+    // and the Slice L spec's API contract section) — only the two fields
+    // ZATCA itself returned that are safe to show the caller.
+    res.status(201).json({ requestId: lifecycle.requestId, dispositionMessage: lifecycle.dispositionMessage });
   } catch (err) {
     if (err instanceof EgsUnitNotFoundError) return res.status(404).json({ error: "وحدة الفوترة الإلكترونية غير موجودة" });
     if (err instanceof ZatcaError) {
