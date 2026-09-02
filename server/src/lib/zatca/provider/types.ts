@@ -57,6 +57,12 @@ export interface ZatcaSubmissionResult {
   rawStatus?: string;
   warnings?: unknown;
   respondedAt: Date;
+  // Clearance only (verified — see fatooraClient.ts's file comment): the
+  // ZATCA-signed/stamped invoice XML (base64), returned only on a real
+  // "CLEARED" response. This is the actual legal cleared document — never
+  // fabricated, and undefined for every status other than a genuine
+  // clearance success.
+  clearedInvoiceXmlBase64?: string;
 }
 
 export interface ZatcaProvider {

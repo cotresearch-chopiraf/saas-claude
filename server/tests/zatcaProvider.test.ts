@@ -83,16 +83,17 @@ describe("FatooraProvider document submission", () => {
     expect(result.correlationId).toBeTruthy();
   });
 
-  it("downgrades a 200 response with a rejected body status to status: rejected", async () => {
+  it("downgrades a 200 response with a rejected body status to status: rejected (verified enum: NOT_CLEARED)", async () => {
     const server = await startMockServer((_req, res) => {
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ clearanceStatus: "REJECTED", validationResults: { status: "ERROR" } }));
+      res.end(JSON.stringify({ clearanceStatus: "NOT_CLEARED", clearedInvoice: null, validationResults: { status: "ERROR" } }));
     });
     cleanup = server.close;
     setEnv(server.url);
 
     const result = await new FatooraProvider("simulation").clearInvoice(credential, document);
     expect(result.status).toBe("rejected");
+    expect(result.clearedInvoiceXmlBase64).toBeUndefined();
   });
 
   it("throws ZatcaAuthenticationError on a 401 response", async () => {
@@ -234,6 +235,139 @@ describe("FatooraProvider document submission", () => {
     const server = await startMockServer((_req, res) => {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end("{}");
+    });
+    cleanup = server.close;
+    setEnv(server.url);
+
+    await expect(new FatooraProvider("simulation").clearInvoice(credential, document)).rejects.toBeInstanceOf(ZatcaExternalServiceError);
+  });
+});
+
+describe("FatooraProvider.reportInvoice (verified Reporting contract)", () => {
+  it("normalizes a REPORTED response to status: reported, and sends Clearance-Status: 0", async () => {
+    let receivedHeaders: http.IncomingHttpHeaders | undefined;
+    const server = await startMockServer((req, res) => {
+      receivedHeaders = req.headers;
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ reportingStatus: "REPORTED", validationResults: { status: "PASS" } }));
+    });
+    cleanup = server.close;
+    setEnv(server.url);
+
+    const result = await new FatooraProvider("simulation").reportInvoice(credential, document);
+    expect(result.status).toBe("reported");
+    expect(result.rawStatus).toBe("REPORTED");
+    expect(receivedHeaders?.["clearance-status"]).toBe("0");
+    expect(receivedHeaders?.["accept-version"]).toBe("V2");
+    expect(receivedHeaders?.["accept-language"]).toBe("en");
+  });
+
+  it("still reports success when validationResults.status is WARNING (verified 202 example)", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(202, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ reportingStatus: "REPORTED", validationResults: { status: "WARNING", warningMessages: ["x"] } }));
+    });
+    cleanup = server.close;
+    setEnv(server.url);
+
+    const result = await new FatooraProvider("simulation").reportInvoice(credential, document);
+    expect(result.status).toBe("reported");
+  });
+
+  it("normalizes a NOT_REPORTED response to status: rejected", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ reportingStatus: "NOT_REPORTED", validationResults: { status: "ERROR" } }));
+    });
+    cleanup = server.close;
+    setEnv(server.url);
+
+    const result = await new FatooraProvider("simulation").reportInvoice(credential, document);
+    expect(result.status).toBe("rejected");
+    expect(result.rawStatus).toBe("NOT_REPORTED");
+  });
+
+  it("throws ZatcaDuplicateError on a 409 (verified: already reported earlier)", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(409, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ message: "Invoice was already Reported successfully earlier" }));
+    });
+    cleanup = server.close;
+    setEnv(server.url);
+
+    await expect(new FatooraProvider("simulation").reportInvoice(credential, document)).rejects.toBeInstanceOf(ZatcaDuplicateError);
+  });
+
+  it("throws ZatcaExternalServiceError when reportingStatus is missing/unrecognized", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ somethingElse: true }));
+    });
+    cleanup = server.close;
+    setEnv(server.url);
+
+    await expect(new FatooraProvider("simulation").reportInvoice(credential, document)).rejects.toBeInstanceOf(ZatcaExternalServiceError);
+  });
+});
+
+describe("FatooraProvider.clearInvoice (verified Clearance contract)", () => {
+  it("normalizes a CLEARED response to status: cleared, extracts clearedInvoiceXmlBase64, and sends Clearance-Status: 1", async () => {
+    let receivedHeaders: http.IncomingHttpHeaders | undefined;
+    const clearedInvoiceXml = "PGNsZWFyZWQ+PC9jbGVhcmVkPg==";
+    const server = await startMockServer((req, res) => {
+      receivedHeaders = req.headers;
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ clearanceStatus: "CLEARED", clearedInvoice: clearedInvoiceXml, validationResults: { status: "PASS" } }));
+    });
+    cleanup = server.close;
+    setEnv(server.url);
+
+    const result = await new FatooraProvider("simulation").clearInvoice(credential, document);
+    expect(result.status).toBe("cleared");
+    expect(result.clearedInvoiceXmlBase64).toBe(clearedInvoiceXml);
+    expect(receivedHeaders?.["clearance-status"]).toBe("1");
+    expect(receivedHeaders?.["accept-version"]).toBe("V2");
+  });
+
+  it("never populates clearedInvoiceXmlBase64 for a NOT_CLEARED response even if the field is present", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ clearanceStatus: "NOT_CLEARED", clearedInvoice: "should-be-ignored", validationResults: { status: "ERROR" } }));
+    });
+    cleanup = server.close;
+    setEnv(server.url);
+
+    const result = await new FatooraProvider("simulation").clearInvoice(credential, document);
+    expect(result.status).toBe("rejected");
+    expect(result.clearedInvoiceXmlBase64).toBeUndefined();
+  });
+
+  it("throws ZatcaDuplicateError on a 208 (verified: invoice hash previously submitted)", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(208, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ message: "Invoice Hash Previously Submitted" }));
+    });
+    cleanup = server.close;
+    setEnv(server.url);
+
+    await expect(new FatooraProvider("simulation").clearInvoice(credential, document)).rejects.toBeInstanceOf(ZatcaDuplicateError);
+  });
+
+  it("throws ZatcaConfigurationError on a 303 (verified: clearance deactivated, use Reporting instead)", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(303, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ message: "Clearance is deactiviated. Please use the /invoices/reporting/single endpoint instead." }));
+    });
+    cleanup = server.close;
+    setEnv(server.url);
+
+    await expect(new FatooraProvider("simulation").clearInvoice(credential, document)).rejects.toBeInstanceOf(ZatcaConfigurationError);
+  });
+
+  it("throws ZatcaExternalServiceError when clearanceStatus is missing/unrecognized", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ somethingElse: true }));
     });
     cleanup = server.close;
     setEnv(server.url);

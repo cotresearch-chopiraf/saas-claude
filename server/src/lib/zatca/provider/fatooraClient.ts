@@ -1,25 +1,38 @@
-// Raw FATOORA HTTP transport (Slice 3). The ONLY module in this codebase
-// that ever builds a ZATCA request or reads a raw ZATCA response — every
-// other layer (fatooraProvider.ts, routes/zatca.ts, domain/) goes through
-// this file's exported functions and only ever sees a normalized
-// FatooraResponse or a lib/zatca/errors.ts ZatcaError subclass, never a raw
-// fetch Response or response body.
+// Raw FATOORA HTTP transport (Slice 3; Reporting/Clearance headers and
+// response contract verified in the ZATCA Network Integration
+// continuation). The ONLY module in this codebase that ever builds a
+// ZATCA request or reads a raw ZATCA response — every other layer
+// (fatooraProvider.ts, routes/zatca.ts, domain/) goes through this file's
+// exported functions and only ever sees a normalized FatooraResponse or a
+// lib/zatca/errors.ts ZatcaError subclass, never a raw fetch Response or
+// response body.
 //
-// PRIMARY-SOURCE VERIFICATION GAP (see the Slice 3 discovery report): this
-// environment's WebFetch tool cannot reach zatca.gov.sa or any other host
-// (confirmed non-domain-specific network egress block), so the exact
-// endpoint paths, header names, and request/response schema below could
-// only be cross-corroborated via WebSearch against secondary integration
-// guides (Qoyod, Jibrid, the Fatoora developer community forum) — never
-// verified against ZATCA's own primary Developer Portal Manual/XSD. To
-// avoid guessing, NOTHING here hardcodes a ZATCA hostname, path, or header
-// value: every one of them is required from environment configuration
-// (loadFatooraEndpointConfig throws a clear ZatcaConfigurationError if
-// unset), and a deploying operator is expected to source the real values
-// from the verified ZATCA Developer Portal before configuring production
-// use. This module is genuinely functional and independently testable
-// against a mock HTTP server regardless of that gap; only "these exact
-// bytes are what ZATCA's production API expects" is unverified.
+// VERIFICATION STATUS — Reporting (POST /invoices/reporting/single) and
+// Clearance (POST /invoices/clearance/single): the exact header set
+// (Authorization, Accept-Language, Clearance-Status, Accept-Version),
+// request body shape ({invoiceHash, uuid, invoice}), and response schema
+// were independently verified against the real "e-Invoicing Sandbox
+// Release (2.1.0)" Swagger export the user obtained directly from their
+// own ZATCA Developer Portal account and shared in this conversation
+// (reporting.pdf / clearance.pdf) — genuinely read and extracted by this
+// session, not cross-corroborated secondary-source guessing. See
+// docs/zatca/ZATCA_NETWORK_INTEGRATION_SPEC.md for the full citation.
+// Compliance CSID / Production CSID onboarding remain unverified — no
+// Swagger export for those was available.
+//
+// To avoid guessing beyond what was verified, NOTHING here hardcodes a
+// ZATCA hostname or path: every one of them is required from environment
+// configuration (loadFatooraEndpointConfig throws a clear
+// ZatcaConfigurationError if unset). Accept-Version defaults to the
+// verified literal "V2" (see below) since that's a fixed API version
+// label, not a deployment choice — still overridable via
+// ZATCA_FATOORA_*_API_VERSION for a future version bump. This module is
+// genuinely functional and independently testable against a mock HTTP
+// server; for Reporting/Clearance the wire contract itself is now
+// verified too — only real Sandbox credentials to test against remain
+// unavailable in this environment. Compliance CSID's contract is still
+// unverified, so submitComplianceDocument's request/response handling
+// below remains the older, conservative cross-corroborated shape.
 
 import { randomUUID } from "node:crypto";
 import { logger } from "../../logger.js";
@@ -82,15 +95,26 @@ interface RawFetchResult {
   correlationId: string;
 }
 
+// Verified literal (see file header) — the Reporting/Clearance Swagger
+// export documents this as a fixed API version label, not a per-tenant or
+// per-environment configuration choice.
+const VERIFIED_ACCEPT_VERSION = "V2";
+
 // Does the actual network call and best-effort JSON parse only — no status
 // interpretation, so it is shared by both the throwing (fatooraRequest) and
 // non-throwing (fatooraProbe) callers below. Never logs headers or body.
+//
+// extraHeaders lets callers (fatooraRequest below) pass endpoint-specific
+// headers verified for Reporting/Clearance (Accept-Language,
+// Clearance-Status) without this transport-level function needing to know
+// their business meaning.
 async function doFetch(
   method: "GET" | "POST",
   path: string,
   body: unknown,
   credential: ResolvedZatcaCredential,
   config: FatooraEndpointConfig,
+  extraHeaders: Record<string, string> = {},
 ): Promise<RawFetchResult> {
   const url = new URL(path.replace(/^\//, ""), config.baseUrl.endsWith("/") ? config.baseUrl : `${config.baseUrl}/`).toString();
   const correlationId = randomUUID();
@@ -99,9 +123,10 @@ async function doFetch(
     Authorization: basicAuthHeader(credential),
     "X-Correlation-Id": correlationId,
     Accept: "application/json",
+    "Accept-Version": config.apiVersion || VERIFIED_ACCEPT_VERSION,
+    ...extraHeaders,
   };
   if (body !== undefined) headers["Content-Type"] = "application/json";
-  if (config.apiVersion) headers["Accept-Version"] = config.apiVersion;
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), config.timeoutMs);
@@ -150,18 +175,25 @@ export interface FatooraResponse {
 // For real document exchanges (compliance/clearance/reporting) — always
 // throws a specific ZatcaError subclass on anything but a clean 2xx JSON
 // response, so fatooraProvider.ts never has to re-interpret a status code.
+//
+// extraHeaders: Reporting/Clearance callers pass Clearance-Status here
+// (verified required header — see file header comment); Compliance
+// (unverified contract) passes none.
 export async function fatooraRequest(
   method: "GET" | "POST",
   path: string,
   body: unknown,
   credential: ResolvedZatcaCredential,
   config: FatooraEndpointConfig,
+  extraHeaders: Record<string, string> = {},
 ): Promise<FatooraResponse> {
-  const result = await doFetch(method, path, body, credential, config);
+  const result = await doFetch(method, path, body, credential, config, extraHeaders);
 
-  // Slice 5 — each branch below maps ONLY standard HTTP status semantics
-  // (RFC 7231/6585) to a category; none of them parse or guess a
-  // ZATCA-specific response-body field. See errors.ts's class comments.
+  // Slice 5 / Network Integration continuation — most branches map
+  // standard HTTP status semantics (RFC 7231/6585); 208 and 303 are
+  // Reporting/Clearance-specific codes confirmed directly against the
+  // real Swagger export (see file header) rather than generic HTTP
+  // meaning, and are documented as such here.
   if (result.status === 401) {
     throw new ZatcaAuthenticationError(`ZATCA rejected the configured credential (status 401, correlationId: ${result.correlationId})`);
   }
@@ -179,9 +211,24 @@ export async function fatooraRequest(
   if (!result.bodyWasValidJson) {
     throw new ZatcaExternalServiceError(`ZATCA returned a non-JSON response (status ${result.status}, correlationId: ${result.correlationId})`);
   }
-  if (result.status === 409) {
+  // 409 (Reporting) and 208 (Clearance) both mean "this document hash was
+  // already submitted successfully" per the verified Swagger doc's own
+  // status descriptions ("Invoice was already Reported successfully
+  // earlier." / "Invoice Hash Previously Submitted") — the same semantic
+  // outcome under two different status codes, one per endpoint.
+  if (result.status === 409 || result.status === 208) {
     throw new ZatcaDuplicateError(
-      `ZATCA reported a conflict (status 409, correlationId: ${result.correlationId}) — commonly indicates this document was already submitted; exact ZATCA semantics for 409 are unverified against the primary specification`,
+      `ZATCA reports this document was already submitted (status ${result.status}, correlationId: ${result.correlationId})`,
+    );
+  }
+  // 303 (Clearance only): the submitted invoice's clearance was
+  // deactivated for this account — ZATCA's own guidance is to call
+  // Reporting instead. This is a MIDAD-side routing mistake (called the
+  // wrong endpoint for this invoice/tenant configuration), not a ZATCA
+  // failure or a document-validation error.
+  if (result.status === 303) {
+    throw new ZatcaConfigurationError(
+      `ZATCA indicates clearance is deactivated for this account — use the Reporting endpoint instead (status 303, correlationId: ${result.correlationId})`,
     );
   }
   if (result.status >= 400) {
