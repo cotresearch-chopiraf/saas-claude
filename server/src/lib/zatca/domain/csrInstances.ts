@@ -85,6 +85,22 @@ export async function findCurrentCsrInstance(companyId: string, egsUnitId: strin
   });
 }
 
+// Slice K — does ANY CSR Instance for this company currently own this
+// exact secretRef? Used by confirmCsidForEgsUnit to decide whether a
+// secretRef it's about to replace is safe to delete from ZatcaSecretStore
+// (no historical owner) or must be preserved (a zatca_csr_instances row
+// still points to it — see db/schema.ts's file comment: a CSR Instance's
+// own secretRef is set once at generation time and never updated, so this
+// is a simple existence check, not a "current" lookup). Scoped to
+// companyId only (not egsUnitId) since a secretRef is already a
+// company-scoped, globally-unique-in-practice opaque string — matching
+// every other tenant-isolated lookup in this module.
+export async function findCsrInstanceBySecretRef(companyId: string, secretRef: string) {
+  return db.query.zatcaCsrInstances.findFirst({
+    where: and(eq(zatcaCsrInstances.companyId, companyId), eq(zatcaCsrInstances.secretRef, secretRef)),
+  });
+}
+
 // Marks an earlier CSR Instance as superseded by a later one. Never
 // deletes or overwrites the earlier row's own historical fields
 // (invoiceType, secretRef, generatedAt) — only records the forward

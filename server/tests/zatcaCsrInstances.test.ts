@@ -278,3 +278,152 @@ describe("Slice J — CSR Instance persistence: concurrency", () => {
     }
   });
 });
+
+// Slice K — confirmCsidForEgsUnit must not destroy a CSR Instance's
+// historically-owned secretRef during normal CSID confirmation. Uses the
+// exact same fake-CA certificate-issuance mechanism already established
+// in tests/zatcaCsrCsid.test.ts (never a fabricated provider behavior).
+async function makeIssuedCertificateForCsr(csrDerBase64: string, notAfter: Date): Promise<string> {
+  const csr = new x509.Pkcs10CertificateRequest(csrDerBase64);
+  const caAlg = { name: "ECDSA", namedCurve: "P-256", hash: "SHA-256" };
+  const caKeys = (await webcrypto.subtle.generateKey(caAlg, true, ["sign", "verify"])) as CryptoKeyPair;
+  const issued = await x509.X509CertificateGenerator.create({
+    serialNumber: "01",
+    subject: csr.subject,
+    issuer: "CN=Fake ZATCA CA for testing",
+    notBefore: new Date("2026-01-01"),
+    notAfter,
+    signingAlgorithm: caAlg,
+    publicKey: csr.publicKey,
+    signingKey: caKeys.privateKey,
+  });
+  return Buffer.from(issued.rawData).toString("base64");
+}
+
+async function confirmCsid(token: string, egsUnitId: string, binarySecurityToken: string, secret: string, stage: "compliance" | "production") {
+  return request(app)
+    .post(`/api/zatca/egs-units/${egsUnitId}/csid`)
+    .set("Authorization", `Bearer ${token}`)
+    .send({ binarySecurityToken, secret, stage });
+}
+
+describe("Slice K — Test 1: existing CSID confirmation still works", () => {
+  it("compliance-stage confirmation succeeds exactly as before", async () => {
+    const egsUnitId = await createEgsUnit(tokenA);
+    const csrRes = await generateCsr(tokenA, egsUnitId);
+    const cert = await makeIssuedCertificateForCsr(csrRes.body.csrDerBase64, new Date("2027-01-01"));
+
+    const res = await confirmCsid(tokenA, egsUnitId, cert, "s3cr3t", "compliance");
+    expect(res.status).toBe(200);
+    expect(res.body.csidStatus).toBe("compliance_issued");
+  });
+});
+
+describe("Slice K — Test 2: historical CSR secret survives CSID confirmation", () => {
+  it("CSR Instance A's secretRef still resolves in ZatcaSecretStore after compliance-stage confirmation", async () => {
+    const { listCsrInstancesForEgsUnit } = await import("../src/lib/zatca/domain/index.js");
+    const { getZatcaSecretStore } = await import("../src/lib/zatca/secretStore/index.js");
+
+    const egsUnitId = await createEgsUnit(tokenA);
+    const csrRes = await generateCsr(tokenA, egsUnitId);
+    const rowsBefore = await listCsrInstancesForEgsUnit(companyA, egsUnitId);
+    const secretRefA = rowsBefore[0].secretRef;
+    expect(await getZatcaSecretStore().resolve(companyA, secretRefA)).not.toBeNull();
+
+    const cert = await makeIssuedCertificateForCsr(csrRes.body.csrDerBase64, new Date("2027-01-01"));
+    const confirmRes = await confirmCsid(tokenA, egsUnitId, cert, "s3cr3t", "compliance");
+    expect(confirmRes.status).toBe(200);
+
+    // The bug this slice fixes: before the fix, this secret would have
+    // been deleted by confirmCsidForEgsUnit's old unconditional delete().
+    const credentialAfter = await getZatcaSecretStore().resolve(companyA, secretRefA);
+    expect(credentialAfter).not.toBeNull();
+    expect(credentialAfter?.privateKeyPem).toBeTruthy();
+
+    // CSR Instance A's own row is untouched -- still records secretRef A.
+    const rowsAfter = await listCsrInstancesForEgsUnit(companyA, egsUnitId);
+    expect(rowsAfter[0].secretRef).toBe(secretRefA);
+  });
+});
+
+describe("Slice K — Test 3: EGS current pointer can change without destroying history", () => {
+  it("zatca_egs_units.secretRef moves to the confirmed credential while CSR Instance A.secretRef stays unchanged", async () => {
+    const { listCsrInstancesForEgsUnit } = await import("../src/lib/zatca/domain/index.js");
+
+    const egsUnitId = await createEgsUnit(tokenA);
+    const csrRes = await generateCsr(tokenA, egsUnitId);
+    const rowsBefore = await listCsrInstancesForEgsUnit(companyA, egsUnitId);
+    const secretRefA = rowsBefore[0].secretRef;
+
+    const unitBefore = await request(app).get(`/api/zatca/egs-units/${egsUnitId}`).set("Authorization", `Bearer ${tokenA}`);
+    expect(unitBefore.body.hasCredential).toBe(true); // sanity: has a secretRef already (from generation)
+
+    const cert = await makeIssuedCertificateForCsr(csrRes.body.csrDerBase64, new Date("2027-01-01"));
+    await confirmCsid(tokenA, egsUnitId, cert, "s3cr3t", "compliance");
+
+    const { getEgsUnit } = await import("../src/lib/zatca/domain/index.js");
+    const unitAfter = await getEgsUnit(companyA, egsUnitId);
+    // EGS current pointer legitimately changed (operational behavior
+    // preserved) ...
+    expect(unitAfter?.secretRef).not.toBe(secretRefA);
+    // ... but CSR Instance A's own historical field did not.
+    const rowsAfter = await listCsrInstancesForEgsUnit(companyA, egsUnitId);
+    expect(rowsAfter[0].secretRef).toBe(secretRefA);
+  });
+});
+
+describe("Slice K — Test 4: multiple CSR instances survive CSID confirmation", () => {
+  it("CSR A and CSR B (regenerated before confirmation) both remain with independently resolvable secrets after confirming CSR B", async () => {
+    const { listCsrInstancesForEgsUnit } = await import("../src/lib/zatca/domain/index.js");
+    const { getZatcaSecretStore } = await import("../src/lib/zatca/secretStore/index.js");
+
+    const egsUnitId = await createEgsUnit(tokenA);
+    await generateCsr(tokenA, egsUnitId, "1000"); // CSR A -- immediately superseded
+    const csrBRes = await generateCsr(tokenA, egsUnitId, "0100"); // CSR B -- current
+
+    const rowsBeforeConfirm = await listCsrInstancesForEgsUnit(companyA, egsUnitId);
+    expect(rowsBeforeConfirm).toHaveLength(2);
+    const secretRefA = rowsBeforeConfirm.find((r) => r.status === "superseded")!.secretRef;
+    const secretRefB = rowsBeforeConfirm.find((r) => r.status === "generated")!.secretRef;
+
+    const cert = await makeIssuedCertificateForCsr(csrBRes.body.csrDerBase64, new Date("2027-01-01"));
+    const confirmRes = await confirmCsid(tokenA, egsUnitId, cert, "s3cr3t", "compliance");
+    expect(confirmRes.status).toBe(200);
+
+    const rowsAfterConfirm = await listCsrInstancesForEgsUnit(companyA, egsUnitId);
+    expect(rowsAfterConfirm).toHaveLength(2);
+
+    expect(await getZatcaSecretStore().resolve(companyA, secretRefA)).not.toBeNull();
+    expect(await getZatcaSecretStore().resolve(companyA, secretRefB)).not.toBeNull();
+  });
+});
+
+describe("Slice K — Test 5: no credential leakage", () => {
+  it("binarySecurityToken/secret/privateKeyPem never appear in the DB row, audit metadata, or API response", async () => {
+    const { listCsrInstancesForEgsUnit } = await import("../src/lib/zatca/domain/index.js");
+
+    const egsUnitId = await createEgsUnit(tokenA);
+    const csrRes = await generateCsr(tokenA, egsUnitId);
+    const cert = await makeIssuedCertificateForCsr(csrRes.body.csrDerBase64, new Date("2027-01-01"));
+    const rawSecret = "SLICE-K-RAW-SECRET-VALUE";
+
+    const confirmRes = await confirmCsid(tokenA, egsUnitId, cert, rawSecret, "compliance");
+    expect(confirmRes.status).toBe(200);
+    expect(JSON.stringify(confirmRes.body)).not.toContain(rawSecret);
+    expect(JSON.stringify(confirmRes.body)).not.toContain(cert);
+
+    const rows = await listCsrInstancesForEgsUnit(companyA, egsUnitId);
+    const rowJson = JSON.stringify(rows);
+    expect(rowJson).not.toContain(rawSecret);
+    expect(rowJson).not.toContain(cert);
+    // Only an opaque secretRef string, never key/cert material shaped
+    // like PEM.
+    expect(rowJson).not.toContain("BEGIN PRIVATE KEY");
+    expect(rowJson).not.toContain("BEGIN CERTIFICATE");
+
+    const auditRes = await request(app).get("/api/audit-events").set("Authorization", `Bearer ${tokenA}`);
+    const auditJson = JSON.stringify(auditRes.body);
+    expect(auditJson).not.toContain(rawSecret);
+    expect(auditJson).not.toContain(cert);
+  });
+});

@@ -60,7 +60,12 @@ import "reflect-metadata";
 import * as x509 from "@peculiar/x509";
 import { db } from "../../../db/client.js";
 import { getEgsUnit, updateEgsUnitCsidStatus, setEgsUnitSecretRef, EgsUnitNotFoundError } from "./egsUnits.js";
-import { createCsrInstance, findCurrentCsrInstance, markCsrInstanceSuperseded } from "./csrInstances.js";
+import {
+  createCsrInstance,
+  findCurrentCsrInstance,
+  findCsrInstanceBySecretRef,
+  markCsrInstanceSuperseded,
+} from "./csrInstances.js";
 import { getZatcaTenantIdentity } from "./config.js";
 import { getZatcaSecretStore } from "../secretStore/index.js";
 import { generateEcdsaKeyPair } from "../csr/keyPair.js";
@@ -262,7 +267,28 @@ export async function confirmCsidForEgsUnit(input: ConfirmCsidInput) {
     // further confirmation can ever need it again.
     publicKeyPem: input.stage === "production" ? undefined : pending.publicKeyPem,
   });
-  await getZatcaSecretStore().delete(input.companyId, unit.secretRef);
+
+  // Slice K — the old EGS-level secretRef (unit.secretRef) is only safe
+  // to delete from ZatcaSecretStore if no zatca_csr_instances row
+  // historically owns it. At compliance-stage confirmation, unit.secretRef
+  // is exactly the secretRef generateCsrForEgsUnit wrote onto this EGS
+  // unit's CSR Instance row (set once at generation time, never updated
+  // afterward — see csrInstances.ts's file comment) — deleting it here
+  // would leave that row's own secretRef field pointing at nothing,
+  // exactly the historical-corruption bug this slice exists to close.
+  // At production-stage confirmation, unit.secretRef is instead the
+  // *compliance-stage* credential this same function's previous call
+  // produced (via the put() above, on that earlier call) — no CSR
+  // Instance row was ever updated to reference it (CSR Instance only ever
+  // records the generation-time secretRef), so it has no historical owner
+  // and remains safe to delete, exactly as before. This is a deliberate,
+  // narrow ownership check — not a blanket "never delete" — so a secret
+  // with no historical owner is still cleaned up rather than accumulating
+  // forever.
+  const historicalOwner = await findCsrInstanceBySecretRef(input.companyId, unit.secretRef);
+  if (!historicalOwner) {
+    await getZatcaSecretStore().delete(input.companyId, unit.secretRef);
+  }
   await setEgsUnitSecretRef(input.companyId, input.egsUnitId, newSecretRef);
 
   const updated = await updateEgsUnitCsidStatus(input.companyId, input.egsUnitId, CSID_STATUS_FOR_STAGE[input.stage], {
