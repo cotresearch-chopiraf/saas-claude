@@ -7,18 +7,19 @@
 // lib/zatca/errors.ts ZatcaError subclass, never a raw fetch Response or
 // response body.
 //
-// VERIFICATION STATUS — Reporting (POST /invoices/reporting/single) and
-// Clearance (POST /invoices/clearance/single): the exact header set
-// (Authorization, Accept-Language, Clearance-Status, Accept-Version),
-// request body shape ({invoiceHash, uuid, invoice}), and response schema
-// were independently verified against the real "e-Invoicing Sandbox
-// Release (2.1.0)" Swagger export the user obtained directly from their
-// own ZATCA Developer Portal account and shared in this conversation
-// (reporting.pdf / clearance.pdf) — genuinely read and extracted by this
-// session, not cross-corroborated secondary-source guessing. See
-// docs/zatca/ZATCA_NETWORK_INTEGRATION_SPEC.md for the full citation.
-// Compliance CSID / Production CSID onboarding remain unverified — no
-// Swagger export for those was available.
+// VERIFICATION STATUS — Reporting (POST /invoices/reporting/single),
+// Clearance (POST /invoices/clearance/single), and Compliance CSID
+// (POST /compliance): the exact header set, request body shape, and
+// response schema were independently verified against the real
+// "e-Invoicing Sandbox Release (2.1.0)" Swagger exports the user obtained
+// directly from their own ZATCA Developer Portal account and shared in
+// this conversation (reporting.pdf / clearance.pdf / compliance_csid.pdf)
+// — genuinely read and extracted by this session, not cross-corroborated
+// secondary-source guessing. See docs/zatca/ZATCA_NETWORK_INTEGRATION_SPEC.md
+// for the full citation. Compliance Invoice / Production CSID onboarding /
+// Production CSID renewal remain unverified in code (their Swagger exports
+// were read too, but are not yet wired here — see the spec doc's Slice A
+// scope note).
 //
 // To avoid guessing beyond what was verified, NOTHING here hardcodes a
 // ZATCA hostname or path: every one of them is required from environment
@@ -28,11 +29,20 @@
 // label, not a deployment choice — still overridable via
 // ZATCA_FATOORA_*_API_VERSION for a future version bump. This module is
 // genuinely functional and independently testable against a mock HTTP
-// server; for Reporting/Clearance the wire contract itself is now
-// verified too — only real Sandbox credentials to test against remain
-// unavailable in this environment. Compliance CSID's contract is still
-// unverified, so submitComplianceDocument's request/response handling
-// below remains the older, conservative cross-corroborated shape.
+// server; for Reporting/Clearance/Compliance CSID the wire contract itself
+// is now verified too — only real Sandbox credentials to test against
+// remain unavailable in this environment. Compliance Invoice's contract is
+// still unverified in code, so submitComplianceDocument's request/response
+// handling below remains the older, conservative cross-corroborated shape.
+//
+// Compliance CSID (fatooraRequestComplianceCsid, below) is deliberately a
+// SEPARATE function from fatooraRequest/doFetch rather than a generalization
+// of them: it is the one FATOORA call with no ResolvedZatcaCredential at
+// all (no Authorization header — verified, see compliance_csid.pdf), uses
+// an OTP header instead, and has its own distinct error-code vocabulary
+// (Missing-OTP/Invalid-OTP/Missing-CSR/Invalid-CSR). Keeping it separate
+// avoids threading an optional-credential branch through the
+// already-verified-and-tested Reporting/Clearance path.
 
 import { randomUUID } from "node:crypto";
 import { logger } from "../../logger.js";
@@ -53,6 +63,16 @@ export interface FatooraEndpointConfig {
   compliancePath: string;
   clearancePath: string;
   reportingPath: string;
+  // Compliance CSID's endpoint (POST /compliance per compliance_csid.pdf)
+  // is a DIFFERENT path from compliancePath above — the existing
+  // compliancePath/_COMPLIANCE_PATH env var is already used by
+  // submitComplianceDocument/checkConnection for the Compliance Invoice
+  // endpoint (/compliance/invoices, per this project's existing test
+  // config). Renaming or repurposing that existing variable is out of
+  // scope here (Slice A touches Compliance CSID only), so this is a new,
+  // separately-configured, OPTIONAL path — unset unless
+  // requestComplianceCsid is actually used.
+  complianceCsidPath?: string;
   apiVersion?: string;
   timeoutMs: number;
 }
@@ -78,6 +98,10 @@ export function loadFatooraEndpointConfig(environment: ZatcaEnvironmentName): Fa
     compliancePath,
     clearancePath,
     reportingPath,
+    // Optional and separate from the mandatory check above — see the
+    // FatooraEndpointConfig field comment. requestComplianceCsid below
+    // throws its own ZatcaConfigurationError if this is unset when needed.
+    complianceCsidPath: process.env[`${prefix}_COMPLIANCE_CSID_PATH`] || undefined,
     apiVersion: process.env[`${prefix}_API_VERSION`] || undefined,
     timeoutMs: Number(process.env.ZATCA_FATOORA_TIMEOUT_MS) || 15000,
   };
@@ -259,4 +283,159 @@ export async function fatooraProbe(
 ): Promise<FatooraProbeResult> {
   const result = await doFetch("GET", path, undefined, credential, config);
   return { status: result.status, correlationId: result.correlationId, credentialRejected: result.status === 401 || result.status === 403 };
+}
+
+export interface ComplianceCsidRawResult {
+  requestId: string;
+  dispositionMessage: string;
+  binarySecurityToken: string;
+  secret: string;
+}
+
+// Extracts the documented {code, message} (400's {errors:[{code,message}]}
+// or 500's {code,message}) into a single safe-to-log/return string. Never
+// interpolates the raw response body itself (see errors.ts's file header) —
+// only these two specific, documented string fields, and only when they
+// are actually present as strings. Falls back to a generic message with no
+// body detail for anything else, rather than guessing a shape.
+function formatComplianceCsidErrorDetail(body: unknown, bodyWasValidJson: boolean): string | undefined {
+  if (!bodyWasValidJson || !body || typeof body !== "object") return undefined;
+  const record = body as Record<string, unknown>;
+
+  if (Array.isArray(record.errors)) {
+    const parts = record.errors
+      .filter((entry): entry is Record<string, unknown> => !!entry && typeof entry === "object")
+      .map((entry) => [entry.code, entry.message].filter((value) => typeof value === "string").join(": "))
+      .filter((part) => part.length > 0);
+    if (parts.length > 0) return parts.join("; ");
+  }
+
+  if (typeof record.code === "string" || typeof record.message === "string") {
+    const part = [record.code, record.message].filter((value) => typeof value === "string").join(": ");
+    if (part.length > 0) return part;
+  }
+
+  return undefined;
+}
+
+// Compliance CSID — POST /compliance. VERIFIED (see file header). The one
+// FATOORA call with no ResolvedZatcaCredential: no certificate/secret
+// exists yet at this point in onboarding, so authentication is the OTP
+// header instead of Basic Auth, per compliance_csid.pdf's own Parameters
+// table (only OTP and Accept-Version are listed; no Authorization row).
+export async function fatooraRequestComplianceCsid(
+  csrBase64: string,
+  otp: string,
+  config: FatooraEndpointConfig,
+): Promise<ComplianceCsidRawResult> {
+  if (!config.complianceCsidPath) {
+    throw new ZatcaConfigurationError(
+      "ZATCA Compliance CSID endpoint path is not configured (ZATCA_FATOORA_SIMULATION_COMPLIANCE_CSID_PATH or " +
+        "ZATCA_FATOORA_PRODUCTION_COMPLIANCE_CSID_PATH). MIDAD never guesses ZATCA endpoint paths — set this from " +
+        "the verified ZATCA Developer Portal Compliance CSID API Swagger documentation before use.",
+    );
+  }
+
+  const url = new URL(
+    config.complianceCsidPath.replace(/^\//, ""),
+    config.baseUrl.endsWith("/") ? config.baseUrl : `${config.baseUrl}/`,
+  ).toString();
+  const correlationId = randomUUID();
+
+  // Verified headers only — no Authorization, no Clearance-Status, no
+  // Accept-Language (compliance_csid.pdf's Parameters table lists exactly
+  // OTP and Accept-Version, both required).
+  const headers: Record<string, string> = {
+    OTP: otp,
+    "Accept-Version": config.apiVersion || VERIFIED_ACCEPT_VERSION,
+    Accept: "application/json",
+    "Content-Type": "application/json",
+    "X-Correlation-Id": correlationId,
+  };
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), config.timeoutMs);
+  const startedAt = Date.now();
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers,
+      // Verified body shape (compliance_csid.pdf's CSRRequest example):
+      // {"csr": "<base64 PEM CSR>"} — exactly one field.
+      body: JSON.stringify({ csr: csrBase64 }),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    const aborted = controller.signal.aborted;
+    logger.warn("zatca_fatoora_compliance_csid_network_error", { correlationId, durationMs: Date.now() - startedAt, aborted });
+    if (aborted) {
+      throw new ZatcaNetworkError(`ZATCA Compliance CSID request timed out after ${config.timeoutMs}ms (correlationId: ${correlationId})`);
+    }
+    throw new ZatcaNetworkError(`Could not reach ZATCA Compliance CSID endpoint (correlationId: ${correlationId})`);
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  const rawText = await res.text();
+  let parsedBody: unknown = null;
+  let bodyWasValidJson = true;
+  if (rawText) {
+    try {
+      parsedBody = JSON.parse(rawText);
+    } catch {
+      bodyWasValidJson = false;
+    }
+  }
+
+  logger.info("zatca_fatoora_compliance_csid_response", { correlationId, status: res.status, durationMs: Date.now() - startedAt });
+
+  const detail = formatComplianceCsidErrorDetail(parsedBody, bodyWasValidJson);
+  const detailSuffix = detail ? `: ${detail}` : "";
+
+  // Only the status codes compliance_csid.pdf actually documents (400,
+  // 406, 500) get a specific mapping — no 401/403/409/429 branches, since
+  // none of those are documented for this endpoint (consistent with there
+  // being no Authorization header to reject or conflict on).
+  if (res.status === 400) {
+    throw new ZatcaValidationError(`ZATCA rejected the Compliance CSID request (status 400, correlationId: ${correlationId})${detailSuffix}`);
+  }
+  if (res.status === 406) {
+    throw new ZatcaValidationError(
+      `ZATCA rejected the API version for the Compliance CSID request (status 406, correlationId: ${correlationId})${detailSuffix}`,
+    );
+  }
+  if (res.status >= 500) {
+    throw new ZatcaExternalServiceError(`ZATCA Compliance CSID endpoint is unavailable (status ${res.status}, correlationId: ${correlationId})${detailSuffix}`);
+  }
+  if (res.status !== 200) {
+    throw new ZatcaExternalServiceError(
+      `ZATCA returned an unexpected status for the Compliance CSID request (status ${res.status}, correlationId: ${correlationId})`,
+    );
+  }
+  if (!bodyWasValidJson) {
+    throw new ZatcaExternalServiceError(`ZATCA returned a non-JSON response for the Compliance CSID request (correlationId: ${correlationId})`);
+  }
+
+  const body = (parsedBody ?? {}) as Record<string, unknown>;
+  const { requestID, dispositionMessage, binarySecurityToken, secret } = body;
+  if (
+    (typeof requestID !== "number" && typeof requestID !== "string") ||
+    typeof dispositionMessage !== "string" ||
+    typeof binarySecurityToken !== "string" ||
+    typeof secret !== "string"
+  ) {
+    throw new ZatcaExternalServiceError(
+      `ZATCA Compliance CSID response did not include the expected fields (requestID/dispositionMessage/` +
+        `binarySecurityToken/secret) (correlationId: ${correlationId})`,
+    );
+  }
+
+  return {
+    requestId: String(requestID),
+    dispositionMessage,
+    binarySecurityToken,
+    secret,
+  };
 }

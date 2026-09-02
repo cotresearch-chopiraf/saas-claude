@@ -11,15 +11,19 @@
 // fatooraClient.ts directly.
 //
 // submitComplianceDocument's contract remains UNVERIFIED — no Swagger
-// export for Compliance CSID/compliance checks was available — so it
-// still uses the older, conservative cross-corroborated normalization
-// (normalizeUnverifiedComplianceResponse), kept separate and clearly
-// labeled rather than assumed to share Reporting/Clearance's schema.
+// export for Compliance Invoice (compliance checks) was available in code
+// yet — so it still uses the older, conservative cross-corroborated
+// normalization (normalizeUnverifiedComplianceResponse), kept separate and
+// clearly labeled rather than assumed to share Reporting/Clearance's
+// schema. requestComplianceCsid below is a SEPARATE, VERIFIED endpoint
+// (POST /compliance, not /compliance/invoices) — see fatooraClient.ts's
+// header comment.
 
-import { fatooraProbe, fatooraRequest, loadFatooraEndpointConfig } from "./fatooraClient.js";
+import { fatooraProbe, fatooraRequest, fatooraRequestComplianceCsid, loadFatooraEndpointConfig } from "./fatooraClient.js";
 import { ZatcaExternalServiceError } from "../errors.js";
 import type {
   ResolvedZatcaCredential,
+  ZatcaComplianceCsidResult,
   ZatcaConnectionCheckResult,
   ZatcaDocumentSubmissionInput,
   ZatcaEnvironmentName,
@@ -110,6 +114,18 @@ export class FatooraProvider implements ZatcaProvider {
       { ...ACCEPT_LANGUAGE_EN, ...CLEARANCE_STATUS_DISABLED },
     );
     return normalizeReportingResponse(res);
+  }
+
+  // Compliance CSID — VERIFIED contract (POST /compliance). No
+  // ResolvedZatcaCredential parameter: this call is what PRODUCES the
+  // first credential, so it takes the raw CSR + OTP instead (see
+  // fatooraClient.ts's fatooraRequestComplianceCsid). Deliberately not
+  // called from anywhere else in this slice — domain/csr.ts's
+  // confirmCsidForEgsUnit, the CSID state machine, and every route are
+  // untouched; see docs/zatca/ZATCA_NETWORK_INTEGRATION_SPEC.md.
+  async requestComplianceCsid(csrBase64: string, otp: string): Promise<ZatcaComplianceCsidResult> {
+    const config = loadFatooraEndpointConfig(this.environment);
+    return fatooraRequestComplianceCsid(csrBase64, otp, config);
   }
 }
 

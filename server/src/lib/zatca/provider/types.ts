@@ -65,6 +65,22 @@ export interface ZatcaSubmissionResult {
   clearedInvoiceXmlBase64?: string;
 }
 
+// Compliance CSID — VERIFIED (see fatooraClient.ts's file comment; contract
+// read directly from the real "Compliance CSID API" Swagger export the user
+// obtained from their own ZATCA Developer Portal account). This is the
+// bootstrapping call: no ResolvedZatcaCredential exists yet at this point
+// (it's what this call produces), so it takes the raw CSR and OTP instead.
+export interface ZatcaComplianceCsidResult {
+  // ZATCA's requestID — returned as a JSON number in the verified example,
+  // stored here as a string since it is used only as an opaque identifier
+  // (e.g. later passed as Production CSID's compliance_request_id), never
+  // arithmetic.
+  requestId: string;
+  dispositionMessage: string;
+  binarySecurityToken: string;
+  secret: string;
+}
+
 export interface ZatcaProvider {
   getEnvironment(): ZatcaEnvironmentName;
 
@@ -81,4 +97,10 @@ export interface ZatcaProvider {
   clearInvoice(credential: ResolvedZatcaCredential, input: ZatcaDocumentSubmissionInput): Promise<ZatcaSubmissionResult>;
 
   reportInvoice(credential: ResolvedZatcaCredential, input: ZatcaDocumentSubmissionInput): Promise<ZatcaSubmissionResult>;
+
+  // Issues a Compliance CSID from a CSR + OTP. VERIFIED contract (see
+  // fatooraClient.ts). Deliberately NOT wired to domain/csr.ts's
+  // confirmCsidForEgsUnit, the CSID state machine, or any route in this
+  // slice — see docs/zatca/ZATCA_NETWORK_INTEGRATION_SPEC.md for why.
+  requestComplianceCsid(csrBase64: string, otp: string): Promise<ZatcaComplianceCsidResult>;
 }

@@ -21,6 +21,7 @@ import {
 const ENV_KEYS = [
   "ZATCA_FATOORA_SIMULATION_BASE_URL",
   "ZATCA_FATOORA_SIMULATION_COMPLIANCE_PATH",
+  "ZATCA_FATOORA_SIMULATION_COMPLIANCE_CSID_PATH",
   "ZATCA_FATOORA_SIMULATION_CLEARANCE_PATH",
   "ZATCA_FATOORA_SIMULATION_REPORTING_PATH",
   "ZATCA_FATOORA_TIMEOUT_MS",
@@ -36,6 +37,18 @@ function setEnv(baseUrl: string, timeoutMs?: number) {
   process.env.ZATCA_FATOORA_SIMULATION_CLEARANCE_PATH = "invoices/clearance/single";
   process.env.ZATCA_FATOORA_SIMULATION_REPORTING_PATH = "invoices/reporting/single";
   if (timeoutMs) process.env.ZATCA_FATOORA_TIMEOUT_MS = String(timeoutMs);
+}
+
+// Compliance CSID (POST /compliance) is a distinct, separately-configured
+// path from ZATCA_FATOORA_SIMULATION_COMPLIANCE_PATH above (that variable
+// is already used for the Compliance Invoice endpoint /compliance/invoices
+// — see fatooraClient.ts's FatooraEndpointConfig comment), so this helper
+// sets both the base config and this one extra variable, kept separate
+// from setEnv() so the existing Reporting/Clearance/Compliance-Invoice
+// tests above are unaffected.
+function setComplianceCsidEnv(baseUrl: string, timeoutMs?: number) {
+  setEnv(baseUrl, timeoutMs);
+  process.env.ZATCA_FATOORA_SIMULATION_COMPLIANCE_CSID_PATH = "compliance";
 }
 
 function startMockServer(handler: http.RequestListener): Promise<{ url: string; close: () => Promise<void> }> {
@@ -405,5 +418,159 @@ describe("FatooraProvider.checkConnection", () => {
   it("propagates ZatcaNetworkError on a real network failure (no server listening)", async () => {
     setEnv("http://127.0.0.1:1"); // port 1 — nothing listens there
     await expect(new FatooraProvider("simulation").checkConnection(credential)).rejects.toBeInstanceOf(ZatcaNetworkError);
+  });
+});
+
+// Slice A (ZATCA Network Integration continuation) — requestComplianceCsid,
+// against the VERIFIED "Compliance CSID API" Swagger export
+// (compliance_csid.pdf, "e-Invoicing Sandbox Release (2.1.0)") the user
+// obtained from their own ZATCA Developer Portal account. This endpoint
+// (POST /compliance) has no ResolvedZatcaCredential — it produces one —
+// so these tests call the provider method directly with a raw CSR + OTP,
+// never with the shared `credential` fixture used above.
+describe("FatooraProvider.requestComplianceCsid (verified Compliance CSID contract)", () => {
+  const csrBase64 = "TFMwdExTMUNSVWRKVGlCRFJWSlVTVVpKUTBGVVJTMHRMUzA9"; // arbitrary placeholder bytes, not a real CSR
+
+  it("throws ZatcaConfigurationError when the Compliance CSID path is not configured", async () => {
+    setEnv("http://127.0.0.1:1"); // base config present, but no COMPLIANCE_CSID_PATH
+    await expect(new FatooraProvider("simulation").requestComplianceCsid(csrBase64, "123456")).rejects.toBeInstanceOf(
+      ZatcaConfigurationError,
+    );
+  });
+
+  it("sends no Authorization header, and sends OTP + Accept-Version: V2 + the verified {csr} body", async () => {
+    let receivedHeaders: http.IncomingHttpHeaders | undefined;
+    let receivedBody = "";
+    const server = await startMockServer((req, res) => {
+      receivedHeaders = req.headers;
+      req.on("data", (chunk) => (receivedBody += chunk));
+      req.on("end", () => {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            requestID: 1234567890123,
+            dispositionMessage: "ISSUED",
+            binarySecurityToken: "cert-bytes-base64",
+            secret: "shared-secret-value",
+          }),
+        );
+      });
+    });
+    cleanup = server.close;
+    setComplianceCsidEnv(server.url);
+
+    const result = await new FatooraProvider("simulation").requestComplianceCsid(csrBase64, "123456");
+
+    expect(receivedHeaders?.authorization).toBeUndefined();
+    expect(receivedHeaders?.otp).toBe("123456");
+    expect(receivedHeaders?.["accept-version"]).toBe("V2");
+    expect(JSON.parse(receivedBody)).toEqual({ csr: csrBase64 });
+
+    expect(result).toEqual({
+      requestId: "1234567890123",
+      dispositionMessage: "ISSUED",
+      binarySecurityToken: "cert-bytes-base64",
+      secret: "shared-secret-value",
+    });
+  });
+
+  it("throws ZatcaValidationError with the ZATCA error detail on Missing-OTP (400)", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ errors: [{ code: "Missing-OTP", message: "OTP is required field" }] }));
+    });
+    cleanup = server.close;
+    setComplianceCsidEnv(server.url);
+
+    const err = await new FatooraProvider("simulation").requestComplianceCsid(csrBase64, "").catch((e) => e);
+    expect(err).toBeInstanceOf(ZatcaValidationError);
+    expect(err.message).toContain("Missing-OTP");
+    expect(err.message).toContain("OTP is required field");
+  });
+
+  it("throws ZatcaValidationError with the ZATCA error detail on Invalid-OTP (400)", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ errors: [{ code: "Invalid-OTP", message: "The provided OTP is invalid" }] }));
+    });
+    cleanup = server.close;
+    setComplianceCsidEnv(server.url);
+
+    const err = await new FatooraProvider("simulation").requestComplianceCsid(csrBase64, "000000").catch((e) => e);
+    expect(err).toBeInstanceOf(ZatcaValidationError);
+    expect(err.message).toContain("Invalid-OTP");
+  });
+
+  it("throws ZatcaValidationError with the ZATCA error detail on Missing-CSR (400)", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ errors: [{ code: "Missing-CSR", message: "CSR is required field" }] }));
+    });
+    cleanup = server.close;
+    setComplianceCsidEnv(server.url);
+
+    const err = await new FatooraProvider("simulation").requestComplianceCsid("", "123456").catch((e) => e);
+    expect(err).toBeInstanceOf(ZatcaValidationError);
+    expect(err.message).toContain("Missing-CSR");
+  });
+
+  it("throws ZatcaValidationError with the ZATCA error detail on Invalid-CSR (400)", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ errors: [{ code: "Invalid-CSR", message: "The provided CSR is invalid" }] }));
+    });
+    cleanup = server.close;
+    setComplianceCsidEnv(server.url);
+
+    const err = await new FatooraProvider("simulation").requestComplianceCsid("not-a-real-csr", "123456").catch((e) => e);
+    expect(err).toBeInstanceOf(ZatcaValidationError);
+    expect(err.message).toContain("Invalid-CSR");
+  });
+
+  it("throws ZatcaValidationError on a 406 (unsupported/missing Accept-Version)", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(406, { "Content-Type": "text/plain;charset=UTF-8" });
+      res.end("This Version is not supported or not provided in the header.");
+    });
+    cleanup = server.close;
+    setComplianceCsidEnv(server.url);
+
+    await expect(new FatooraProvider("simulation").requestComplianceCsid(csrBase64, "123456")).rejects.toBeInstanceOf(
+      ZatcaValidationError,
+    );
+  });
+
+  it("throws ZatcaExternalServiceError with the ZATCA error detail on a 500", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ code: "Invalid-Request", message: "System failed to process your request" }));
+    });
+    cleanup = server.close;
+    setComplianceCsidEnv(server.url);
+
+    const err = await new FatooraProvider("simulation").requestComplianceCsid(csrBase64, "123456").catch((e) => e);
+    expect(err).toBeInstanceOf(ZatcaExternalServiceError);
+    expect(err.message).toContain("Invalid-Request");
+    expect(err.message).toContain("System failed to process your request");
+  });
+
+  it("throws ZatcaExternalServiceError when a 200 response is missing the expected fields", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ somethingElse: true }));
+    });
+    cleanup = server.close;
+    setComplianceCsidEnv(server.url);
+
+    await expect(new FatooraProvider("simulation").requestComplianceCsid(csrBase64, "123456")).rejects.toBeInstanceOf(
+      ZatcaExternalServiceError,
+    );
+  });
+
+  it("throws ZatcaNetworkError on a real network failure (no server listening)", async () => {
+    setComplianceCsidEnv("http://127.0.0.1:1"); // port 1 — nothing listens there
+    await expect(new FatooraProvider("simulation").requestComplianceCsid(csrBase64, "123456")).rejects.toBeInstanceOf(
+      ZatcaNetworkError,
+    );
   });
 });
