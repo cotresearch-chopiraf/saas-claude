@@ -68,6 +68,17 @@ beforeAll(async () => {
     .send({ companyName: "CSR Co B", name: "Owner B", email: uniqueEmail("csr-b"), password: "password123" });
   companyB = resB.body.company.id;
   tokenB = resB.body.token;
+
+  // VAT Registration Number consistency (ZATCA Network Integration
+  // continuation) — CSR generation now requires organizationIdentifier to
+  // match the company's registered VAT number exactly. Set it once here
+  // to match validFields.organizationIdentifier so every existing
+  // CSR-generation test below keeps working; the dedicated mismatch test
+  // exercises the rejection path separately without touching this.
+  await request(app)
+    .patch("/api/zatca/config")
+    .set("Authorization", `Bearer ${tokenA}`)
+    .send({ vatNumber: validFields.organizationIdentifier, commercialRegistration: "1010101010" });
 });
 
 async function createEgsUnit(token: string): Promise<string> {
@@ -151,6 +162,36 @@ describe("POST /api/zatca/egs-units/:id/csr", () => {
       .send({ otp: "123456", fields: validFields, customAttributeOids });
     expect(res.status).toBe(404);
   });
+
+  it("VAT CONSISTENCY: rejects a CSR whose organizationIdentifier does not match the company's registered VAT number", async () => {
+    const egsUnitId = await createEgsUnit(tokenA);
+    const mismatched = { ...validFields, organizationIdentifier: "300000000000003" };
+    expect(mismatched.organizationIdentifier).not.toBe(validFields.organizationIdentifier);
+    const res = await request(app)
+      .post(`/api/zatca/egs-units/${egsUnitId}/csr`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .send({ otp: "123456", fields: mismatched, customAttributeOids });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/لا يطابق الرقم الضريبي/);
+    // Never silently corrected or defaulted -- confirm no EGS unit
+    // advanced past not_onboarded/csidStatus "none" for this rejection.
+    const unit = await request(app).get(`/api/zatca/egs-units/${egsUnitId}`).set("Authorization", `Bearer ${tokenA}`);
+    expect(unit.body.csidStatus).toBe("none");
+  });
+
+  it("VAT CONSISTENCY: rejects CSR generation entirely when the company has no VAT number registered yet", async () => {
+    const resC = await request(app)
+      .post("/api/auth/register")
+      .send({ companyName: "CSR Co C (no VAT)", name: "Owner C", email: uniqueEmail("csr-c"), password: "password123" });
+    const tokenC = resC.body.token as string;
+    const egsUnitId = await createEgsUnit(tokenC);
+    const res = await request(app)
+      .post(`/api/zatca/egs-units/${egsUnitId}/csr`)
+      .set("Authorization", `Bearer ${tokenC}`)
+      .send({ otp: "123456", fields: validFields, customAttributeOids });
+    expect(res.status).toBe(400);
+    expect(res.body.category).toBe("configuration");
+  });
 });
 
 async function makeIssuedCertificateForCsr(csrDerBase64: string, notAfter: Date): Promise<string> {
@@ -222,18 +263,59 @@ describe("POST /api/zatca/egs-units/:id/csid", () => {
     expect(new Date(res.body.certificateExpiresAt).toISOString()).toBe(notAfter.toISOString());
   });
 
-  it("a production-stage confirmation sets csidStatus=production_issued", async () => {
+  it("a production-stage confirmation sets csidStatus=production_issued (after compliance is issued first)", async () => {
     const egsUnitId = await createEgsUnit(tokenA);
     const csrDer = await generateCsr(tokenA, egsUnitId);
-    const matchingCert = await makeIssuedCertificateForCsr(csrDer, new Date("2027-01-01"));
+    const complianceCert = await makeIssuedCertificateForCsr(csrDer, new Date("2027-01-01"));
+    const complianceRes = await request(app)
+      .post(`/api/zatca/egs-units/${egsUnitId}/csid`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .send({ binarySecurityToken: complianceCert, secret: "s3cr3t", stage: "compliance" });
+    expect(complianceRes.status).toBe(200);
+    expect(complianceRes.body.csidStatus).toBe("compliance_issued");
 
     const res = await request(app)
       .post(`/api/zatca/egs-units/${egsUnitId}/csid`)
       .set("Authorization", `Bearer ${tokenA}`)
-      .send({ binarySecurityToken: matchingCert, secret: "s3cr3t", stage: "production" });
+      .send({ binarySecurityToken: complianceCert, secret: "s3cr3t", stage: "production" });
 
     expect(res.status).toBe(200);
     expect(res.body.csidStatus).toBe("production_issued");
+  });
+
+  it("STATE MACHINE: rejects 'CSR -> Production CSID' as a shortcut -- production requires compliance_issued first", async () => {
+    const egsUnitId = await createEgsUnit(tokenA);
+    const csrDer = await generateCsr(tokenA, egsUnitId);
+    const cert = await makeIssuedCertificateForCsr(csrDer, new Date("2027-01-01"));
+
+    // Never confirmed "compliance" -- csidStatus is still compliance_pending.
+    const res = await request(app)
+      .post(`/api/zatca/egs-units/${egsUnitId}/csid`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .send({ binarySecurityToken: cert, secret: "s3cr3t", stage: "production" });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/لا يمكن تأكيد شهادة الإنتاج/);
+    const unit = await request(app).get(`/api/zatca/egs-units/${egsUnitId}`).set("Authorization", `Bearer ${tokenA}`);
+    expect(unit.body.csidStatus).toBe("compliance_pending");
+  });
+
+  it("STATE MACHINE: rejects a second 'compliance' confirmation once compliance is already issued", async () => {
+    const egsUnitId = await createEgsUnit(tokenA);
+    const csrDer = await generateCsr(tokenA, egsUnitId);
+    const cert = await makeIssuedCertificateForCsr(csrDer, new Date("2027-01-01"));
+    const first = await request(app)
+      .post(`/api/zatca/egs-units/${egsUnitId}/csid`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .send({ binarySecurityToken: cert, secret: "s3cr3t", stage: "compliance" });
+    expect(first.status).toBe(200);
+
+    const second = await request(app)
+      .post(`/api/zatca/egs-units/${egsUnitId}/csid`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .send({ binarySecurityToken: cert, secret: "s3cr3t", stage: "compliance" });
+    expect(second.status).toBe(400);
+    expect(second.body.error).toMatch(/لا يمكن تأكيد شهادة الامتثال/);
   });
 
   it("TENANT ISOLATION: company B cannot confirm a CSID for company A's EGS unit", async () => {
@@ -314,7 +396,7 @@ describe("POST /api/zatca/egs-units/:id/csid", () => {
     // regressed, this test would fail with "configuration" (missing key)
     // or the local-verification failure message -- never silently pass.
     await request(app).patch("/api/zatca/config").set("Authorization", `Bearer ${tokenA}`).send({
-      vatNumber: "300000000000003",
+      vatNumber: validFields.organizationIdentifier,
       commercialRegistration: "1010101010",
     });
     const egsUnitId = await createEgsUnit(tokenA);

@@ -38,10 +38,28 @@
 // cryptographic proof the OTP is genuine — the real proof-of-possession
 // happens implicitly when (if) the tenant's own CSR submission to ZATCA
 // (using this generated CSR, however they perform it) succeeds.
+//
+// ZATCA NETWORK INTEGRATION CONTINUATION — two additional safeguards, both
+// genuinely implementable and testable without any unverified network
+// contract, per docs/zatca/ZATCA_NETWORK_INTEGRATION_SPEC.md:
+//   - State-machine ordering: confirmCsidForEgsUnit refuses "CSR ->
+//     Production CSID" as a shortcut — production requires this EGS
+//     unit's csidStatus to already be compliance_issued. Also refuses a
+//     redundant second confirmation at either stage. This mirrors the
+//     official onboarding sequence's own requirement, not an invented
+//     MIDAD rule.
+//   - VAT Registration Number consistency: generateCsrForEgsUnit requires
+//     the CSR's organizationIdentifier to exactly match the company's
+//     currently-registered VAT number (getZatcaTenantIdentity). Since
+//     every invoice MIDAD ever builds for this company draws from that
+//     same identity, this one check at CSR-generation time is sufficient
+//     to guarantee CSR/invoice/QR VAT consistency for everything
+//     downstream.
 
 import "reflect-metadata";
 import * as x509 from "@peculiar/x509";
 import { getEgsUnit, updateEgsUnitCsidStatus, setEgsUnitSecretRef, EgsUnitNotFoundError } from "./egsUnits.js";
+import { getZatcaTenantIdentity } from "./config.js";
 import { getZatcaSecretStore } from "../secretStore/index.js";
 import { generateEcdsaKeyPair } from "../csr/keyPair.js";
 import { buildZatcaCsr, type ZatcaCsrFields, type ZatcaCsrCustomAttributeOids } from "../csr/csrBuilder.js";
@@ -71,6 +89,30 @@ export async function generateCsrForEgsUnit(input: GenerateCsrInput): Promise<Ge
   // The OTP is never referenced again below — this function does not
   // store it, log it, or pass it to anything. Its only remaining purpose
   // in this scope is the presence check above.
+
+  // VAT Registration Number consistency (ZATCA Network Integration
+  // continuation) — the official Developer Portal manual (per the
+  // user-supplied baseline; unverified against the primary PDF, which
+  // remains EGRESS_BLOCKED — see docs/zatca/ZATCA_NETWORK_INTEGRATION_SPEC.md)
+  // states the VAT number used for CSID issuance must match the VAT
+  // number used in every subsequent invoice/QR call. MIDAD has one VAT
+  // number per company (not per EGS unit), and every invoice already
+  // draws from that same company identity (documentBuilder.ts), so
+  // enforcing the match here — at CSR generation time — is sufficient to
+  // guarantee it for everything downstream, without inventing any new
+  // per-EGS-unit VAT concept the schema doesn't have.
+  const identity = await getZatcaTenantIdentity(input.companyId);
+  if (!identity.vatNumber) {
+    throw new ZatcaConfigurationError(
+      "لم يتم تسجيل الرقم الضريبي (VAT) لهذه الشركة بعد — أكملي بيانات الهوية الضريبية قبل إنشاء طلب CSR",
+    );
+  }
+  if (input.fields.organizationIdentifier !== identity.vatNumber) {
+    throw new ZatcaValidationError(
+      "الرقم الضريبي في حقل CSR (organizationIdentifier) لا يطابق الرقم الضريبي المسجّل لهذه الشركة — يجب أن يتطابقا " +
+        "تماماً، لأن نفس الرقم يُستخدم لاحقاً في كل فاتورة ورمز QR لهذه الوحدة",
+    );
+  }
 
   const keys = await generateEcdsaKeyPair();
   const { csrPem, csrDerBase64 } = await buildZatcaCsr({
@@ -111,6 +153,27 @@ const CSID_STATUS_FOR_STAGE: Record<ConfirmCsidInput["stage"], (typeof zatcaCsid
 export async function confirmCsidForEgsUnit(input: ConfirmCsidInput) {
   const unit = await getEgsUnit(input.companyId, input.egsUnitId);
   if (!unit) throw new EgsUnitNotFoundError(input.egsUnitId);
+
+  // State-machine ordering (ZATCA Network Integration continuation) — per
+  // the user-supplied baseline, Production CSID requires a prior,
+  // completed Compliance CSID stage; "CSR -> Production CSID" is
+  // explicitly not a valid shortcut. Every other starting state
+  // (including a second "compliance" confirmation, or "production" from
+  // "none"/"expired"/"revoked") is rejected the same way — this function
+  // only ever advances the state machine forward by exactly one step.
+  if (input.stage === "production" && unit.csidStatus !== "compliance_issued") {
+    throw new ZatcaConfigurationError(
+      `لا يمكن تأكيد شهادة الإنتاج (Production CSID) قبل إتمام مرحلة شهادة الامتثال (Compliance CSID) — الحالة ` +
+        `الحالية لهذه الوحدة: "${unit.csidStatus}". يجب تأكيد Compliance CSID أولاً.`,
+    );
+  }
+  if (input.stage === "compliance" && unit.csidStatus !== "compliance_pending") {
+    throw new ZatcaConfigurationError(
+      `لا يمكن تأكيد شهادة الامتثال (Compliance CSID) والحالة الحالية لهذه الوحدة هي "${unit.csidStatus}" — يجب ` +
+        `إنشاء طلب CSR جديد أولاً (ينقل الحالة إلى compliance_pending).`,
+    );
+  }
+
   if (!unit.secretRef) {
     throw new ZatcaConfigurationError("لم يتم إنشاء طلب توقيع شهادة (CSR) لهذه الوحدة بعد — يجب إنشاؤه أولاً");
   }
@@ -144,6 +207,15 @@ export async function confirmCsidForEgsUnit(input: ConfirmCsidInput) {
     secret: input.secret,
     privateKeyPem: pending.privateKeyPem,
     curve: pending.curve,
+    // Carried forward (not dropped after the compliance stage): the
+    // production-stage confirmation re-runs the same public-key match
+    // check below, since the official onboarding flow exchanges the
+    // existing Compliance CSID for a Production one rather than
+    // generating a new key pair — the underlying key pair is expected to
+    // stay the same across both stages. Only dropped once the state
+    // machine reaches its terminal "production_issued" stage, where no
+    // further confirmation can ever need it again.
+    publicKeyPem: input.stage === "production" ? undefined : pending.publicKeyPem,
   });
   await getZatcaSecretStore().delete(input.companyId, unit.secretRef);
   await setEgsUnitSecretRef(input.companyId, input.egsUnitId, newSecretRef);
