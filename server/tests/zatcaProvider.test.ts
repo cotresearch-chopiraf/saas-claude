@@ -574,3 +574,270 @@ describe("FatooraProvider.requestComplianceCsid (verified Compliance CSID contra
     );
   });
 });
+
+// Slice B (ZATCA Network Integration continuation) — submitComplianceDocument
+// / normalizeComplianceInvoiceResponse, against the VERIFIED "Compliance
+// Invoice API" Swagger export (compliance_invoice.pdf, "e-Invoicing Sandbox
+// Release (2.1.0)"). This endpoint documents TWO genuinely distinct
+// response shapes, both occurring under either HTTP 200 or HTTP 400 —
+// these tests exercise both, via submitComplianceDocument end-to-end (a
+// real mock server, not the normalizer function in isolation) so the
+// HTTP-400-carries-a-real-body wiring (fatooraRequestComplianceInvoice) is
+// actually verified, not just the parsing logic.
+describe("FatooraProvider.submitComplianceDocument (verified Compliance Invoice contract)", () => {
+  it("Shape 1: normalizes a 200 REPORTED response to status: compliance_pending, preserving clearanceStatus/qrSellertStatus/qrBuyertStatus", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          validationResults: { status: "PASS", infoMessages: [], warningMessages: [], errorMessages: [] },
+          reportingStatus: "REPORTED",
+          clearanceStatus: null,
+          qrSellertStatus: null,
+          qrBuyertStatus: null,
+        }),
+      );
+    });
+    cleanup = server.close;
+    setEnv(server.url);
+
+    const result = await new FatooraProvider("simulation").submitComplianceDocument(credential, document);
+    expect(result.status).toBe("compliance_pending");
+    expect(result.rawStatus).toBe("REPORTED");
+    expect(result.clearanceStatus).toBeNull();
+    expect(result.qrSellertStatus).toBeNull();
+    expect(result.qrBuyertStatus).toBeNull();
+  });
+
+  it("Shape 1: preserves a non-null clearanceStatus/qrSellertStatus/qrBuyertStatus when ZATCA returns one", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          validationResults: { status: "PASS" },
+          reportingStatus: "REPORTED",
+          clearanceStatus: "CLEARED",
+          qrSellertStatus: "PASS",
+          qrBuyertStatus: "PASS",
+        }),
+      );
+    });
+    cleanup = server.close;
+    setEnv(server.url);
+
+    const result = await new FatooraProvider("simulation").submitComplianceDocument(credential, document);
+    expect(result.clearanceStatus).toBe("CLEARED");
+    expect(result.qrSellertStatus).toBe("PASS");
+    expect(result.qrBuyertStatus).toBe("PASS");
+  });
+
+  it("Shape 1: a validationResults.status of ERROR alongside reportingStatus NOT_REPORTED normalizes to status: rejected", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          validationResults: {
+            status: "ERROR",
+            errorMessages: [{ type: "ERROR", code: "BR-KSA-37", category: "KSA", message: "The seller address building number must contain 4 digits.", status: "ERROR" }],
+          },
+          reportingStatus: "NOT_REPORTED",
+          clearanceStatus: null,
+          qrSellertStatus: null,
+          qrBuyertStatus: null,
+        }),
+      );
+    });
+    cleanup = server.close;
+    setEnv(server.url);
+
+    const result = await new FatooraProvider("simulation").submitComplianceDocument(credential, document);
+    expect(result.status).toBe("rejected");
+    expect(result.rawStatus).toBe("NOT_REPORTED");
+  });
+
+  it("Shape 2 (InvoiceResultModel): a 400 QR-code error response normalizes to status: rejected, preserving category/code/message", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          invoiceHash: "some-hash",
+          status: "Not Reported",
+          warnings: null,
+          errors: [
+            { category: "QR-Code-Errors", code: "Seller-Name", message: "seller name does not match with qr code seller name" },
+            { code: "QR-Hashed-XML", message: "Invalid The XML hash. The XML hash of the invoice does not match with QR Code xml hash" },
+          ],
+        }),
+      );
+    });
+    cleanup = server.close;
+    setEnv(server.url);
+
+    const result = await new FatooraProvider("simulation").submitComplianceDocument(credential, document);
+    expect(result.status).toBe("rejected");
+    expect(result.rawStatus).toBe("Not Reported");
+    const warnings = result.warnings as { warnings: unknown; errors: Array<{ category?: string; code: string; message: string }> };
+    expect(warnings.errors).toHaveLength(2);
+    expect(warnings.errors[0]).toEqual({ category: "QR-Code-Errors", code: "Seller-Name", message: "seller name does not match with qr code seller name" });
+    expect(warnings.errors[1].code).toBe("QR-Hashed-XML");
+  });
+
+  it("Shape 2 (InvoiceResultModel): a 400 signature-error response with multiple errors preserves every entry", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          invoiceHash: "some-hash",
+          status: "Not Reported",
+          warnings: null,
+          errors: [
+            { category: "Signature-Errors", code: "X-509-Issuer-Name", message: "Wrong X509IssuerName" },
+            { category: "Signature-Errors", code: "Certificate", message: "Wrong Invoice Certificate" },
+            { category: "Signature-Errors", code: "Signature-Value", message: "Wrong Signature Value" },
+          ],
+        }),
+      );
+    });
+    cleanup = server.close;
+    setEnv(server.url);
+
+    const result = await new FatooraProvider("simulation").submitComplianceDocument(credential, document);
+    expect(result.status).toBe("rejected");
+    const warnings = result.warnings as { errors: unknown[] };
+    expect(warnings.errors).toHaveLength(3);
+  });
+
+  it("Shape 2: 'Accepted with Warnings' is a real success (status: compliance_pending), never treated as rejection", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          invoiceHash: "some-hash",
+          status: "Accepted with Warnings",
+          warnings: [{ category: "KSA", code: "BR-KSA-warn", message: "a non-blocking warning" }],
+          errors: null,
+        }),
+      );
+    });
+    cleanup = server.close;
+    setEnv(server.url);
+
+    const result = await new FatooraProvider("simulation").submitComplianceDocument(credential, document);
+    expect(result.status).toBe("compliance_pending");
+    expect(result.rawStatus).toBe("Accepted with Warnings");
+    const warnings = result.warnings as { warnings: unknown[] };
+    expect(warnings.warnings).toHaveLength(1);
+  });
+
+  it("Shape 2: a 'Reported' status normalizes to status: compliance_pending", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ invoiceHash: "some-hash", status: "Reported", warnings: null, errors: null }));
+    });
+    cleanup = server.close;
+    setEnv(server.url);
+
+    const result = await new FatooraProvider("simulation").submitComplianceDocument(credential, document);
+    expect(result.status).toBe("compliance_pending");
+  });
+
+  it("throws ZatcaExternalServiceError on a response matching neither documented shape", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ somethingElse: true }));
+    });
+    cleanup = server.close;
+    setEnv(server.url);
+
+    await expect(new FatooraProvider("simulation").submitComplianceDocument(credential, document)).rejects.toBeInstanceOf(
+      ZatcaExternalServiceError,
+    );
+  });
+
+  it("throws ZatcaExternalServiceError on a 400 matching neither documented shape (never fabricates a rejection detail)", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ unexpected: "shape" }));
+    });
+    cleanup = server.close;
+    setEnv(server.url);
+
+    await expect(new FatooraProvider("simulation").submitComplianceDocument(credential, document)).rejects.toBeInstanceOf(
+      ZatcaExternalServiceError,
+    );
+  });
+
+  it("throws ZatcaAuthenticationError on a 401 response", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(401, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ timestamp: 1654514661409, status: 401, error: "Unauthorized", message: "" }));
+    });
+    cleanup = server.close;
+    setEnv(server.url);
+
+    await expect(new FatooraProvider("simulation").submitComplianceDocument(credential, document)).rejects.toBeInstanceOf(
+      ZatcaAuthenticationError,
+    );
+  });
+
+  it("throws ZatcaExternalServiceError on a 500 response", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ code: "Invalid-Request", message: "System failed to process your request" }));
+    });
+    cleanup = server.close;
+    setEnv(server.url);
+
+    await expect(new FatooraProvider("simulation").submitComplianceDocument(credential, document)).rejects.toBeInstanceOf(
+      ZatcaExternalServiceError,
+    );
+  });
+
+  it("never populates clearedInvoiceXmlBase64 (that field is Clearance-only)", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ reportingStatus: "REPORTED", validationResults: { status: "PASS" } }));
+    });
+    cleanup = server.close;
+    setEnv(server.url);
+
+    const result = await new FatooraProvider("simulation").submitComplianceDocument(credential, document);
+    expect(result.clearedInvoiceXmlBase64).toBeUndefined();
+  });
+});
+
+// Regression guard: Reporting/Clearance must be byte-for-byte unaffected by
+// Slice B (they never call fatooraRequestComplianceInvoice or
+// normalizeComplianceInvoiceResponse) — re-asserts the core success shape
+// for each, so a future refactor accidentally routing them through the
+// Compliance Invoice path would fail loudly here in addition to the
+// existing dedicated describe blocks above.
+describe("Slice B regression guard: Reporting/Clearance normalization unchanged", () => {
+  it("reportInvoice still returns status: reported for a REPORTED response, with no clearanceStatus/qrSellertStatus/qrBuyertStatus fields", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ reportingStatus: "REPORTED", validationResults: { status: "PASS" } }));
+    });
+    cleanup = server.close;
+    setEnv(server.url);
+
+    const result = await new FatooraProvider("simulation").reportInvoice(credential, document);
+    expect(result.status).toBe("reported");
+    expect(result.clearanceStatus).toBeUndefined();
+    expect(result.qrSellertStatus).toBeUndefined();
+    expect(result.qrBuyertStatus).toBeUndefined();
+  });
+
+  it("clearInvoice still returns status: cleared for a CLEARED response", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ clearanceStatus: "CLEARED", clearedInvoice: "base64-xml", validationResults: { status: "PASS" } }));
+    });
+    cleanup = server.close;
+    setEnv(server.url);
+
+    const result = await new FatooraProvider("simulation").clearInvoice(credential, document);
+    expect(result.status).toBe("cleared");
+    expect(result.clearedInvoiceXmlBase64).toBe("base64-xml");
+  });
+});

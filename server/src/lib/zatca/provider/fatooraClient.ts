@@ -8,18 +8,18 @@
 // response body.
 //
 // VERIFICATION STATUS — Reporting (POST /invoices/reporting/single),
-// Clearance (POST /invoices/clearance/single), and Compliance CSID
-// (POST /compliance): the exact header set, request body shape, and
-// response schema were independently verified against the real
-// "e-Invoicing Sandbox Release (2.1.0)" Swagger exports the user obtained
-// directly from their own ZATCA Developer Portal account and shared in
-// this conversation (reporting.pdf / clearance.pdf / compliance_csid.pdf)
-// — genuinely read and extracted by this session, not cross-corroborated
+// Clearance (POST /invoices/clearance/single), Compliance CSID
+// (POST /compliance), and Compliance Invoice (POST /compliance/invoices):
+// the exact header set, request body shape, and response schema were
+// independently verified against the real "e-Invoicing Sandbox Release
+// (2.1.0)" Swagger exports the user obtained directly from their own ZATCA
+// Developer Portal account and shared in this conversation (reporting.pdf
+// / clearance.pdf / compliance_csid.pdf / compliance_invoice.pdf) —
+// genuinely read and extracted by this session, not cross-corroborated
 // secondary-source guessing. See docs/zatca/ZATCA_NETWORK_INTEGRATION_SPEC.md
-// for the full citation. Compliance Invoice / Production CSID onboarding /
-// Production CSID renewal remain unverified in code (their Swagger exports
-// were read too, but are not yet wired here — see the spec doc's Slice A
-// scope note).
+// for the full citation. Production CSID onboarding / renewal remain
+// unverified in code (their Swagger exports were read too, but are not yet
+// wired here — future slices).
 //
 // To avoid guessing beyond what was verified, NOTHING here hardcodes a
 // ZATCA hostname or path: every one of them is required from environment
@@ -29,20 +29,23 @@
 // label, not a deployment choice — still overridable via
 // ZATCA_FATOORA_*_API_VERSION for a future version bump. This module is
 // genuinely functional and independently testable against a mock HTTP
-// server; for Reporting/Clearance/Compliance CSID the wire contract itself
-// is now verified too — only real Sandbox credentials to test against
-// remain unavailable in this environment. Compliance Invoice's contract is
-// still unverified in code, so submitComplianceDocument's request/response
-// handling below remains the older, conservative cross-corroborated shape.
+// server; for Reporting/Clearance/Compliance CSID/Compliance Invoice the
+// wire contract itself is now verified too — only real Sandbox credentials
+// to test against remain unavailable in this environment.
 //
-// Compliance CSID (fatooraRequestComplianceCsid, below) is deliberately a
-// SEPARATE function from fatooraRequest/doFetch rather than a generalization
-// of them: it is the one FATOORA call with no ResolvedZatcaCredential at
-// all (no Authorization header — verified, see compliance_csid.pdf), uses
-// an OTP header instead, and has its own distinct error-code vocabulary
-// (Missing-OTP/Invalid-OTP/Missing-CSR/Invalid-CSR). Keeping it separate
-// avoids threading an optional-credential branch through the
-// already-verified-and-tested Reporting/Clearance path.
+// Compliance CSID (fatooraRequestComplianceCsid) and Compliance Invoice
+// (fatooraRequestComplianceInvoice), both below, are deliberately SEPARATE
+// functions from fatooraRequest/doFetch rather than generalizations of it:
+// Compliance CSID is the one FATOORA call with no ResolvedZatcaCredential
+// at all (no Authorization header — verified, see compliance_csid.pdf),
+// using an OTP header instead, with its own distinct error-code vocabulary
+// (Missing-OTP/Invalid-OTP/Missing-CSR/Invalid-CSR). Compliance Invoice
+// returns structured, meaningful bodies under HTTP 400 itself (two
+// genuinely distinct shapes — see fatooraProvider.ts's
+// normalizeComplianceInvoiceResponse), unlike fatooraRequest's shared
+// policy of treating any 400+ as terminal. Keeping both separate avoids
+// threading extra branches through the already-verified-and-tested
+// Reporting/Clearance path, which must not change.
 
 import { randomUUID } from "node:crypto";
 import { logger } from "../../logger.js";
@@ -257,6 +260,59 @@ export async function fatooraRequest(
   }
   if (result.status >= 400) {
     throw new ZatcaValidationError(`ZATCA rejected the request (status ${result.status}, correlationId: ${result.correlationId})`);
+  }
+
+  return { status: result.status, body: result.body, correlationId: result.correlationId };
+}
+
+// Compliance Invoice — POST /compliance/invoices. VERIFIED (see file
+// header; compliance_invoice.pdf, "e-Invoicing Sandbox Release (2.1.0)").
+// Deliberately a SEPARATE function from fatooraRequest (used unchanged by
+// Reporting/Clearance) rather than a new branch inside it: this endpoint's
+// own Swagger doc documents multiple genuinely distinct, structured
+// response bodies under HTTP 400 itself (both the nested validationResults
+// shape and the flat InvoiceResultModel shape a QR/signature/certificate
+// failure returns — see fatooraProvider.ts's normalizeComplianceInvoiceResponse).
+// The 400 body is this endpoint's primary way of reporting most compliance-
+// check failures, not an afterthought, so this function RETURNS (never
+// throws) on both 200 and 400, and only throws for the other documented
+// statuses (401, 406, 500) or a transport failure — letting the normalizer
+// interpret the 400 body instead of a generic throw discarding it, exactly
+// as fatooraRequest's shared 400 handling would (and must continue to, for
+// Reporting/Clearance, which this function does not touch).
+export async function fatooraRequestComplianceInvoice(
+  path: string,
+  body: unknown,
+  credential: ResolvedZatcaCredential,
+  config: FatooraEndpointConfig,
+  extraHeaders: Record<string, string> = {},
+): Promise<FatooraResponse> {
+  const result = await doFetch("POST", path, body, credential, config, extraHeaders);
+
+  if (result.status === 401) {
+    throw new ZatcaAuthenticationError(
+      `ZATCA rejected the configured credential for the Compliance Invoice request (status 401, correlationId: ${result.correlationId})`,
+    );
+  }
+  if (result.status === 406) {
+    throw new ZatcaValidationError(
+      `ZATCA rejected the API version for the Compliance Invoice request (status 406, correlationId: ${result.correlationId})`,
+    );
+  }
+  if (result.status >= 500) {
+    throw new ZatcaExternalServiceError(
+      `ZATCA Compliance Invoice endpoint is unavailable (status ${result.status}, correlationId: ${result.correlationId})`,
+    );
+  }
+  if (result.status !== 200 && result.status !== 400) {
+    throw new ZatcaExternalServiceError(
+      `ZATCA returned an unexpected status for the Compliance Invoice request (status ${result.status}, correlationId: ${result.correlationId})`,
+    );
+  }
+  if (!result.bodyWasValidJson) {
+    throw new ZatcaExternalServiceError(
+      `ZATCA returned a non-JSON response for the Compliance Invoice request (status ${result.status}, correlationId: ${result.correlationId})`,
+    );
   }
 
   return { status: result.status, body: result.body, correlationId: result.correlationId };

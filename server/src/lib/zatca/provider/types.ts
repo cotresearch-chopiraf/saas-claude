@@ -63,6 +63,21 @@ export interface ZatcaSubmissionResult {
   // fabricated, and undefined for every status other than a genuine
   // clearance success.
   clearedInvoiceXmlBase64?: string;
+  // Compliance Invoice only (Slice B — verified against
+  // compliance_invoice.pdf's "Shape 1" response). This endpoint tests
+  // every invoice type generically, so its response carries clearance and
+  // QR outcomes alongside reportingStatus even though this call is not
+  // itself a real Clearance/Reporting submission — kept as distinct,
+  // clearly-scoped passthrough fields rather than folded into `rawStatus`
+  // (which already means something specific for Reporting/Clearance).
+  // `null` when ZATCA itself returned null (not applicable to this
+  // invoice); `undefined` when the response didn't include the field at
+  // all or Compliance Invoice was not the call that produced this result.
+  // Field names (qrSellertStatus/qrBuyertStatus) preserve ZATCA's own
+  // spelling from the Swagger export verbatim, not a MIDAD typo.
+  clearanceStatus?: string | null;
+  qrSellertStatus?: string | null;
+  qrBuyertStatus?: string | null;
 }
 
 // Compliance CSID — VERIFIED (see fatooraClient.ts's file comment; contract

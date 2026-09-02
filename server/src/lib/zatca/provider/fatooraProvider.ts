@@ -10,16 +10,19 @@
 // on ./types.ts's ZatcaProvider interface, never on this class or on
 // fatooraClient.ts directly.
 //
-// submitComplianceDocument's contract remains UNVERIFIED — no Swagger
-// export for Compliance Invoice (compliance checks) was available in code
-// yet — so it still uses the older, conservative cross-corroborated
-// normalization (normalizeUnverifiedComplianceResponse), kept separate and
-// clearly labeled rather than assumed to share Reporting/Clearance's
-// schema. requestComplianceCsid below is a SEPARATE, VERIFIED endpoint
-// (POST /compliance, not /compliance/invoices) — see fatooraClient.ts's
-// header comment.
+// submitComplianceDocument — VERIFIED contract (Slice B; POST
+// /compliance/invoices, see compliance_invoice.pdf and
+// fatooraClient.ts's header comment). requestComplianceCsid below is a
+// SEPARATE, also-VERIFIED endpoint (POST /compliance, not
+// /compliance/invoices).
 
-import { fatooraProbe, fatooraRequest, fatooraRequestComplianceCsid, loadFatooraEndpointConfig } from "./fatooraClient.js";
+import {
+  fatooraProbe,
+  fatooraRequest,
+  fatooraRequestComplianceCsid,
+  fatooraRequestComplianceInvoice,
+  loadFatooraEndpointConfig,
+} from "./fatooraClient.js";
 import { ZatcaExternalServiceError } from "../errors.js";
 import type {
   ResolvedZatcaCredential,
@@ -75,17 +78,21 @@ export class FatooraProvider implements ZatcaProvider {
     };
   }
 
-  // Compliance document checks — contract UNVERIFIED (no Swagger export
-  // available for this endpoint). Kept exactly as before: conservative,
-  // generic status-field detection, never assumed to share Reporting/
-  // Clearance's now-verified schema.
+  // Compliance Invoice (compliance checks) — VERIFIED contract (Slice B;
+  // POST /compliance/invoices).
   async submitComplianceDocument(
     credential: ResolvedZatcaCredential,
     input: ZatcaDocumentSubmissionInput,
   ): Promise<ZatcaSubmissionResult> {
     const config = loadFatooraEndpointConfig(this.environment);
-    const res = await fatooraRequest("POST", config.compliancePath, buildDocumentBody(input), credential, config);
-    return normalizeUnverifiedComplianceResponse(res, "compliance_pending");
+    const res = await fatooraRequestComplianceInvoice(
+      config.compliancePath,
+      buildDocumentBody(input),
+      credential,
+      config,
+      { ...ACCEPT_LANGUAGE_EN },
+    );
+    return normalizeComplianceInvoiceResponse(res);
   }
 
   // Clearance — VERIFIED contract (POST /invoices/clearance/single).
@@ -204,47 +211,90 @@ function normalizeClearanceResponse(res: { body: unknown; correlationId: string 
   };
 }
 
-// Compliance — UNCHANGED from Slice 5 (contract still unverified). Some
-// ZATCA responses return HTTP 200 with the actual outcome only visible
-// inside the body (a document can be rejected with a 200 status and
-// clearanceStatus/reportingStatus/validationResults describing why) — a
-// commonly corroborated behavior across the secondary sources checked
-// for this specific, still-unverified endpoint. fatooraRequest() already
-// throws on a non-2xx status; this function is what catches the
-// "200 OK but actually rejected" case so a rejected document is never
-// reported to the caller as accepted.
+// Compliance Invoice response — Slice B, VERIFIED against
+// compliance_invoice.pdf. This endpoint's own Swagger doc documents TWO
+// genuinely distinct response body shapes, both confirmed occurring under
+// EITHER HTTP 200 or HTTP 400 (this endpoint does not reserve one shape
+// per status code — see fatooraClient.ts's fatooraRequestComplianceInvoice,
+// which returns rather than throws on 400 for exactly this reason):
 //
-// Equally important the other way: a 2xx response whose body carries NONE
-// of the recognized status fields is NOT treated as success either — this
-// function must never convert an unrecognized/ambiguous result into a
-// claimed success. It throws ZatcaExternalServiceError instead, the same
-// category used for "reached ZATCA but got something unusable".
-function normalizeUnverifiedComplianceResponse(
-  res: { body: unknown; correlationId: string },
-  successStatus: ZatcaSubmissionResult["status"],
-): ZatcaSubmissionResult {
+//   Shape 1 ("Reporting-style"): { validationResults: {status, ...},
+//     reportingStatus: "REPORTED"|"NOT_REPORTED", clearanceStatus,
+//     qrSellertStatus, qrBuyertStatus }. The same nested shape as the
+//     already-verified Reporting endpoint's response, plus three extra
+//     diagnostic fields unique to this endpoint (it tests every invoice
+//     type generically, so it reports clearance/QR outcomes too, even
+//     though this call is a compliance check, not a real submission).
+//     Discriminated by the presence of `reportingStatus`, a field Shape 2
+//     never carries.
+//
+//   Shape 2 (InvoiceResultModel — the shape ZATCA's own examples show for
+//     QR-code, digital-signature, and authentication-certificate failures
+//     specifically): { invoiceHash, status: "Reported"|"Not Reported"|
+//     "Accepted with Warnings", warnings, errors: [{category, code,
+//     message}] }. A flat shape with its own `status` enum, discriminated
+//     from Shape 1 by NOT carrying `reportingStatus` and instead carrying
+//     one of these three literal values.
+//
+// A response matching NEITHER shape is never treated as success — this
+// function throws ZatcaExternalServiceError instead, the same discipline
+// normalizeReportingResponse/normalizeClearanceResponse already follow.
+// This function is intentionally NOT reused for Reporting or Clearance —
+// their own normalizers (above) are unchanged by this slice.
+const COMPLIANCE_INVOICE_RESULT_STATUSES = ["Reported", "Not Reported", "Accepted with Warnings"] as const;
+type ComplianceInvoiceResultStatus = (typeof COMPLIANCE_INVOICE_RESULT_STATUSES)[number];
+
+// null means ZATCA itself returned null (field not applicable to this
+// invoice); undefined means the field was absent or not a string — never
+// invented, just faithfully passed through either way.
+function normalizeNullableStringField(value: unknown): string | null | undefined {
+  if (value === null) return null;
+  return typeof value === "string" ? value : undefined;
+}
+
+function normalizeComplianceInvoiceResponse(res: { body: unknown; correlationId: string }): ZatcaSubmissionResult {
   const body = (res.body ?? {}) as Record<string, unknown>;
-  const clearanceStatus = typeof body.clearanceStatus === "string" ? body.clearanceStatus : undefined;
-  const reportingStatus = typeof body.reportingStatus === "string" ? body.reportingStatus : undefined;
-  const genericStatus = typeof body.status === "string" ? body.status : undefined;
-  const validationResults = body.validationResults as { status?: string } | undefined;
 
-  const rawStatus = clearanceStatus ?? reportingStatus ?? genericStatus;
-  const rejected = [clearanceStatus, reportingStatus, validationResults?.status]
-    .filter((value): value is string => typeof value === "string")
-    .some((value) => /reject|error|fail|not_reported|not_cleared/i.test(value));
-
-  if (!rejected && rawStatus === undefined && validationResults === undefined) {
-    throw new ZatcaExternalServiceError(
-      `ZATCA returned a response with no recognizable status field (correlationId: ${res.correlationId})`,
-    );
+  // Shape 1 — discriminator: reportingStatus present (Shape 2 never has it).
+  if (typeof body.reportingStatus === "string") {
+    const reportingStatus = body.reportingStatus;
+    if (reportingStatus !== "REPORTED" && reportingStatus !== "NOT_REPORTED") {
+      throw new ZatcaExternalServiceError(
+        `ZATCA Compliance Invoice response had an unrecognized reportingStatus (correlationId: ${res.correlationId})`,
+      );
+    }
+    const validationResults = body.validationResults as { status?: string } | undefined;
+    return {
+      status: reportingStatus === "REPORTED" ? "compliance_pending" : "rejected",
+      correlationId: res.correlationId,
+      rawStatus: reportingStatus,
+      warnings: validationResults,
+      clearanceStatus: normalizeNullableStringField(body.clearanceStatus),
+      qrSellertStatus: normalizeNullableStringField(body.qrSellertStatus),
+      qrBuyertStatus: normalizeNullableStringField(body.qrBuyertStatus),
+      respondedAt: new Date(),
+    };
   }
 
-  return {
-    status: rejected ? "rejected" : successStatus,
-    correlationId: res.correlationId,
-    rawStatus,
-    warnings: body.validationResults ?? body.warnings ?? undefined,
-    respondedAt: new Date(),
-  };
+  // Shape 2 (InvoiceResultModel) — discriminator: its own documented
+  // status enum. "Accepted with Warnings" is a real success (the document
+  // was still processed), mirroring how Reporting's own WARNING
+  // validationResults.status is never treated as rejection.
+  if (typeof body.status === "string" && (COMPLIANCE_INVOICE_RESULT_STATUSES as readonly string[]).includes(body.status)) {
+    const status = body.status as ComplianceInvoiceResultStatus;
+    return {
+      status: status === "Not Reported" ? "rejected" : "compliance_pending",
+      correlationId: res.correlationId,
+      rawStatus: status,
+      // Both documented fields preserved verbatim (category/code/message
+      // intact per error entry) — never collapsed into a single string.
+      warnings: { warnings: body.warnings ?? null, errors: Array.isArray(body.errors) ? body.errors : null },
+      respondedAt: new Date(),
+    };
+  }
+
+  throw new ZatcaExternalServiceError(
+    `ZATCA Compliance Invoice response matched neither documented shape (no reportingStatus, no recognized ` +
+      `InvoiceResultModel status) (correlationId: ${res.correlationId})`,
+  );
 }
