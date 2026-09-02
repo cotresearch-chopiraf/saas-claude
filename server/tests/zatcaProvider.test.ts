@@ -22,6 +22,7 @@ const ENV_KEYS = [
   "ZATCA_FATOORA_SIMULATION_BASE_URL",
   "ZATCA_FATOORA_SIMULATION_COMPLIANCE_PATH",
   "ZATCA_FATOORA_SIMULATION_COMPLIANCE_CSID_PATH",
+  "ZATCA_FATOORA_SIMULATION_PRODUCTION_CSID_PATH",
   "ZATCA_FATOORA_SIMULATION_CLEARANCE_PATH",
   "ZATCA_FATOORA_SIMULATION_REPORTING_PATH",
   "ZATCA_FATOORA_TIMEOUT_MS",
@@ -49,6 +50,14 @@ function setEnv(baseUrl: string, timeoutMs?: number) {
 function setComplianceCsidEnv(baseUrl: string, timeoutMs?: number) {
   setEnv(baseUrl, timeoutMs);
   process.env.ZATCA_FATOORA_SIMULATION_COMPLIANCE_CSID_PATH = "compliance";
+}
+
+// Production CSID Onboarding (POST) and Renewal (PATCH) target the SAME
+// path — one extra variable covers both, same pattern as
+// setComplianceCsidEnv above.
+function setProductionCsidEnv(baseUrl: string, timeoutMs?: number) {
+  setEnv(baseUrl, timeoutMs);
+  process.env.ZATCA_FATOORA_SIMULATION_PRODUCTION_CSID_PATH = "production/csids";
 }
 
 function startMockServer(handler: http.RequestListener): Promise<{ url: string; close: () => Promise<void> }> {
@@ -839,5 +848,362 @@ describe("Slice B regression guard: Reporting/Clearance normalization unchanged"
     const result = await new FatooraProvider("simulation").clearInvoice(credential, document);
     expect(result.status).toBe("cleared");
     expect(result.clearedInvoiceXmlBase64).toBe("base64-xml");
+  });
+});
+
+// Slice C (ZATCA Network Integration continuation) —
+// requestProductionCsidOnboarding, against the VERIFIED "Production CSID
+// (Onboarding) API" Swagger export (onboarding.pdf, "e-Invoicing Sandbox
+// Release (2.1.0)").
+describe("FatooraProvider.requestProductionCsidOnboarding (verified Production CSID Onboarding contract)", () => {
+  it("sends POST, Basic Authorization, Accept-Version: V2, and the verified {compliance_request_id} body (as a string)", async () => {
+    let receivedMethod: string | undefined;
+    let receivedHeaders: http.IncomingHttpHeaders | undefined;
+    let receivedBody = "";
+    const server = await startMockServer((req, res) => {
+      receivedMethod = req.method;
+      receivedHeaders = req.headers;
+      req.on("data", (chunk) => (receivedBody += chunk));
+      req.on("end", () => {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            requestID: 1642424139872,
+            dispositionMessage: "ISSUED",
+            binarySecurityToken: "production-cert-bytes",
+            secret: "production-shared-secret",
+          }),
+        );
+      });
+    });
+    cleanup = server.close;
+    setProductionCsidEnv(server.url);
+
+    // requestID is a JSON NUMBER on the Compliance CSID response
+    // (1234567890123), but onboarding.pdf's own example submits it as a
+    // JSON STRING ("1234567890123") in compliance_request_id — an
+    // explicit String() conversion at this test's call boundary mirrors
+    // exactly what the caller (a future slice) must do; this test does
+    // not silently coerce anything inside the client itself.
+    const result = await new FatooraProvider("simulation").requestProductionCsidOnboarding(credential, String(1234567890123));
+
+    expect(receivedMethod).toBe("POST");
+    expect(receivedHeaders?.authorization).toBe(
+      `Basic ${Buffer.from(`${credential.binarySecurityToken}:${credential.secret}`).toString("base64")}`,
+    );
+    expect(receivedHeaders?.["accept-version"]).toBe("V2");
+    expect(JSON.parse(receivedBody)).toEqual({ compliance_request_id: "1234567890123" });
+
+    expect(result).toEqual({
+      requestId: "1642424139872",
+      dispositionMessage: "ISSUED",
+      binarySecurityToken: "production-cert-bytes",
+      secret: "production-shared-secret",
+    });
+  });
+
+  it("throws ZatcaValidationError with detail on Missing-ComplianceSteps (400) — the confirmed gap this slice does not resolve", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ errors: [{ code: "Missing-ComplianceSteps", message: "Compliance steps for this CSID are not yet complete" }] }));
+    });
+    cleanup = server.close;
+    setProductionCsidEnv(server.url);
+
+    const err = await new FatooraProvider("simulation")
+      .requestProductionCsidOnboarding(credential, "1234567890123")
+      .catch((e) => e);
+    expect(err).toBeInstanceOf(ZatcaValidationError);
+    expect(err.message).toContain("Missing-ComplianceSteps");
+    expect(err.message).toContain("Compliance steps for this CSID are not yet complete");
+  });
+
+  it("throws ZatcaValidationError with detail on Missing-compliance_request_id (400)", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ errors: [{ code: "Missing-compliance_request_id", message: "compliance_request_id is a required header" }] }));
+    });
+    cleanup = server.close;
+    setProductionCsidEnv(server.url);
+
+    const err = await new FatooraProvider("simulation").requestProductionCsidOnboarding(credential, "").catch((e) => e);
+    expect(err).toBeInstanceOf(ZatcaValidationError);
+    expect(err.message).toContain("Missing-compliance_request_id");
+  });
+
+  it("throws ZatcaValidationError with detail on Invalid-ComplianceRequestId (400)", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ errors: [{ code: "Invalid-ComplianceRequestId", message: "The provided compliance_request_id is invalid" }] }));
+    });
+    cleanup = server.close;
+    setProductionCsidEnv(server.url);
+
+    const err = await new FatooraProvider("simulation")
+      .requestProductionCsidOnboarding(credential, "not-a-real-id")
+      .catch((e) => e);
+    expect(err).toBeInstanceOf(ZatcaValidationError);
+    expect(err.message).toContain("Invalid-ComplianceRequestId");
+  });
+
+  it("throws ZatcaAuthenticationError on a 401 response", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(401, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ timestamp: 1654514661409, status: 401, error: "Unauthorized", message: "" }));
+    });
+    cleanup = server.close;
+    setProductionCsidEnv(server.url);
+
+    await expect(
+      new FatooraProvider("simulation").requestProductionCsidOnboarding(credential, "1234567890123"),
+    ).rejects.toBeInstanceOf(ZatcaAuthenticationError);
+  });
+
+  it("throws ZatcaValidationError on a 406 (unsupported/missing Accept-Version)", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(406, { "Content-Type": "text/plain;charset=UTF-8" });
+      res.end("This Version is not supported or not provided in the header.");
+    });
+    cleanup = server.close;
+    setProductionCsidEnv(server.url);
+
+    await expect(
+      new FatooraProvider("simulation").requestProductionCsidOnboarding(credential, "1234567890123"),
+    ).rejects.toBeInstanceOf(ZatcaValidationError);
+  });
+
+  it("throws ZatcaExternalServiceError with detail on a 500", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ code: "Invalid-Request", message: "System failed to process your request" }));
+    });
+    cleanup = server.close;
+    setProductionCsidEnv(server.url);
+
+    const err = await new FatooraProvider("simulation")
+      .requestProductionCsidOnboarding(credential, "1234567890123")
+      .catch((e) => e);
+    expect(err).toBeInstanceOf(ZatcaExternalServiceError);
+    expect(err.message).toContain("Invalid-Request");
+  });
+
+  it("throws ZatcaExternalServiceError when a 200 response is missing the expected fields", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ somethingElse: true }));
+    });
+    cleanup = server.close;
+    setProductionCsidEnv(server.url);
+
+    await expect(
+      new FatooraProvider("simulation").requestProductionCsidOnboarding(credential, "1234567890123"),
+    ).rejects.toBeInstanceOf(ZatcaExternalServiceError);
+  });
+
+  it("throws ZatcaConfigurationError when the Production CSID path is not configured", async () => {
+    setEnv("http://127.0.0.1:1"); // base config present, but no PRODUCTION_CSID_PATH
+    await expect(
+      new FatooraProvider("simulation").requestProductionCsidOnboarding(credential, "1234567890123"),
+    ).rejects.toBeInstanceOf(ZatcaConfigurationError);
+  });
+});
+
+// Slice C — renewProductionCsid, against the VERIFIED "Production CSID
+// (Renewal) API" Swagger export (renewal.pdf).
+describe("FatooraProvider.renewProductionCsid (verified Production CSID Renewal contract)", () => {
+  const csrBase64 = "TFMwdExTMUNSVWRKVGlCRFJWSlVTVVpKUTBGVVJTMHRMUzA9"; // arbitrary placeholder bytes, not a real CSR
+
+  it("sends PATCH, OTP + Accept-Version: V2, no Authorization header, and the verified {csr} body", async () => {
+    let receivedMethod: string | undefined;
+    let receivedHeaders: http.IncomingHttpHeaders | undefined;
+    let receivedBody = "";
+    const server = await startMockServer((req, res) => {
+      receivedMethod = req.method;
+      receivedHeaders = req.headers;
+      req.on("data", (chunk) => (receivedBody += chunk));
+      req.on("end", () => {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            requestID: 347,
+            tokenType: "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-x509-token-profile-1.0#X509v3",
+            dispositionMessage: "ISSUED",
+            binarySecurityToken: "renewed-cert-bytes",
+            secret: "renewed-shared-secret",
+          }),
+        );
+      });
+    });
+    cleanup = server.close;
+    setProductionCsidEnv(server.url);
+
+    const result = await new FatooraProvider("simulation").renewProductionCsid(csrBase64, "111111");
+
+    expect(receivedMethod).toBe("PATCH");
+    expect(receivedHeaders?.authorization).toBeUndefined(); // documented ambiguity — see fatooraClient.ts
+    expect(receivedHeaders?.otp).toBe("111111");
+    expect(receivedHeaders?.["accept-version"]).toBe("V2");
+    expect(JSON.parse(receivedBody)).toEqual({ csr: csrBase64 });
+
+    expect(result).toEqual({
+      outcome: "issued",
+      requestId: "347",
+      tokenType: "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-x509-token-profile-1.0#X509v3",
+      dispositionMessage: "ISSUED",
+      binarySecurityToken: "renewed-cert-bytes",
+      secret: "renewed-shared-secret",
+    });
+  });
+
+  it("preserves tokenType exactly as returned (a URI string), never fabricated or normalized", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          requestID: 999,
+          tokenType: "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-x509-token-profile-1.0#X509v3",
+          dispositionMessage: "ISSUED",
+          binarySecurityToken: "cert",
+          secret: "secret",
+        }),
+      );
+    });
+    cleanup = server.close;
+    setProductionCsidEnv(server.url);
+
+    const result = await new FatooraProvider("simulation").renewProductionCsid(csrBase64, "111111");
+    expect(result.tokenType).toBe("http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-x509-token-profile-1.0#X509v3");
+  });
+
+  it("throws ZatcaValidationError with detail on a documented 400 (Invalid-CSR)", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ errors: [{ code: "Invalid-CSR", message: "The provided CSR is invalid" }] }));
+    });
+    cleanup = server.close;
+    setProductionCsidEnv(server.url);
+
+    const err = await new FatooraProvider("simulation").renewProductionCsid(csrBase64, "111111").catch((e) => e);
+    expect(err).toBeInstanceOf(ZatcaValidationError);
+    expect(err.message).toContain("Invalid-CSR");
+  });
+
+  it("returns outcome: not_compliant (never 'issued', never thrown) for a 428 NOT_COMPLIANT response, unwrapping the {value: {...}} envelope", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(428, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          value: {
+            requestID: 1234567890123,
+            tokenType: null,
+            dispositionMessage: "NOT_COMPLIANT",
+            binarySecurityToken: "cert-still-present",
+            secret: "secret-still-present",
+            errors: null,
+          },
+        }),
+      );
+    });
+    cleanup = server.close;
+    setProductionCsidEnv(server.url);
+
+    const result = await new FatooraProvider("simulation").renewProductionCsid(csrBase64, "111111");
+    expect(result.outcome).toBe("not_compliant");
+    expect(result.dispositionMessage).toBe("NOT_COMPLIANT");
+    expect(result.tokenType).toBeNull();
+    expect(result.requestId).toBe("1234567890123");
+    // A caller checking only for a truthy binarySecurityToken (the naive
+    // mistake this test guards against) would wrongly treat this as
+    // issued — the discriminant is what must be checked instead.
+    expect(result.binarySecurityToken).toBe("cert-still-present");
+  });
+
+  it("throws ZatcaExternalServiceError on a 428 response missing the documented {value} wrapper", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(428, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ requestID: 1, dispositionMessage: "NOT_COMPLIANT" })); // no `value` wrapper
+    });
+    cleanup = server.close;
+    setProductionCsidEnv(server.url);
+
+    await expect(new FatooraProvider("simulation").renewProductionCsid(csrBase64, "111111")).rejects.toBeInstanceOf(
+      ZatcaExternalServiceError,
+    );
+  });
+
+  it("throws ZatcaExternalServiceError with detail on a 500", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ category: "HTTP-Errors", code: "500", message: "Something went wrong and caused an Internal Server Error." }));
+    });
+    cleanup = server.close;
+    setProductionCsidEnv(server.url);
+
+    const err = await new FatooraProvider("simulation").renewProductionCsid(csrBase64, "111111").catch((e) => e);
+    expect(err).toBeInstanceOf(ZatcaExternalServiceError);
+    expect(err.message).toContain("Something went wrong");
+  });
+
+  it("throws ZatcaExternalServiceError when a 200 response is missing the expected fields", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ somethingElse: true }));
+    });
+    cleanup = server.close;
+    setProductionCsidEnv(server.url);
+
+    await expect(new FatooraProvider("simulation").renewProductionCsid(csrBase64, "111111")).rejects.toBeInstanceOf(
+      ZatcaExternalServiceError,
+    );
+  });
+
+  it("throws ZatcaConfigurationError when the Production CSID path is not configured", async () => {
+    setEnv("http://127.0.0.1:1");
+    await expect(new FatooraProvider("simulation").renewProductionCsid(csrBase64, "111111")).rejects.toBeInstanceOf(
+      ZatcaConfigurationError,
+    );
+  });
+});
+
+// Regression guard (Slice C): Reporting/Clearance/Compliance CSID/
+// Compliance Invoice must be unaffected — none of them call
+// fatooraRequestProductionCsidOnboarding or
+// fatooraRequestProductionCsidRenewal, and productionCsidPath is a new,
+// separately-configured, optional field they never read.
+describe("Slice C regression guard: Reporting/Clearance/Compliance CSID/Compliance Invoice unchanged", () => {
+  it("reportInvoice still succeeds without ZATCA_FATOORA_SIMULATION_PRODUCTION_CSID_PATH configured", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ reportingStatus: "REPORTED", validationResults: { status: "PASS" } }));
+    });
+    cleanup = server.close;
+    setEnv(server.url); // deliberately NOT setProductionCsidEnv
+
+    const result = await new FatooraProvider("simulation").reportInvoice(credential, document);
+    expect(result.status).toBe("reported");
+  });
+
+  it("requestComplianceCsid still succeeds without ZATCA_FATOORA_SIMULATION_PRODUCTION_CSID_PATH configured", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ requestID: 1, dispositionMessage: "ISSUED", binarySecurityToken: "t", secret: "s" }));
+    });
+    cleanup = server.close;
+    setComplianceCsidEnv(server.url); // deliberately NOT setProductionCsidEnv
+
+    const result = await new FatooraProvider("simulation").requestComplianceCsid("csr", "123456");
+    expect(result.dispositionMessage).toBe("ISSUED");
+  });
+
+  it("submitComplianceDocument still succeeds without ZATCA_FATOORA_SIMULATION_PRODUCTION_CSID_PATH configured", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ reportingStatus: "REPORTED", validationResults: { status: "PASS" } }));
+    });
+    cleanup = server.close;
+    setEnv(server.url); // deliberately NOT setProductionCsidEnv
+
+    const result = await new FatooraProvider("simulation").submitComplianceDocument(credential, document);
+    expect(result.status).toBe("compliance_pending");
   });
 });

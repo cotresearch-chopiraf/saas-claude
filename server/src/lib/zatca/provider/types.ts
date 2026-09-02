@@ -96,6 +96,50 @@ export interface ZatcaComplianceCsidResult {
   secret: string;
 }
 
+// Production CSID Onboarding — VERIFIED (Slice C; see fatooraClient.ts's
+// file comment; contract read directly from the real "Production CSID
+// (Onboarding) API" Swagger export the user obtained from their own ZATCA
+// Developer Portal account). Uses the Compliance CSID's own credential.
+export interface ZatcaProductionCsidOnboardingResult {
+  // Same String() convention as ZatcaComplianceCsidResult.requestId — see
+  // its comment.
+  requestId: string;
+  dispositionMessage: string;
+  binarySecurityToken: string;
+  secret: string;
+}
+
+// Production CSID Renewal — VERIFIED (Slice C; see fatooraClient.ts's file
+// comment; contract read directly from the real "Production CSID
+// (Renewal) API" Swagger export). No credential parameter on the provider
+// method below — see fatooraClient.ts's documented ambiguity: this
+// endpoint's own Swagger export never shows an Authorization parameter
+// row, even though 401 is a documented response.
+//
+// `outcome` is a required discriminant, not an afterthought: ZATCA's own
+// verified 428 response ("NOT_COMPLIANT") is a genuinely different
+// outcome from a 200 "issued" success, wrapped in its own {"value": {...}}
+// envelope — callers MUST branch on this field rather than assuming any
+// result with a `binarySecurityToken` was actually issued.
+interface ZatcaProductionCsidRenewalFields {
+  requestId: string;
+  // ZATCA's own field — a URI string on a genuine "issued" success (per
+  // the verified example), null on "not_compliant". Never fabricated.
+  tokenType: string | null;
+  dispositionMessage: string;
+  binarySecurityToken: string;
+  secret: string;
+}
+export interface ZatcaProductionCsidRenewalIssuedResult extends ZatcaProductionCsidRenewalFields {
+  outcome: "issued";
+}
+export interface ZatcaProductionCsidRenewalNotCompliantResult extends ZatcaProductionCsidRenewalFields {
+  outcome: "not_compliant";
+}
+export type ZatcaProductionCsidRenewalResult =
+  | ZatcaProductionCsidRenewalIssuedResult
+  | ZatcaProductionCsidRenewalNotCompliantResult;
+
 export interface ZatcaProvider {
   getEnvironment(): ZatcaEnvironmentName;
 
@@ -118,4 +162,24 @@ export interface ZatcaProvider {
   // confirmCsidForEgsUnit, the CSID state machine, or any route in this
   // slice — see docs/zatca/ZATCA_NETWORK_INTEGRATION_SPEC.md for why.
   requestComplianceCsid(csrBase64: string, otp: string): Promise<ZatcaComplianceCsidResult>;
+
+  // Exchanges a Compliance CSID + compliance_request_id for a Production
+  // CSID. VERIFIED contract (Slice C). Deliberately NOT wired to
+  // domain/csr.ts, the CSID state machine, or any route — not
+  // automatically called after requestComplianceCsid or
+  // submitComplianceDocument, and does not attempt to resolve the
+  // Missing-ComplianceSteps gap documented in
+  // docs/zatca/ZATCA_NETWORK_INTEGRATION_SPEC.md (left for a future
+  // slice).
+  requestProductionCsidOnboarding(
+    credential: ResolvedZatcaCredential,
+    complianceRequestId: string,
+  ): Promise<ZatcaProductionCsidOnboardingResult>;
+
+  // Renews an existing Production CSID from a fresh CSR + OTP. VERIFIED
+  // contract (Slice C). No credential parameter — see
+  // ZatcaProductionCsidRenewalResult's comment and fatooraClient.ts's
+  // documented ambiguity. Deliberately NOT wired to any state machine or
+  // route in this slice.
+  renewProductionCsid(csrBase64: string, otp: string): Promise<ZatcaProductionCsidRenewalResult>;
 }

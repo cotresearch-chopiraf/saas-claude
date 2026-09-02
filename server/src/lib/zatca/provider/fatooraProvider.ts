@@ -12,15 +12,18 @@
 //
 // submitComplianceDocument — VERIFIED contract (Slice B; POST
 // /compliance/invoices, see compliance_invoice.pdf and
-// fatooraClient.ts's header comment). requestComplianceCsid below is a
-// SEPARATE, also-VERIFIED endpoint (POST /compliance, not
-// /compliance/invoices).
+// fatooraClient.ts's header comment). requestComplianceCsid,
+// requestProductionCsidOnboarding, and renewProductionCsid below are
+// SEPARATE, also-VERIFIED endpoints (POST /compliance; POST and PATCH
+// /production/csids respectively).
 
 import {
   fatooraProbe,
   fatooraRequest,
   fatooraRequestComplianceCsid,
   fatooraRequestComplianceInvoice,
+  fatooraRequestProductionCsidOnboarding,
+  fatooraRequestProductionCsidRenewal,
   loadFatooraEndpointConfig,
 } from "./fatooraClient.js";
 import { ZatcaExternalServiceError } from "../errors.js";
@@ -30,6 +33,8 @@ import type {
   ZatcaConnectionCheckResult,
   ZatcaDocumentSubmissionInput,
   ZatcaEnvironmentName,
+  ZatcaProductionCsidOnboardingResult,
+  ZatcaProductionCsidRenewalResult,
   ZatcaProvider,
   ZatcaSubmissionResult,
 } from "./types.js";
@@ -133,6 +138,32 @@ export class FatooraProvider implements ZatcaProvider {
   async requestComplianceCsid(csrBase64: string, otp: string): Promise<ZatcaComplianceCsidResult> {
     const config = loadFatooraEndpointConfig(this.environment);
     return fatooraRequestComplianceCsid(csrBase64, otp, config);
+  }
+
+  // Production CSID Onboarding — VERIFIED contract (Slice C; POST
+  // /production/csids). Uses the Compliance CSID's own credential (Basic
+  // Auth). Deliberately not called automatically after requestComplianceCsid
+  // or submitComplianceDocument, and not wired to domain/csr.ts, the CSID
+  // state machine, or any route — see fatooraClient.ts's
+  // fatooraRequestProductionCsidOnboarding for the documented
+  // Missing-CurrentCCSID ambiguity this method does not attempt to resolve.
+  async requestProductionCsidOnboarding(
+    credential: ResolvedZatcaCredential,
+    complianceRequestId: string,
+  ): Promise<ZatcaProductionCsidOnboardingResult> {
+    const config = loadFatooraEndpointConfig(this.environment);
+    return fatooraRequestProductionCsidOnboarding(complianceRequestId, credential, config);
+  }
+
+  // Production CSID Renewal — VERIFIED contract (Slice C; PATCH
+  // /production/csids). No credential parameter — see
+  // fatooraClient.ts's fatooraRequestProductionCsidRenewal for the
+  // documented Authorization ambiguity this method does not resolve by
+  // guessing. The 428 NOT_COMPLIANT outcome is returned, never thrown and
+  // never folded into "issued" — see types.ts's ZatcaProductionCsidRenewalResult.
+  async renewProductionCsid(csrBase64: string, otp: string): Promise<ZatcaProductionCsidRenewalResult> {
+    const config = loadFatooraEndpointConfig(this.environment);
+    return fatooraRequestProductionCsidRenewal(csrBase64, otp, config);
   }
 }
 

@@ -76,6 +76,12 @@ export interface FatooraEndpointConfig {
   // separately-configured, OPTIONAL path — unset unless
   // requestComplianceCsid is actually used.
   complianceCsidPath?: string;
+  // Production CSID Onboarding (POST /production/csids, onboarding.pdf)
+  // and Renewal (PATCH /production/csids, renewal.pdf) target the SAME
+  // path with different HTTP methods — one env var covers both, unlike
+  // Compliance CSID/Invoice which have genuinely distinct paths. Optional,
+  // like complianceCsidPath: unset unless Slice C's methods are used.
+  productionCsidPath?: string;
   apiVersion?: string;
   timeoutMs: number;
 }
@@ -105,6 +111,7 @@ export function loadFatooraEndpointConfig(environment: ZatcaEnvironmentName): Fa
     // FatooraEndpointConfig field comment. requestComplianceCsid below
     // throws its own ZatcaConfigurationError if this is unset when needed.
     complianceCsidPath: process.env[`${prefix}_COMPLIANCE_CSID_PATH`] || undefined,
+    productionCsidPath: process.env[`${prefix}_PRODUCTION_CSID_PATH`] || undefined,
     apiVersion: process.env[`${prefix}_API_VERSION`] || undefined,
     timeoutMs: Number(process.env.ZATCA_FATOORA_TIMEOUT_MS) || 15000,
   };
@@ -494,4 +501,335 @@ export async function fatooraRequestComplianceCsid(
     binarySecurityToken,
     secret,
   };
+}
+
+export interface ProductionCsidOnboardingRawResult {
+  requestId: string;
+  dispositionMessage: string;
+  binarySecurityToken: string;
+  secret: string;
+}
+
+// Production CSID Onboarding — POST /production/csids. VERIFIED (see file
+// header; onboarding.pdf). Basic Auth with the Compliance CSID's own
+// credential (binarySecurityToken/secret), same auth pattern as Compliance
+// Invoice/Reporting/Clearance — onboarding.pdf's own Parameters table
+// documents an Authorization row with exactly this description.
+//
+// KNOWN AMBIGUITY (Slice C, documented — never resolved by guessing):
+// onboarding.pdf's 400 error list includes Missing-CurrentCCSID /
+// Invalid-CurrentCCSID ("currentCCSID is a required header" /
+// "currentCCSID is invalid"), but NO "currentCCSID" (or similarly named)
+// parameter appears anywhere in this same export's documented Parameters
+// table for this endpoint — only Authorization and Accept-Version are
+// listed there. This reads as leftover/copy-pasted error-list text from
+// Renewal (which genuinely deals with a "currentCSID" concept), not a
+// confirmed real requirement of Onboarding — but since the contract
+// cannot be confirmed either way from what was provided, this function
+// deliberately sends no currentCCSID header/field and does not invent
+// one. If ZATCA's real Sandbox ever returns Missing-CurrentCCSID against
+// this exact call, that would be direct confirmation worth revisiting.
+export async function fatooraRequestProductionCsidOnboarding(
+  complianceRequestId: string,
+  credential: ResolvedZatcaCredential,
+  config: FatooraEndpointConfig,
+): Promise<ProductionCsidOnboardingRawResult> {
+  if (!config.productionCsidPath) {
+    throw new ZatcaConfigurationError(
+      "ZATCA Production CSID endpoint path is not configured (ZATCA_FATOORA_SIMULATION_PRODUCTION_CSID_PATH or " +
+        "ZATCA_FATOORA_PRODUCTION_PRODUCTION_CSID_PATH). MIDAD never guesses ZATCA endpoint paths — set this from " +
+        "the verified ZATCA Developer Portal Production CSID API Swagger documentation before use.",
+    );
+  }
+
+  const url = new URL(
+    config.productionCsidPath.replace(/^\//, ""),
+    config.baseUrl.endsWith("/") ? config.baseUrl : `${config.baseUrl}/`,
+  ).toString();
+  const correlationId = randomUUID();
+
+  const headers: Record<string, string> = {
+    Authorization: basicAuthHeader(credential),
+    "Accept-Version": config.apiVersion || VERIFIED_ACCEPT_VERSION,
+    Accept: "application/json",
+    "Content-Type": "application/json",
+    "X-Correlation-Id": correlationId,
+  };
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), config.timeoutMs);
+  const startedAt = Date.now();
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers,
+      // Verified body shape (onboarding.pdf's example): exactly one
+      // field, compliance_request_id, submitted as a STRING even though
+      // Compliance CSID's requestID is returned as a JSON number in its
+      // own response — this is the documented contract's own
+      // inconsistency, not a MIDAD bug. The String() conversion at the
+      // call boundary (fatooraProvider.ts) is the only place this is
+      // handled, deliberately explicit rather than silently coerced here.
+      body: JSON.stringify({ compliance_request_id: complianceRequestId }),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    const aborted = controller.signal.aborted;
+    logger.warn("zatca_fatoora_production_csid_onboarding_network_error", { correlationId, durationMs: Date.now() - startedAt, aborted });
+    if (aborted) {
+      throw new ZatcaNetworkError(
+        `ZATCA Production CSID (Onboarding) request timed out after ${config.timeoutMs}ms (correlationId: ${correlationId})`,
+      );
+    }
+    throw new ZatcaNetworkError(`Could not reach ZATCA Production CSID (Onboarding) endpoint (correlationId: ${correlationId})`);
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  const rawText = await res.text();
+  let parsedBody: unknown = null;
+  let bodyWasValidJson = true;
+  if (rawText) {
+    try {
+      parsedBody = JSON.parse(rawText);
+    } catch {
+      bodyWasValidJson = false;
+    }
+  }
+
+  logger.info("zatca_fatoora_production_csid_onboarding_response", { correlationId, status: res.status, durationMs: Date.now() - startedAt });
+
+  const detail = formatComplianceCsidErrorDetail(parsedBody, bodyWasValidJson);
+  const detailSuffix = detail ? `: ${detail}` : "";
+
+  // Only the status codes onboarding.pdf actually documents (400, 401,
+  // 406, 500) get a specific mapping.
+  if (res.status === 401) {
+    throw new ZatcaAuthenticationError(
+      `ZATCA rejected the configured credential for the Production CSID (Onboarding) request (status 401, correlationId: ${correlationId})`,
+    );
+  }
+  if (res.status === 400) {
+    throw new ZatcaValidationError(
+      `ZATCA rejected the Production CSID (Onboarding) request (status 400, correlationId: ${correlationId})${detailSuffix}`,
+    );
+  }
+  if (res.status === 406) {
+    throw new ZatcaValidationError(
+      `ZATCA rejected the API version for the Production CSID (Onboarding) request (status 406, correlationId: ${correlationId})`,
+    );
+  }
+  if (res.status >= 500) {
+    throw new ZatcaExternalServiceError(
+      `ZATCA Production CSID (Onboarding) endpoint is unavailable (status ${res.status}, correlationId: ${correlationId})${detailSuffix}`,
+    );
+  }
+  if (res.status !== 200) {
+    throw new ZatcaExternalServiceError(
+      `ZATCA returned an unexpected status for the Production CSID (Onboarding) request (status ${res.status}, correlationId: ${correlationId})`,
+    );
+  }
+  if (!bodyWasValidJson) {
+    throw new ZatcaExternalServiceError(
+      `ZATCA returned a non-JSON response for the Production CSID (Onboarding) request (correlationId: ${correlationId})`,
+    );
+  }
+
+  const body = (parsedBody ?? {}) as Record<string, unknown>;
+  const { requestID, dispositionMessage, binarySecurityToken, secret } = body;
+  if (
+    (typeof requestID !== "number" && typeof requestID !== "string") ||
+    typeof dispositionMessage !== "string" ||
+    typeof binarySecurityToken !== "string" ||
+    typeof secret !== "string"
+  ) {
+    throw new ZatcaExternalServiceError(
+      `ZATCA Production CSID (Onboarding) response did not include the expected fields (requestID/dispositionMessage/` +
+        `binarySecurityToken/secret) (correlationId: ${correlationId})`,
+    );
+  }
+
+  return {
+    requestId: String(requestID),
+    dispositionMessage,
+    binarySecurityToken,
+    secret,
+  };
+}
+
+export type ProductionCsidRenewalRawResult =
+  | { outcome: "issued"; requestId: string; tokenType: string | null; dispositionMessage: string; binarySecurityToken: string; secret: string }
+  | { outcome: "not_compliant"; requestId: string; tokenType: string | null; dispositionMessage: string; binarySecurityToken: string; secret: string };
+
+function parseProductionCsidRenewalFields(
+  body: Record<string, unknown>,
+  correlationId: string,
+): Omit<ProductionCsidRenewalRawResult, "outcome"> {
+  const { requestID, tokenType, dispositionMessage, binarySecurityToken, secret } = body;
+  if (
+    (typeof requestID !== "number" && typeof requestID !== "string") ||
+    (tokenType !== null && typeof tokenType !== "string") ||
+    typeof dispositionMessage !== "string" ||
+    typeof binarySecurityToken !== "string" ||
+    typeof secret !== "string"
+  ) {
+    throw new ZatcaExternalServiceError(
+      `ZATCA Production CSID (Renewal) response did not include the expected fields (requestID/tokenType/` +
+        `dispositionMessage/binarySecurityToken/secret) (correlationId: ${correlationId})`,
+    );
+  }
+  return { requestId: String(requestID), tokenType, dispositionMessage, binarySecurityToken, secret };
+}
+
+// Production CSID Renewal — PATCH /production/csids. VERIFIED (see file
+// header; renewal.pdf).
+//
+// KNOWN AMBIGUITY (Slice C, documented — never resolved by guessing):
+// renewal.pdf's captured Parameters table lists only OTP (header,
+// required), accept-language (header, optional), and Accept-Version
+// (header, required) — UNLIKE Onboarding and Compliance Invoice, no
+// "Authorization" row with a description appears anywhere in this
+// export's extracted text for this endpoint, even though a 401
+// "Unauthorized" response IS documented as a possible outcome. Every
+// other authenticated CSID/invoice endpoint in this project uses Basic
+// Auth (binarySecurityToken:secret), so it is plausible the same applies
+// here and the row simply was not captured by this session's text
+// extraction (Swagger UI sometimes renders a global "Authorize" padlock
+// rather than a per-endpoint parameter row) — but that would be a guess,
+// not something confirmed by what was provided. Per this slice's explicit
+// instruction not to invent undocumented Authorization behavior, this
+// function sends NO Authorization header and takes no credential
+// parameter. The 401 status is still mapped (it is a documented response
+// code for this endpoint), but real-world testing may reveal this call
+// actually requires a credential this function does not send — revisit
+// only with clearer Swagger evidence, never by guessing now.
+//
+// 428 NOT_COMPLIANT is a genuinely distinct outcome (see the special
+// {"value": {...}} wrapper documented in renewal.pdf) — this function
+// never normalizes it into the same shape as a 200 "issued" success;
+// callers must branch on the returned `outcome` discriminant.
+export async function fatooraRequestProductionCsidRenewal(
+  csrBase64: string,
+  otp: string,
+  config: FatooraEndpointConfig,
+): Promise<ProductionCsidRenewalRawResult> {
+  if (!config.productionCsidPath) {
+    throw new ZatcaConfigurationError(
+      "ZATCA Production CSID endpoint path is not configured (ZATCA_FATOORA_SIMULATION_PRODUCTION_CSID_PATH or " +
+        "ZATCA_FATOORA_PRODUCTION_PRODUCTION_CSID_PATH). MIDAD never guesses ZATCA endpoint paths — set this from " +
+        "the verified ZATCA Developer Portal Production CSID (Renewal) API Swagger documentation before use.",
+    );
+  }
+
+  const url = new URL(
+    config.productionCsidPath.replace(/^\//, ""),
+    config.baseUrl.endsWith("/") ? config.baseUrl : `${config.baseUrl}/`,
+  ).toString();
+  const correlationId = randomUUID();
+
+  // Verified headers only (see ambiguity note above) — no Authorization.
+  const headers: Record<string, string> = {
+    OTP: otp,
+    "Accept-Version": config.apiVersion || VERIFIED_ACCEPT_VERSION,
+    Accept: "application/json",
+    "Content-Type": "application/json",
+    "X-Correlation-Id": correlationId,
+  };
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), config.timeoutMs);
+  const startedAt = Date.now();
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "PATCH",
+      headers,
+      // Verified body shape (renewal.pdf's example): {"csr": "<base64
+      // PEM CSR>"} — the same single-field shape as Compliance CSID.
+      body: JSON.stringify({ csr: csrBase64 }),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    const aborted = controller.signal.aborted;
+    logger.warn("zatca_fatoora_production_csid_renewal_network_error", { correlationId, durationMs: Date.now() - startedAt, aborted });
+    if (aborted) {
+      throw new ZatcaNetworkError(
+        `ZATCA Production CSID (Renewal) request timed out after ${config.timeoutMs}ms (correlationId: ${correlationId})`,
+      );
+    }
+    throw new ZatcaNetworkError(`Could not reach ZATCA Production CSID (Renewal) endpoint (correlationId: ${correlationId})`);
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  const rawText = await res.text();
+  let parsedBody: unknown = null;
+  let bodyWasValidJson = true;
+  if (rawText) {
+    try {
+      parsedBody = JSON.parse(rawText);
+    } catch {
+      bodyWasValidJson = false;
+    }
+  }
+
+  logger.info("zatca_fatoora_production_csid_renewal_response", { correlationId, status: res.status, durationMs: Date.now() - startedAt });
+
+  const detail = formatComplianceCsidErrorDetail(parsedBody, bodyWasValidJson);
+  const detailSuffix = detail ? `: ${detail}` : "";
+
+  if (res.status === 401) {
+    throw new ZatcaAuthenticationError(
+      `ZATCA rejected the request for the Production CSID (Renewal) request (status 401, correlationId: ${correlationId})`,
+    );
+  }
+  if (res.status === 400) {
+    throw new ZatcaValidationError(
+      `ZATCA rejected the Production CSID (Renewal) request (status 400, correlationId: ${correlationId})${detailSuffix}`,
+    );
+  }
+  if (res.status === 406) {
+    throw new ZatcaValidationError(
+      `ZATCA rejected the API version for the Production CSID (Renewal) request (status 406, correlationId: ${correlationId})`,
+    );
+  }
+  if (res.status >= 500) {
+    throw new ZatcaExternalServiceError(
+      `ZATCA Production CSID (Renewal) endpoint is unavailable (status ${res.status}, correlationId: ${correlationId})${detailSuffix}`,
+    );
+  }
+  // 428 (verified — renewal.pdf's own documented status): NOT_COMPLIANT,
+  // wrapped in {"value": {...}}. Never treated as a transport error and
+  // never normalized into "issued" — a distinct, legitimate outcome.
+  if (res.status === 428) {
+    if (!bodyWasValidJson) {
+      throw new ZatcaExternalServiceError(
+        `ZATCA returned a non-JSON 428 response for the Production CSID (Renewal) request (correlationId: ${correlationId})`,
+      );
+    }
+    const wrapper = (parsedBody ?? {}) as Record<string, unknown>;
+    const value = wrapper.value;
+    if (!value || typeof value !== "object") {
+      throw new ZatcaExternalServiceError(
+        `ZATCA 428 NOT_COMPLIANT response for the Production CSID (Renewal) request was missing the documented ` +
+          `"value" wrapper (correlationId: ${correlationId})`,
+      );
+    }
+    return { outcome: "not_compliant", ...parseProductionCsidRenewalFields(value as Record<string, unknown>, correlationId) };
+  }
+  if (res.status !== 200) {
+    throw new ZatcaExternalServiceError(
+      `ZATCA returned an unexpected status for the Production CSID (Renewal) request (status ${res.status}, correlationId: ${correlationId})`,
+    );
+  }
+  if (!bodyWasValidJson) {
+    throw new ZatcaExternalServiceError(
+      `ZATCA returned a non-JSON response for the Production CSID (Renewal) request (correlationId: ${correlationId})`,
+    );
+  }
+
+  return { outcome: "issued", ...parseProductionCsidRenewalFields(parsedBody as Record<string, unknown>, correlationId) };
 }
