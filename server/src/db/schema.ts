@@ -1774,6 +1774,69 @@ export const zatcaEgsUnits = pgTable(
   }),
 );
 
+// One row per real CSR/key-pair generation event (Slice J — ZATCA CSR
+// Instance persistence). An EGS unit legitimately accumulates MANY of
+// these over its life (first onboarding, a regeneration after failed
+// compliance, a renewal's fresh CSR, ...) — this table is deliberately
+// insert-only/historical, never the current-state pointer. Current state
+// ("where is this EGS right now") stays on zatca_egs_units's own
+// status/csidStatus/certificateExpiresAt/secretRef columns, unchanged by
+// this table's existence — see the file-level comment above and
+// domain/csr.ts's own comment for how the two relate.
+//
+// purpose: deliberately a free-form NULLABLE text column, not an enum.
+// The real ZATCA-side taxonomy for "was this onboarding, regeneration, or
+// renewal" is not established from any verified source available to this
+// project (see docs/zatca — Slices D through I's own architecture audits)
+// — inventing enum values here would misrepresent an unverified MIDAD
+// guess as settled ZATCA semantics. Left unset (NULL) until a real
+// taxonomy is verified; the column exists so a future caller CAN record
+// one without a schema change, but nothing in this slice writes to it.
+//
+// secretRef: the opaque ZatcaSecretStore reference for the key pair THIS
+// CSR generation produced — never the credential material itself (same
+// invariant as zatca_egs_units.secretRef). Deliberately NOT unique and
+// deliberately never deleted by CSR regeneration (see domain/csr.ts) —
+// the whole point of this table is that an earlier CSR's secretRef stays
+// independently resolvable after a later CSR is generated.
+export const zatcaCsrInstanceStatusEnum = pgEnum("zatca_csr_instance_status", ["generated", "superseded"]);
+
+export const zatcaCsrInstances = pgTable(
+  "zatca_csr_instances",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    egsUnitId: uuid("egs_unit_id")
+      .notNull()
+      .references(() => zatcaEgsUnits.id, { onDelete: "cascade" }),
+    // See file comment above — intentionally unconstrained, intentionally
+    // unwritten by this slice.
+    purpose: text("purpose"),
+    // The exact 4-digit value supplied to generateCsrForEgsUnit's
+    // fields.invoiceType, persisted verbatim — never reinterpreted,
+    // never re-derived. See csr/csrBuilder.ts for the validation this
+    // value already passed before reaching here (unchanged by this slice).
+    invoiceType: text("invoice_type").notNull(),
+    secretRef: text("secret_ref").notNull(),
+    status: zatcaCsrInstanceStatusEnum("status").notNull().default("generated"),
+    // Self-reference: set on THIS row once a later CSR generation for the
+    // same EGS unit supersedes it. Nullable — most rows (the current one,
+    // and any this slice never revisits) stay NULL indefinitely. Same
+    // self-referencing-FK convention already used elsewhere in this file
+    // (e.g. boqRevisions.supersedesRevisionId).
+    supersededBy: uuid("superseded_by").references((): AnyPgColumn => zatcaCsrInstances.id),
+    generatedAt: timestamp("generated_at").notNull().defaultNow(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    egsUnitIdx: index("zatca_csr_instances_egs_unit_idx").on(table.egsUnitId),
+    companyIdx: index("zatca_csr_instances_company_idx").on(table.companyId),
+  }),
+);
+
 // A dedicated ICV (Invoice Counter Value) per (company, EGS unit) — see
 // the file-level comment for why this is never companies.next_invoice_number.
 export const zatcaIcvCounters = pgTable(

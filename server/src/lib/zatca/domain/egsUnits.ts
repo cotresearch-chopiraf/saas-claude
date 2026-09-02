@@ -7,6 +7,7 @@
 // client-supplied value.
 
 import { and, eq } from "drizzle-orm";
+import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { db } from "../../../db/client.js";
 import {
   zatcaEgsUnits,
@@ -14,6 +15,14 @@ import {
   type zatcaEnvironmentEnum,
   type zatcaCsidStatusEnum,
 } from "../../../db/schema.js";
+import type * as schema from "../../../db/schema.js";
+
+// Same optional-transaction convention already used by
+// domain/submissions.ts's createSubmission — lets a caller (Slice J's
+// generateCsrForEgsUnit) share one transaction across the CSR Instance
+// insert and these EGS-level projection updates, without forcing every
+// other existing caller to change.
+type Tx = NodePgDatabase<typeof schema>;
 
 // The single source of truth for this error — icv.ts and pih.ts both
 // import it from here rather than each declaring their own copy.
@@ -60,8 +69,13 @@ export async function listEgsUnits(companyId: string) {
 // ZatcaSecretStore, never real credential material) with an EGS unit.
 // Returns undefined when the unit doesn't exist or isn't this company's,
 // matching getEgsUnit's tenant-isolation contract.
-export async function setEgsUnitSecretRef(companyId: string, egsUnitId: string, secretRef: string | null) {
-  const [updated] = await db
+export async function setEgsUnitSecretRef(
+  companyId: string,
+  egsUnitId: string,
+  secretRef: string | null,
+  dbOrTx: Tx | typeof db = db,
+) {
+  const [updated] = await dbOrTx
     .update(zatcaEgsUnits)
     .set({ secretRef, updatedAt: new Date() })
     .where(and(eq(zatcaEgsUnits.id, egsUnitId), eq(zatcaEgsUnits.companyId, companyId)))
@@ -101,9 +115,10 @@ export async function updateEgsUnitCsidStatus(
   companyId: string,
   egsUnitId: string,
   csidStatus: (typeof zatcaCsidStatusEnum.enumValues)[number],
-  options: { certificateExpiresAt?: Date } = {},
+  options: { certificateExpiresAt?: Date; dbOrTx?: Tx | typeof db } = {},
 ) {
-  const [updated] = await db
+  const dbOrTx = options.dbOrTx ?? db;
+  const [updated] = await dbOrTx
     .update(zatcaEgsUnits)
     .set({
       csidStatus,

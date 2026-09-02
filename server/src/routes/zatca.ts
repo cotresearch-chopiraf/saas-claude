@@ -307,11 +307,16 @@ zatcaRouter.post("/egs-units/:id/csr", requireSubmit, async (req: Request<{ id: 
       entityType: "zatca_egs_unit",
       entityId: req.params.id,
       // The OTP and private key are never included — only the fact that
-      // a CSR was generated and the (public) common name used.
-      afterValue: { commonName: parsed.data.fields.commonName },
+      // a CSR was generated, the (public) common name used, and (Slice J)
+      // the durable CSR Instance row this generation created.
+      afterValue: { commonName: parsed.data.fields.commonName, csrInstanceId: result.csrInstanceId },
     });
 
-    res.status(201).json(result);
+    // Slice J — the API response is built explicitly from csrPem/
+    // csrDerBase64 only, never `result` as a whole, so the new internal
+    // csrInstanceId field never reaches this wire response — the existing
+    // CSR API contract is unchanged for every consumer.
+    res.status(201).json({ csrPem: result.csrPem, csrDerBase64: result.csrDerBase64 });
   } catch (err) {
     if (err instanceof EgsUnitNotFoundError) return res.status(404).json({ error: "وحدة الفوترة الإلكترونية غير موجودة" });
     if (err instanceof ZatcaError) {

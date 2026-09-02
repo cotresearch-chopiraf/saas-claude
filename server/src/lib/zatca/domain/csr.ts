@@ -58,7 +58,9 @@
 
 import "reflect-metadata";
 import * as x509 from "@peculiar/x509";
+import { db } from "../../../db/client.js";
 import { getEgsUnit, updateEgsUnitCsidStatus, setEgsUnitSecretRef, EgsUnitNotFoundError } from "./egsUnits.js";
+import { createCsrInstance, findCurrentCsrInstance, markCsrInstanceSuperseded } from "./csrInstances.js";
 import { getZatcaTenantIdentity } from "./config.js";
 import { getZatcaSecretStore } from "../secretStore/index.js";
 import { generateEcdsaKeyPair } from "../csr/keyPair.js";
@@ -77,6 +79,12 @@ export interface GenerateCsrInput {
 export interface GenerateCsrResult {
   csrPem: string;
   csrDerBase64: string;
+  // Slice J — the durable zatca_csr_instances row id for this generation
+  // event. Purely additive to this internal result type: routes/zatca.ts
+  // reads it only to enrich its existing audit event, and builds the
+  // actual HTTP response from csrPem/csrDerBase64 alone — the API
+  // contract this function's callers see over the wire is unchanged.
+  csrInstanceId: string;
 }
 
 export async function generateCsrForEgsUnit(input: GenerateCsrInput): Promise<GenerateCsrResult> {
@@ -128,11 +136,48 @@ export async function generateCsrForEgsUnit(input: GenerateCsrInput): Promise<Ge
     publicKeyPem: keys.publicKeyPem,
     curve: keys.curve,
   });
-  if (unit.secretRef) await getZatcaSecretStore().delete(input.companyId, unit.secretRef);
-  await setEgsUnitSecretRef(input.companyId, input.egsUnitId, secretRef);
-  await updateEgsUnitCsidStatus(input.companyId, input.egsUnitId, "compliance_pending");
 
-  return { csrPem, csrDerBase64 };
+  // Slice J — deliberately NO LONGER deletes the previous secretRef here.
+  // Before this slice, a regenerated CSR's key pair silently destroyed the
+  // prior one's — this is exactly the eager-deletion behavior the CSR
+  // Instance history below exists to stop happening. ZatcaSecretStore
+  // itself never required this (put() already returns a new, independent
+  // reference every time — see its own file comment); the delete() call
+  // was this function's own prior policy choice, now removed. The
+  // now-superseded CSR Instance's secretRef (below) stays independently
+  // resolvable indefinitely — cleanup of truly orphaned secrets, if ever
+  // needed, is a separate future policy decision, not this slice's.
+
+  // The DB writes below (the new CSR Instance row, marking any prior
+  // instance superseded, and the two EGS-level projection updates) share
+  // one transaction so they either all land or none do. ZatcaSecretStore's
+  // put() above is NOT part of this transaction — it is a separate store,
+  // not this database — so a transaction failure after put() succeeded
+  // leaves one orphaned-but-harmless secret in the store (never referenced
+  // by any row, never a correctness or security issue, just unclaimed
+  // storage) rather than a torn write across two different systems. This
+  // residual failure mode is accepted rather than building a distributed
+  // transaction to avoid it.
+  const csrInstance = await db.transaction(async (tx) => {
+    const priorInstance = await findCurrentCsrInstance(input.companyId, input.egsUnitId, tx);
+
+    const created = await createCsrInstance(
+      input.companyId,
+      { egsUnitId: input.egsUnitId, invoiceType: input.fields.invoiceType, secretRef },
+      tx,
+    );
+
+    if (priorInstance) {
+      await markCsrInstanceSuperseded(input.companyId, priorInstance.id, created.id, tx);
+    }
+
+    await setEgsUnitSecretRef(input.companyId, input.egsUnitId, secretRef, tx);
+    await updateEgsUnitCsidStatus(input.companyId, input.egsUnitId, "compliance_pending", { dbOrTx: tx });
+
+    return created;
+  });
+
+  return { csrPem, csrDerBase64, csrInstanceId: csrInstance.id };
 }
 
 export interface ConfirmCsidInput {

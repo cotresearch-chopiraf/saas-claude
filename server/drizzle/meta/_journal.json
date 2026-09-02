@@ -148,6 +148,13 @@
       "when": 1788289137468,
       "tag": "0020_left_celestials",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1788375812726,
+      "tag": "0021_burly_red_shift",
+      "breakpoints": true
     }
   ]
 }
