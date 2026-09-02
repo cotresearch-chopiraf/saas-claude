@@ -162,6 +162,13 @@
       "when": 1788382276429,
       "tag": "0022_curvy_namorita",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1788386755246,
+      "tag": "0023_normal_bucky",
+      "breakpoints": true
     }
   ]
 }

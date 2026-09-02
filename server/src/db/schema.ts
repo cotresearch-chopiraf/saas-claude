@@ -1898,6 +1898,91 @@ export const zatcaComplianceLifecycles = pgTable(
   }),
 );
 
+// One row per real call to ZATCA's Compliance Invoice endpoint (POST
+// /compliance/invoices) for one Compliance Lifecycle (Slice M — ZATCA
+// Compliance Attempt persistence). Purely historical/insert-only, same as
+// zatca_csr_instances: a Compliance Lifecycle legitimately accumulates
+// many of these (one real ZATCA round trip each) and none of them are
+// ever overwritten or deleted. No uniqueness constraint anywhere on this
+// table — multiple attempts (including multiple attempts of the same
+// documentType) are explicitly expected and allowed; see
+// domain/complianceInvoice.ts's file comment for exactly when a row here
+// is and is not created.
+//
+// documentType: reuses zatcaDocumentTypeEnum verbatim — the SAME already-
+// established MIDAD-wide ZATCA document-type taxonomy zatca_submissions
+// already persists as documentTypeCode ("388"/"381"/"383"), not a new,
+// Compliance-Invoice-specific vocabulary. This is a deliberate choice,
+// not a guess: no prior Compliance Invoice domain flow existed before
+// this slice (confirmed by an audit of every call site — see
+// domain/complianceInvoice.ts), so there was no prior "value already used
+// by the Compliance Invoice flow" to inherit; reusing the one taxonomy
+// this concept already has elsewhere in the schema, rather than inventing
+// a second, Compliance-Invoice-only one (e.g. human-readable labels like
+// "Tax Invoice"/"Simplified Invoice"), is the reading of "preserve the
+// existing application taxonomy" this slice's spec calls for. Distinct
+// from, and never derived from, the CSR Instance's own Functionality Map
+// `invoiceType` string — see that column's own comment; this slice does
+// not duplicate or derive from it.
+//
+// correlationId/rawStatus/normalizedOutcome: verbatim from
+// ZatcaSubmissionResult (provider/types.ts) — correlationId and rawStatus
+// are that type's own optional fields; normalizedOutcome is its `status`
+// union ("cleared"/"reported"/"compliance_pending"/"rejected"), stored as
+// plain text rather than a new pgEnum since only two of those four values
+// (compliance_pending/rejected) are ever actually produced for THIS call
+// by fatooraProvider.ts's normalizeComplianceInvoiceResponse — declaring
+// an enum with two permanently-unreachable values here would misrepresent
+// this column's real range. All three are nullable: null on the one path
+// this slice ever leaves them null, see below.
+//
+// errorCategory: the existing ZatcaErrorCategory (lib/zatca/errors.ts)
+// of a thrown ZatcaError, when the provider call itself failed outright
+// (never reached/returned a recognized ZatcaSubmissionResult) — never a
+// new error taxonomy. errorCode: reserved for a genuinely distinct
+// ZATCA-native error code, per this slice's audit finding that no such
+// concept exists anywhere in this codebase today (zatca_submissions'
+// own zatcaErrorCode column is, in the one place it's ever written,
+// literally the same string as its error's category — not a second,
+// independent piece of information) — so this column stays unpopulated
+// by this slice rather than duplicating errorCategory's value into it a
+// second time under a different name. Both are null on a successful or
+// ZATCA-rejected call (a real, non-throwing ZatcaSubmissionResult was
+// produced) and populated only when the provider call threw.
+//
+// retryOfAttemptId: nullable self-reference (same convention as
+// zatca_csr_instances.supersededBy) — exists per the approved schema, but
+// nothing in this slice's domain flow ever populates it: no retry
+// identity concept exists yet for Compliance Invoice calls (confirmed by
+// this slice's own audit), and inventing one here would be exactly the
+// kind of fabricated relationship this slice's spec forbids.
+export const zatcaComplianceAttempts = pgTable(
+  "zatca_compliance_attempts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    complianceLifecycleId: uuid("compliance_lifecycle_id")
+      .notNull()
+      .references(() => zatcaComplianceLifecycles.id, { onDelete: "cascade" }),
+    documentType: zatcaDocumentTypeEnum("document_type").notNull(),
+    correlationId: text("correlation_id"),
+    rawStatus: text("raw_status"),
+    normalizedOutcome: text("normalized_outcome"),
+    attemptedAt: timestamp("attempted_at").notNull().defaultNow(),
+    errorCategory: text("error_category"),
+    errorCode: text("error_code"),
+    retryOfAttemptId: uuid("retry_of_attempt_id").references((): AnyPgColumn => zatcaComplianceAttempts.id),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    lifecycleIdx: index("zatca_compliance_attempts_lifecycle_idx").on(table.complianceLifecycleId),
+    companyIdx: index("zatca_compliance_attempts_company_idx").on(table.companyId),
+  }),
+);
+
 // A dedicated ICV (Invoice Counter Value) per (company, EGS unit) — see
 // the file-level comment for why this is never companies.next_invoice_number.
 export const zatcaIcvCounters = pgTable(

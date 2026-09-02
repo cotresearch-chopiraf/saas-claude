@@ -17,3 +17,5 @@ export * from "./csr.js";
 export * from "./csrInstances.js";
 export * from "./complianceLifecycles.js";
 export * from "./complianceCsid.js";
+export * from "./complianceAttempts.js";
+export * from "./complianceInvoice.js";

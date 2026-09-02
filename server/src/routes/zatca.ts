@@ -27,6 +27,7 @@ import {
   generateCsrForEgsUnit,
   confirmCsidForEgsUnit,
   requestComplianceCsidForEgsUnit,
+  submitComplianceInvoiceForEgsUnit,
 } from "../lib/zatca/domain/index.js";
 import { lockAndReadPihPointer, updatePihPointer } from "../lib/zatca/domain/pih.js";
 import { getZatcaSecretStore } from "../lib/zatca/secretStore/index.js";
@@ -426,6 +427,84 @@ zatcaRouter.post("/egs-units/:id/compliance-csid", requireSubmit, async (req: Re
     throw err;
   }
 });
+
+const submitComplianceInvoiceSchema = z.object({
+  documentType: z.enum(["388", "381", "383"]),
+  // The compliance test document itself — this route does not build,
+  // sign, or store one; the caller supplies the exact same values ZATCA's
+  // Compliance Invoice endpoint expects (see
+  // domain/complianceInvoice.ts's file comment for why: zero dependency
+  // on real MIDAD invoices or the XAdES signer).
+  invoiceXmlBase64: z.string().min(1),
+  invoiceHashBase64: z.string().min(1),
+  uuid: z.string().uuid(),
+});
+
+// POST /api/zatca/egs-units/:id/compliance-invoices (Slice M) — submits
+// one real Compliance Invoice test call to ZATCA for this EGS unit's
+// current CSR Instance's Compliance Lifecycle (see
+// domain/complianceInvoice.ts) and persists the result as one historical
+// Compliance Attempt row. Deliberately does NOT touch this Compliance
+// Lifecycle's status, this EGS unit's csidStatus, or imply any aggregate
+// compliance-completion fact — see that module's own file comment.
+zatcaRouter.post(
+  "/egs-units/:id/compliance-invoices",
+  requireSubmit,
+  async (req: Request<{ id: string }>, res: Response) => {
+    const parsed = submitComplianceInvoiceSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
+
+    try {
+      const { attempt, result } = await submitComplianceInvoiceForEgsUnit({
+        companyId: req.companyId!,
+        egsUnitId: req.params.id,
+        documentType: parsed.data.documentType,
+        invoiceXmlBase64: parsed.data.invoiceXmlBase64,
+        invoiceHashBase64: parsed.data.invoiceHashBase64,
+        uuid: parsed.data.uuid,
+      });
+
+      await recordAuditEvent(db, {
+        companyId: req.companyId!,
+        actorUserId: req.userId!,
+        action: "zatca.complianceInvoice.attempted",
+        entityType: "zatca_egs_unit",
+        entityId: req.params.id,
+        // The document XML/hash and the credential are never included —
+        // only the durable attempt identity and ZATCA's own (non-secret)
+        // outcome fields.
+        afterValue: {
+          complianceAttemptId: attempt.id,
+          documentType: attempt.documentType,
+          correlationId: attempt.correlationId,
+          normalizedOutcome: attempt.normalizedOutcome,
+        },
+      });
+
+      // The existing normalized Compliance Invoice result, minus the
+      // Clearance-only clearedInvoiceXmlBase64 field (always undefined for
+      // this call) — the wire response deliberately never includes
+      // secretRef or a database attempt/lifecycle id (see this route's own
+      // comment and domain/complianceCsid.ts's established precedent).
+      res.status(201).json({
+        status: result.status,
+        correlationId: result.correlationId,
+        rawStatus: result.rawStatus,
+        warnings: result.warnings,
+        clearanceStatus: result.clearanceStatus,
+        qrSellertStatus: result.qrSellertStatus,
+        qrBuyertStatus: result.qrBuyertStatus,
+        respondedAt: result.respondedAt,
+      });
+    } catch (err) {
+      if (err instanceof EgsUnitNotFoundError) return res.status(404).json({ error: "وحدة الفوترة الإلكترونية غير موجودة" });
+      if (err instanceof ZatcaError) {
+        return res.status(httpStatusForZatcaError(err)).json({ error: err.message, category: err.category });
+      }
+      throw err;
+    }
+  },
+);
 
 // POST /api/zatca/egs-units/:id/verify-connection — the one route in this
 // slice that actually contacts ZATCA (gated by zatca.submit, not
