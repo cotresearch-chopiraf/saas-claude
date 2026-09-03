@@ -19,3 +19,5 @@ export * from "./complianceLifecycles.js";
 export * from "./complianceCsid.js";
 export * from "./complianceAttempts.js";
 export * from "./complianceInvoice.js";
+export * from "./providerOperations.js";
+export * from "./productionCsid.js";

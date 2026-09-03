@@ -2008,6 +2008,93 @@ export const zatcaComplianceAttempts = pgTable(
   }),
 );
 
+// One row per real call to a still-unwired ZATCA provider operation —
+// Production CSID Onboarding and Production CSID Renewal (Slice W).
+// Deliberately NOT a "compliance steps" or completion model: this table
+// records ONLY the technical fact that MIDAD made one specific provider
+// call and what came back — never whether the taxpayer is compliant,
+// whether onboarding/renewal is "complete", or any test count. See
+// domain/productionCsid.ts's file comment for the full boundary this
+// table exists inside.
+//
+// Deliberately separate from zatca_compliance_attempts (Slice M), which
+// remains scoped to Compliance Invoice calls only — this table is not a
+// generalization or replacement of it; neither existing table
+// (zatca_compliance_lifecycles, zatca_compliance_attempts) is modified or
+// retrofitted into this one, per this slice's explicit "preserve existing
+// behavior" constraint.
+//
+// egsUnitId (not csrInstanceId/complianceLifecycleId): the one
+// relationship both operation types below genuinely share. Onboarding
+// conceptually belongs to the EGS unit receiving a Production CSID;
+// Renewal's CSR is caller-supplied and opaque here (see
+// domain/productionCsid.ts) and is not tied to any zatca_csr_instances
+// row — forcing a CSR/Lifecycle FK onto Renewal would invent a
+// relationship the verified provider contract does not establish.
+export const zatcaProviderOperationTypeEnum = pgEnum("zatca_provider_operation_type", [
+  "production_csid_onboarding",
+  "production_csid_renewal",
+]);
+
+// Strictly technical/internal — never a ZATCA compliance verdict. Only
+// two values exist because a row is only ever inserted once the provider
+// call has genuinely concluded (mirrors zatca_compliance_attempts' own
+// insert-only-on-conclusion convention — see domain/providerOperations.ts):
+// "response_received" for any real, non-throwing provider response
+// (including Renewal's verified "not_compliant" outcome — ZATCA responded,
+// it just declined; this is a received response, not a technical failure)
+// and "failed" for a thrown ZatcaError (the call itself did not complete).
+// Values like "not_started"/"in_progress"/"submitted"/"blocked" are
+// deliberately not included: nothing in this slice's domain flow ever
+// creates a row before the call concludes, so they would be unused,
+// speculative states.
+export const zatcaProviderOperationStatusEnum = pgEnum("zatca_provider_operation_status", [
+  "response_received",
+  "failed",
+]);
+
+export const zatcaProviderOperations = pgTable(
+  "zatca_provider_operations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    egsUnitId: uuid("egs_unit_id")
+      .notNull()
+      .references(() => zatcaEgsUnits.id, { onDelete: "cascade" }),
+    operationType: zatcaProviderOperationTypeEnum("operation_type").notNull(),
+    internalStatus: zatcaProviderOperationStatusEnum("internal_status").notNull(),
+    // ZATCA's own requestID for this call, when one was returned —
+    // verbatim, an opaque identifier, never arithmetic (same convention as
+    // zatca_compliance_lifecycles.requestId).
+    providerRequestId: text("provider_request_id"),
+    dispositionMessage: text("disposition_message"),
+    // The provider's own verified outcome discriminant, stored verbatim,
+    // when the operation has one (Renewal's "issued"/"not_compliant" —
+    // ZATCA's own vocabulary, never a MIDAD interpretation of it). Null
+    // for operation types with no such discriminant (Onboarding).
+    providerOutcome: text("provider_outcome"),
+    // Opaque ZatcaSecretStore reference for the credential this operation
+    // produced, if any — never the credential material itself. Completely
+    // independent from every other secretRef in this schema (CSR
+    // Instance's, Compliance Lifecycle's) — see domain/productionCsid.ts.
+    secretRef: text("secret_ref"),
+    // The thrown ZatcaError's own category — see
+    // zatca_compliance_attempts.errorCategory's identical convention.
+    // Null on a real (even "not_compliant") response.
+    errorCategory: text("error_category"),
+    startedAt: timestamp("started_at").notNull(),
+    finishedAt: timestamp("finished_at").notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    egsUnitIdx: index("zatca_provider_operations_egs_unit_idx").on(table.egsUnitId),
+    companyIdx: index("zatca_provider_operations_company_idx").on(table.companyId),
+  }),
+);
+
 // A dedicated ICV (Invoice Counter Value) per (company, EGS unit) — see
 // the file-level comment for why this is never companies.next_invoice_number.
 export const zatcaIcvCounters = pgTable(

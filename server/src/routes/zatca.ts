@@ -28,6 +28,8 @@ import {
   confirmCsidForEgsUnit,
   requestComplianceCsidForEgsUnit,
   submitComplianceInvoiceForEgsUnit,
+  requestProductionCsidOnboardingForEgsUnit,
+  renewProductionCsidForEgsUnit,
 } from "../lib/zatca/domain/index.js";
 import { lockAndReadPihPointer, updatePihPointer } from "../lib/zatca/domain/pih.js";
 import { getZatcaSecretStore } from "../lib/zatca/secretStore/index.js";
@@ -503,6 +505,100 @@ zatcaRouter.post(
         qrBuyertStatus: result.qrBuyertStatus,
         respondedAt: result.respondedAt,
       });
+    } catch (err) {
+      if (err instanceof EgsUnitNotFoundError) return res.status(404).json({ error: "وحدة الفوترة الإلكترونية غير موجودة" });
+      if (err instanceof ZatcaError) {
+        return res.status(httpStatusForZatcaError(err)).json({ error: err.message, category: err.category });
+      }
+      throw err;
+    }
+  },
+);
+
+// POST /api/zatca/egs-units/:id/production-csid (Slice W) — requests a
+// real Production CSID from ZATCA for this EGS unit's current CSR
+// Instance's Compliance CSID (see domain/productionCsid.ts) and persists
+// the result as one historical provider-operation row. Purely an
+// INTERNAL EXECUTION HISTORY record — deliberately does NOT touch this
+// EGS unit's csidStatus and does NOT imply "onboarding complete." No
+// request body: every input this operation needs is already resolved
+// server-side from the EGS unit's own current CSR/Compliance chain.
+zatcaRouter.post("/egs-units/:id/production-csid", requireSubmit, async (req: Request<{ id: string }>, res: Response) => {
+  try {
+    const { operation, result } = await requestProductionCsidOnboardingForEgsUnit({
+      companyId: req.companyId!,
+      egsUnitId: req.params.id,
+    });
+
+    await recordAuditEvent(db, {
+      companyId: req.companyId!,
+      actorUserId: req.userId!,
+      action: "zatca.productionCsid.onboardingRequested",
+      entityType: "zatca_egs_unit",
+      entityId: req.params.id,
+      // The credential is never included — only the durable operation
+      // identity and ZATCA's own (non-secret) disposition text.
+      afterValue: { providerOperationId: operation.id, requestId: operation.providerRequestId, dispositionMessage: operation.dispositionMessage },
+    });
+
+    // Wire response deliberately never includes secretRef or a database
+    // operation id — same established precedent as compliance-csid/
+    // compliance-invoices.
+    res.status(201).json({ requestId: result.requestId, dispositionMessage: result.dispositionMessage });
+  } catch (err) {
+    if (err instanceof EgsUnitNotFoundError) return res.status(404).json({ error: "وحدة الفوترة الإلكترونية غير موجودة" });
+    if (err instanceof ZatcaError) {
+      return res.status(httpStatusForZatcaError(err)).json({ error: err.message, category: err.category });
+    }
+    throw err;
+  }
+});
+
+const renewProductionCsidSchema = z.object({
+  // The renewal CSR — this route does not generate, sign, or store one;
+  // the caller supplies the exact same values ZATCA's Production CSID
+  // Renewal endpoint expects (see domain/productionCsid.ts's file comment
+  // for why this stays opaque to MIDAD's own CSR Instance chain).
+  csrBase64: z.string().min(1),
+  otp: z.string().min(1),
+});
+
+// POST /api/zatca/egs-units/:id/production-csid/renew (Slice W) — calls
+// ZATCA's Production CSID Renewal endpoint and persists the result as one
+// historical provider-operation row. Never claims "renewal complete" —
+// both the verified "issued" and "not_compliant" outcomes are recorded as
+// real received responses and returned to the caller verbatim (ZATCA's
+// own vocabulary, not a MIDAD interpretation of it).
+zatcaRouter.post(
+  "/egs-units/:id/production-csid/renew",
+  requireSubmit,
+  async (req: Request<{ id: string }>, res: Response) => {
+    const parsed = renewProductionCsidSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
+
+    try {
+      const { operation, result } = await renewProductionCsidForEgsUnit({
+        companyId: req.companyId!,
+        egsUnitId: req.params.id,
+        csrBase64: parsed.data.csrBase64,
+        otp: parsed.data.otp,
+      });
+
+      await recordAuditEvent(db, {
+        companyId: req.companyId!,
+        actorUserId: req.userId!,
+        action: "zatca.productionCsid.renewalRequested",
+        entityType: "zatca_egs_unit",
+        entityId: req.params.id,
+        afterValue: {
+          providerOperationId: operation.id,
+          requestId: operation.providerRequestId,
+          dispositionMessage: operation.dispositionMessage,
+          outcome: operation.providerOutcome,
+        },
+      });
+
+      res.status(201).json({ requestId: result.requestId, dispositionMessage: result.dispositionMessage, outcome: result.outcome });
     } catch (err) {
       if (err instanceof EgsUnitNotFoundError) return res.status(404).json({ error: "وحدة الفوترة الإلكترونية غير موجودة" });
       if (err instanceof ZatcaError) {
