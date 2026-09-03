@@ -65,7 +65,7 @@
 import { getEgsUnit, EgsUnitNotFoundError } from "./egsUnits.js";
 import { findCurrentCsrInstance } from "./csrInstances.js";
 import { getComplianceLifecycleForCsrInstance } from "./complianceLifecycles.js";
-import { createComplianceAttempt } from "./complianceAttempts.js";
+import { createComplianceAttempt, type InvoiceFamily } from "./complianceAttempts.js";
 import { getZatcaSecretStore } from "../secretStore/index.js";
 import { getZatcaProvider } from "../provider/index.js";
 import { ZatcaConfigurationError, ZatcaError, ZatcaValidationError } from "../errors.js";
@@ -76,9 +76,52 @@ export interface SubmitComplianceInvoiceInput {
   companyId: string;
   egsUnitId: string;
   documentType: (typeof zatcaDocumentTypeEnum.enumValues)[number];
+  // Which ZATCA compliance-test family this attempt targets — caller-
+  // declared intent, validated below against the resolved CSR Instance's
+  // Functionality Map before any provider call is made. See
+  // domain/complianceAttempts.ts's InvoiceFamily comment and this file's
+  // validateInvoiceFamilyAgainstCsr for the full reasoning; never derived
+  // from documentType, the CSR, or anything else.
+  invoiceFamily: InvoiceFamily;
   invoiceXmlBase64: string;
   invoiceHashBase64: string;
   uuid: string;
+}
+
+// Slice Q-Implementation — MIDAD-SIDE INTEGRITY RULE, NOT A ZATCA API
+// CONTRACT. No verified ZATCA source states that the Compliance Invoice
+// endpoint itself validates a request's family against the submitting
+// CSR's Functionality Map (provider/types.ts's ZatcaDocumentSubmissionInput
+// carries no CSR linkage at all). This check exists solely so MIDAD
+// refuses, before ever contacting ZATCA, a request whose declared family
+// the caller's own CSR could not have produced — derived from the Slice
+// P/Q-verified meaning of the Functionality Map (T=Standard, S=Simplified,
+// digits 1/2 of "TSXY"), never from an inferred test count or any other
+// unverified rule.
+//
+// "0000" is deliberately rejected for EITHER family rather than silently
+// allowed: its validity is itself UNVERIFIED (Slice O/P) — there is no
+// evidence-backed basis to permit a compliance-test family against a
+// Functionality Map value nothing confirms is even a valid CSR input.
+function validateInvoiceFamilyAgainstCsr(csrInvoiceType: string, invoiceFamily: InvoiceFamily): void {
+  const t = csrInvoiceType[0];
+  const s = csrInvoiceType[1];
+  if (csrInvoiceType === "0000" || t === undefined || s === undefined) {
+    throw new ZatcaValidationError(
+      `لا يمكن التحقق من توافق نوع الفاتورة (${invoiceFamily}) مع خريطة وظائف CSR غير المعروفة/غير المدعومة "${csrInvoiceType}" — ` +
+        "هذه القيمة غير موثّقة",
+    );
+  }
+  if (invoiceFamily === "standard" && t !== "1") {
+    throw new ZatcaValidationError(
+      `طلب CSR هذا (invoiceType="${csrInvoiceType}") لا يدعم الفواتير القياسية (Standard) — لا يمكن إرسال فاتورة اختبار امتثال قياسية له`,
+    );
+  }
+  if (invoiceFamily === "simplified" && s !== "1") {
+    throw new ZatcaValidationError(
+      `طلب CSR هذا (invoiceType="${csrInvoiceType}") لا يدعم الفواتير المبسّطة (Simplified) — لا يمكن إرسال فاتورة اختبار امتثال مبسّطة له`,
+    );
+  }
 }
 
 export async function submitComplianceInvoiceForEgsUnit(
@@ -108,6 +151,12 @@ export async function submitComplianceInvoiceForEgsUnit(
     );
   }
 
+  // MIDAD-side integrity check (never a claimed ZATCA rule — see this
+  // function's own comment) — runs before any provider call or secret
+  // resolution, so an incompatible request never reaches the network and
+  // never creates an attempt row.
+  validateInvoiceFamilyAgainstCsr(csrInstance.invoiceType, input.invoiceFamily);
+
   const secret = await getZatcaSecretStore().resolve(input.companyId, lifecycle.secretRef);
   if (!secret?.binarySecurityToken || !secret.secret) {
     throw new ZatcaConfigurationError("تعذّر استرجاع بيانات اعتماد شهادة الامتثال المخزّنة — أعيدي طلب شهادة الامتثال");
@@ -133,6 +182,7 @@ export async function submitComplianceInvoiceForEgsUnit(
   const attempt = await createComplianceAttempt(input.companyId, {
     complianceLifecycleId: lifecycle.id,
     documentType: input.documentType,
+    invoiceFamily: input.invoiceFamily,
     correlationId: result?.correlationId ?? null,
     rawStatus: result?.rawStatus ?? null,
     normalizedOutcome: result?.status ?? null,

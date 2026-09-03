@@ -1956,6 +1956,30 @@ export const zatcaComplianceLifecycles = pgTable(
 // identity concept exists yet for Compliance Invoice calls (confirmed by
 // this slice's own audit), and inventing one here would be exactly the
 // kind of fabricated relationship this slice's spec forbids.
+//
+// invoiceFamily (Slice Q-Implementation): "standard" | "simplified" — which
+// ZATCA compliance-test family this specific attempt targeted. Required
+// because documentType alone cannot distinguish a Standard Tax Invoice
+// attempt from a Simplified Tax Invoice attempt (both documentType "388")
+// when the owning CSR Instance's Functionality Map is "1100" (both
+// families supported) — confirmed as a real, unrecoverable historical-
+// identity gap by the Slice Q audit (no other column, and no later
+// derivation from the CSR, can reconstruct which family a "1100"-CSR
+// attempt targeted). Caller-supplied at attempt-creation time (see
+// domain/complianceInvoice.ts's CSR-compatibility validation), never
+// derived from documentType/clientTaxId/the CSR's invoiceType/anything
+// else, and never updated after insert — same immutable-history contract
+// as every other column on this table.
+//
+// Plain text, not a new pgEnum — matches the one existing column in this
+// schema with the identical two-value shape (zatca_submissions.subtype,
+// via lib/zatca/types.ts's ZatcaInvoiceSubtype union), which is also plain
+// text rather than a pgEnum. Despite sharing the same two string values,
+// this column is DELIBERATELY INDEPENDENT from zatca_submissions.subtype:
+// that column is a real-invoice business classification derived from
+// invoices.clientTaxId (documentBuilder.ts), unrelated to any CSR's
+// Functionality Map — the two concepts must never be conflated, and this
+// column intentionally does not reuse that type or that derivation.
 export const zatcaComplianceAttempts = pgTable(
   "zatca_compliance_attempts",
   {
@@ -1967,6 +1991,7 @@ export const zatcaComplianceAttempts = pgTable(
       .notNull()
       .references(() => zatcaComplianceLifecycles.id, { onDelete: "cascade" }),
     documentType: zatcaDocumentTypeEnum("document_type").notNull(),
+    invoiceFamily: text("invoice_family").notNull(),
     correlationId: text("correlation_id"),
     rawStatus: text("raw_status"),
     normalizedOutcome: text("normalized_outcome"),

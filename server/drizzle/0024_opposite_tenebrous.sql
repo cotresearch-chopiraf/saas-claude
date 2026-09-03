@@ -1,0 +1,1 @@
+ALTER TABLE "zatca_compliance_attempts" ADD COLUMN "invoice_family" text NOT NULL;

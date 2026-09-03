@@ -169,6 +169,13 @@
       "when": 1788386755246,
       "tag": "0023_normal_bucky",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1788456909968,
+      "tag": "0024_opposite_tenebrous",
+      "breakpoints": true
     }
   ]
 }

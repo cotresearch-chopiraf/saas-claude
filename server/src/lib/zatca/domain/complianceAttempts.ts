@@ -17,9 +17,27 @@ import { and, eq } from "drizzle-orm";
 import { db } from "../../../db/client.js";
 import { zatcaComplianceAttempts, type zatcaDocumentTypeEnum } from "../../../db/schema.js";
 
+// Slice Q-Implementation — deliberately NOT lib/zatca/types.ts's
+// ZatcaInvoiceSubtype, despite the identical value set. See db/schema.ts's
+// zatcaComplianceAttempts comment: that type/column concerns a real
+// invoice's B2B/B2C business classification (derived from
+// invoices.clientTaxId), an unrelated concept to which ZATCA compliance-
+// test family a Compliance Attempt targeted. Declared once here (this
+// table's own repository module) and imported by domain/complianceInvoice.ts
+// rather than duplicated.
+export type InvoiceFamily = "standard" | "simplified";
+
 export interface CreateComplianceAttemptInput {
   complianceLifecycleId: string;
   documentType: (typeof zatcaDocumentTypeEnum.enumValues)[number];
+  // Which ZATCA compliance-test family this attempt targeted — caller-
+  // supplied, never derived (see domain/complianceInvoice.ts's CSR-
+  // compatibility validation). Required: distinguishes an otherwise-
+  // identical documentType "388" attempt under a "1100" CSR (which
+  // supports both families) from its counterpart in the other family —
+  // see db/schema.ts's column comment for the full historical-integrity
+  // reasoning.
+  invoiceFamily: InvoiceFamily;
   // Verbatim ZatcaSubmissionResult fields (provider/types.ts) when the
   // provider call returned one; null when it threw instead — see
   // domain/complianceInvoice.ts's file comment for exactly when each case
@@ -44,6 +62,7 @@ export async function createComplianceAttempt(companyId: string, input: CreateCo
       companyId,
       complianceLifecycleId: input.complianceLifecycleId,
       documentType: input.documentType,
+      invoiceFamily: input.invoiceFamily,
       correlationId: input.correlationId,
       rawStatus: input.rawStatus,
       normalizedOutcome: input.normalizedOutcome,

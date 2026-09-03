@@ -430,6 +430,11 @@ zatcaRouter.post("/egs-units/:id/compliance-csid", requireSubmit, async (req: Re
 
 const submitComplianceInvoiceSchema = z.object({
   documentType: z.enum(["388", "381", "383"]),
+  // Which ZATCA compliance-test family this attempt targets — required,
+  // caller-declared (never inferred from documentType or the CSR here;
+  // see domain/complianceInvoice.ts's validateInvoiceFamilyAgainstCsr for
+  // the MIDAD-side compatibility check against the resolved CSR).
+  invoiceFamily: z.enum(["standard", "simplified"]),
   // The compliance test document itself — this route does not build,
   // sign, or store one; the caller supplies the exact same values ZATCA's
   // Compliance Invoice endpoint expects (see
@@ -459,6 +464,7 @@ zatcaRouter.post(
         companyId: req.companyId!,
         egsUnitId: req.params.id,
         documentType: parsed.data.documentType,
+        invoiceFamily: parsed.data.invoiceFamily,
         invoiceXmlBase64: parsed.data.invoiceXmlBase64,
         invoiceHashBase64: parsed.data.invoiceHashBase64,
         uuid: parsed.data.uuid,
@@ -476,6 +482,7 @@ zatcaRouter.post(
         afterValue: {
           complianceAttemptId: attempt.id,
           documentType: attempt.documentType,
+          invoiceFamily: attempt.invoiceFamily,
           correlationId: attempt.correlationId,
           normalizedOutcome: attempt.normalizedOutcome,
         },

@@ -99,6 +99,7 @@ async function submitComplianceInvoice(
   token: string,
   egsUnitId: string,
   documentType = "388",
+  invoiceFamily: "standard" | "simplified" = "standard",
   overrides: Partial<{ invoiceXmlBase64: string; invoiceHashBase64: string; uuid: string }> = {},
 ) {
   return request(app)
@@ -106,6 +107,7 @@ async function submitComplianceInvoice(
     .set("Authorization", `Bearer ${token}`)
     .send({
       documentType,
+      invoiceFamily,
       invoiceXmlBase64: overrides.invoiceXmlBase64 ?? "PGE+PC9hPg==",
       invoiceHashBase64: overrides.invoiceHashBase64 ?? "abc123==",
       uuid: overrides.uuid ?? "11111111-1111-1111-1111-111111111111",
@@ -198,8 +200,8 @@ afterEach(async () => {
 
 // Drives an EGS unit all the way to an "issued" Compliance Lifecycle,
 // against whatever mock server is currently configured via setFatooraEnv.
-async function setUpComplianceLifecycle(token: string, egsUnitId: string) {
-  const csrRes = await generateCsr(token, egsUnitId);
+async function setUpComplianceLifecycle(token: string, egsUnitId: string, invoiceType = baseFields.invoiceType) {
+  const csrRes = await generateCsr(token, egsUnitId, invoiceType);
   const csidRes = await requestComplianceCsid(token, egsUnitId, csrRes.body.csrDerBase64);
   expect(csidRes.status).toBe(201);
   return csrRes.body.csrDerBase64 as string;
@@ -479,5 +481,241 @@ describe("Slice M — Compliance Attempt persistence: Test 9, lifecycle status r
     const { getEgsUnit } = await import("../src/lib/zatca/domain/index.js");
     const unit = await getEgsUnit(companyA, egsUnitId);
     expect(unit!.csidStatus).toBe("compliance_pending");
+  });
+});
+
+// Slice Q-Implementation — invoiceFamily contract + historical integrity.
+// Persists which ZATCA compliance-test family ("standard"/"simplified") a
+// Compliance Attempt targeted, validated against the resolving CSR
+// Instance's Functionality Map (a MIDAD-side integrity rule, never a
+// claimed ZATCA API contract — see domain/complianceInvoice.ts's own
+// comment). documentType and invoiceFamily are orthogonal: this suite
+// never restricts invoiceFamily by documentType beyond what the CSR
+// compatibility check itself enforces.
+
+describe("Slice Q — invoiceFamily / CSR compatibility matrix", () => {
+  it("1000 + standard + 388 -> valid", async () => {
+    const egsUnitId = await createEgsUnit(tokenA);
+    const server = await startMockFatoora(comboHandler("reported"));
+    cleanup = server.close;
+    setFatooraEnv(server.url);
+    await setUpComplianceLifecycle(tokenA, egsUnitId, "1000");
+
+    const res = await submitComplianceInvoice(tokenA, egsUnitId, "388", "standard");
+    expect(res.status).toBe(201);
+  });
+
+  it("1000 + simplified + 388 -> rejected, no provider call, no attempt persisted", async () => {
+    const egsUnitId = await createEgsUnit(tokenA);
+    const server = await startMockFatoora(comboHandler("reported"));
+    cleanup = server.close;
+    setFatooraEnv(server.url);
+    await setUpComplianceLifecycle(tokenA, egsUnitId, "1000");
+
+    const res = await submitComplianceInvoice(tokenA, egsUnitId, "388", "simplified");
+    expect(res.status).toBe(400);
+    expect(res.body.category).toBe("validation");
+
+    const { listCsrInstancesForEgsUnit, getComplianceLifecycleForCsrInstance, listComplianceAttemptsForLifecycle } = await import(
+      "../src/lib/zatca/domain/index.js"
+    );
+    const [csrInstance] = await listCsrInstancesForEgsUnit(companyA, egsUnitId);
+    const lifecycle = await getComplianceLifecycleForCsrInstance(companyA, csrInstance.id);
+    expect(await listComplianceAttemptsForLifecycle(companyA, lifecycle!.id)).toHaveLength(0);
+  });
+
+  it("0100 + simplified + 388 -> valid", async () => {
+    const egsUnitId = await createEgsUnit(tokenA);
+    const server = await startMockFatoora(comboHandler("reported"));
+    cleanup = server.close;
+    setFatooraEnv(server.url);
+    await setUpComplianceLifecycle(tokenA, egsUnitId, "0100");
+
+    const res = await submitComplianceInvoice(tokenA, egsUnitId, "388", "simplified");
+    expect(res.status).toBe(201);
+  });
+
+  it("0100 + standard + 388 -> rejected, no provider call, no attempt persisted", async () => {
+    const egsUnitId = await createEgsUnit(tokenA);
+    const server = await startMockFatoora(comboHandler("reported"));
+    cleanup = server.close;
+    setFatooraEnv(server.url);
+    await setUpComplianceLifecycle(tokenA, egsUnitId, "0100");
+
+    const res = await submitComplianceInvoice(tokenA, egsUnitId, "388", "standard");
+    expect(res.status).toBe(400);
+    expect(res.body.category).toBe("validation");
+
+    const { listCsrInstancesForEgsUnit, getComplianceLifecycleForCsrInstance, listComplianceAttemptsForLifecycle } = await import(
+      "../src/lib/zatca/domain/index.js"
+    );
+    const [csrInstance] = await listCsrInstancesForEgsUnit(companyA, egsUnitId);
+    const lifecycle = await getComplianceLifecycleForCsrInstance(companyA, csrInstance.id);
+    expect(await listComplianceAttemptsForLifecycle(companyA, lifecycle!.id)).toHaveLength(0);
+  });
+
+  it("1100 + standard + 388 -> valid", async () => {
+    const egsUnitId = await createEgsUnit(tokenA);
+    const server = await startMockFatoora(comboHandler("reported"));
+    cleanup = server.close;
+    setFatooraEnv(server.url);
+    await setUpComplianceLifecycle(tokenA, egsUnitId, "1100");
+
+    const res = await submitComplianceInvoice(tokenA, egsUnitId, "388", "standard");
+    expect(res.status).toBe(201);
+  });
+
+  it("1100 + simplified + 388 -> valid", async () => {
+    const egsUnitId = await createEgsUnit(tokenA);
+    const server = await startMockFatoora(comboHandler("reported"));
+    cleanup = server.close;
+    setFatooraEnv(server.url);
+    await setUpComplianceLifecycle(tokenA, egsUnitId, "1100");
+
+    const res = await submitComplianceInvoice(tokenA, egsUnitId, "388", "simplified");
+    expect(res.status).toBe(201);
+  });
+
+  it("invalid invoiceFamily string -> 400 schema validation failure", async () => {
+    const egsUnitId = await createEgsUnit(tokenA);
+    const server = await startMockFatoora(comboHandler("reported"));
+    cleanup = server.close;
+    setFatooraEnv(server.url);
+    await setUpComplianceLifecycle(tokenA, egsUnitId, "1100");
+
+    const res = await request(app)
+      .post(`/api/zatca/egs-units/${egsUnitId}/compliance-invoices`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .send({
+        documentType: "388",
+        invoiceFamily: "foo",
+        invoiceXmlBase64: "PGE+PC9hPg==",
+        invoiceHashBase64: "abc123==",
+        uuid: "11111111-1111-1111-1111-111111111111",
+      });
+    expect(res.status).toBe(400);
+  });
+
+  it("missing invoiceFamily -> 400 schema validation failure", async () => {
+    const egsUnitId = await createEgsUnit(tokenA);
+    const server = await startMockFatoora(comboHandler("reported"));
+    cleanup = server.close;
+    setFatooraEnv(server.url);
+    await setUpComplianceLifecycle(tokenA, egsUnitId, "1100");
+
+    const res = await request(app)
+      .post(`/api/zatca/egs-units/${egsUnitId}/compliance-invoices`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .send({
+        documentType: "388",
+        invoiceXmlBase64: "PGE+PC9hPg==",
+        invoiceHashBase64: "abc123==",
+        uuid: "11111111-1111-1111-1111-111111111111",
+      });
+    expect(res.status).toBe(400);
+  });
+
+  it("0000 -> rejected as unresolved/unverified for either family", async () => {
+    const egsUnitId = await createEgsUnit(tokenA);
+    const server = await startMockFatoora(comboHandler("reported"));
+    cleanup = server.close;
+    setFatooraEnv(server.url);
+    await setUpComplianceLifecycle(tokenA, egsUnitId, "0000");
+
+    const standardRes = await submitComplianceInvoice(tokenA, egsUnitId, "388", "standard");
+    expect(standardRes.status).toBe(400);
+    expect(standardRes.body.category).toBe("validation");
+
+    const simplifiedRes = await submitComplianceInvoice(tokenA, egsUnitId, "388", "simplified");
+    expect(simplifiedRes.status).toBe(400);
+    expect(simplifiedRes.body.category).toBe("validation");
+  });
+});
+
+describe("Slice Q — historical integrity", () => {
+  it("a persisted attempt's invoiceFamily is unaffected by a later CSR regeneration for the same EGS unit", async () => {
+    const egsUnitId = await createEgsUnit(tokenA);
+    const server = await startMockFatoora(comboHandler("reported"));
+    cleanup = server.close;
+    setFatooraEnv(server.url);
+    await setUpComplianceLifecycle(tokenA, egsUnitId, "1000");
+
+    const res = await submitComplianceInvoice(tokenA, egsUnitId, "388", "standard");
+    expect(res.status).toBe(201);
+
+    const { listCsrInstancesForEgsUnit, getComplianceLifecycleForCsrInstance, listComplianceAttemptsForLifecycle } = await import(
+      "../src/lib/zatca/domain/index.js"
+    );
+    const [oldCsrInstance] = await listCsrInstancesForEgsUnit(companyA, egsUnitId);
+    const oldLifecycle = await getComplianceLifecycleForCsrInstance(companyA, oldCsrInstance.id);
+    const [oldAttempt] = await listComplianceAttemptsForLifecycle(companyA, oldLifecycle!.id);
+    expect(oldAttempt.invoiceFamily).toBe("standard");
+
+    // A new CSR (different Functionality Map) supersedes the old one for
+    // this EGS unit — the old attempt's persisted family must not change.
+    await generateCsr(tokenA, egsUnitId, "1100");
+
+    const reReadAttempt = (await listComplianceAttemptsForLifecycle(companyA, oldLifecycle!.id))[0];
+    expect(reReadAttempt.invoiceFamily).toBe("standard");
+    expect(reReadAttempt.id).toBe(oldAttempt.id);
+  });
+
+  it("two attempts under the same 1100 CSR remain distinguishable by invoiceFamily", async () => {
+    const egsUnitId = await createEgsUnit(tokenA);
+    const server = await startMockFatoora(comboHandler("reported"));
+    cleanup = server.close;
+    setFatooraEnv(server.url);
+    await setUpComplianceLifecycle(tokenA, egsUnitId, "1100");
+
+    const resA = await submitComplianceInvoice(tokenA, egsUnitId, "388", "standard");
+    const resB = await submitComplianceInvoice(tokenA, egsUnitId, "388", "simplified");
+    expect(resA.status).toBe(201);
+    expect(resB.status).toBe(201);
+
+    const { listCsrInstancesForEgsUnit, getComplianceLifecycleForCsrInstance, listComplianceAttemptsForLifecycle } = await import(
+      "../src/lib/zatca/domain/index.js"
+    );
+    const [csrInstance] = await listCsrInstancesForEgsUnit(companyA, egsUnitId);
+    const lifecycle = await getComplianceLifecycleForCsrInstance(companyA, csrInstance.id);
+    const attempts = await listComplianceAttemptsForLifecycle(companyA, lifecycle!.id);
+    expect(attempts).toHaveLength(2);
+    const families = attempts.map((a) => a.invoiceFamily).sort();
+    expect(families).toEqual(["simplified", "standard"]);
+  });
+});
+
+describe("Slice Q — provider boundary", () => {
+  it("invoiceFamily never crosses into the provider request body", async () => {
+    const egsUnitId = await createEgsUnit(tokenA);
+    let receivedBody = "";
+    const server = await startMockFatoora((req, res) => {
+      if (req.url === "/compliance/invoices") {
+        req.on("data", (chunk) => (receivedBody += chunk));
+        req.on("end", () => {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              reportingStatus: "REPORTED",
+              validationResults: { status: "PASS" },
+              clearanceStatus: null,
+              qrSellertStatus: null,
+              qrBuyertStatus: null,
+            }),
+          );
+        });
+        return;
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ requestID: 1234567890123, dispositionMessage: "ISSUED", binarySecurityToken: "cert", secret: "secret" }));
+    });
+    cleanup = server.close;
+    setFatooraEnv(server.url);
+    await setUpComplianceLifecycle(tokenA, egsUnitId, "1100");
+
+    const res = await submitComplianceInvoice(tokenA, egsUnitId, "388", "standard");
+    expect(res.status).toBe(201);
+    expect(JSON.parse(receivedBody)).toEqual({ invoiceHash: "abc123==", uuid: "11111111-1111-1111-1111-111111111111", invoice: "PGE+PC9hPg==" });
+    expect(receivedBody).not.toContain("invoiceFamily");
+    expect(receivedBody).not.toContain("standard");
   });
 });
