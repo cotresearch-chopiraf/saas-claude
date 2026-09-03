@@ -1,0 +1,35 @@
+# Slice Z — keeps the Docker build context free of local state, secrets,
+# and anything the image build doesn't need. node_modules/dist are always
+# rebuilt fresh inside the image; nothing here should ever end up baked in.
+node_modules
+**/node_modules
+dist
+**/dist
+build
+**/build
+
+# Local environment files — never copied into an image.
+.env
+.env.*
+!.env.example
+server/.env
+server/.env.*
+!server/.env.example
+
+# Version control and CI metadata — no reason for either inside the image.
+.git
+.github
+
+# Local runtime state / uploads — never part of a build; real storage is
+# configured at deploy time (or mounted as a volume), not shipped in the
+# image.
+uploads
+server/uploads
+
+# Editor/OS noise and logs.
+.DS_Store
+*.log
+
+# Test artifacts and coverage — not needed to build or run the app.
+coverage
+**/coverage

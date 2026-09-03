@@ -133,7 +133,9 @@ export const users = pgTable("users", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
-export const projects = pgTable("projects", {
+export const projects = pgTable(
+  "projects",
+  {
   id: uuid("id").primaryKey().defaultRandom(),
   companyId: uuid("company_id")
     .notNull()
@@ -167,7 +169,15 @@ export const projects = pgTable("projects", {
     .default("0"),
   startDate: date("start_date"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+  },
+  (table) => ({
+    // Slice Z — every tenant-scoped list route filters projects by
+    // companyId (see routes/projects.ts); this was the one column every
+    // downstream project-scoped table's own tenant-ownership check
+    // ultimately depends on, and it had no explicit index before this.
+    companyIdx: index("projects_company_idx").on(table.companyId),
+  }),
+);
 
 // This table's plannedAmount is the canonical Cost Plan / expected-cost
 // baseline for this product — the number future Commitment, Actual Cost,
@@ -177,7 +187,9 @@ export const projects = pgTable("projects", {
 // published BOQ value (Σ boqItems.amount — contractual scope valuation);
 // see docs/MIDAD_FINANCIAL_MODEL.md for why these three are kept distinct
 // rather than collapsed into one generic "budget" number.
-export const budgetItems = pgTable("budget_items", {
+export const budgetItems = pgTable(
+  "budget_items",
+  {
   id: uuid("id").primaryKey().defaultRandom(),
   projectId: uuid("project_id")
     .notNull()
@@ -195,9 +207,18 @@ export const budgetItems = pgTable("budget_items", {
   boqItemId: uuid("boq_item_id").references((): AnyPgColumn => boqItems.id),
   budgetRevisionId: uuid("budget_revision_id").references((): AnyPgColumn => budgetRevisions.id),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+  },
+  (table) => ({
+    // Slice Z — every budget/cost-plan list route filters by projectId
+    // alone (companyId is validated once against the parent project
+    // before this query runs — see routes/budget.ts).
+    projectIdx: index("budget_items_project_idx").on(table.projectId),
+  }),
+);
 
-export const expenses = pgTable("expenses", {
+export const expenses = pgTable(
+  "expenses",
+  {
   id: uuid("id").primaryKey().defaultRandom(),
   projectId: uuid("project_id")
     .notNull()
@@ -209,9 +230,16 @@ export const expenses = pgTable("expenses", {
   amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
   expenseDate: date("expense_date").notNull(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+  },
+  (table) => ({
+    // Slice Z — same pattern as budget_items above (routes/budget.ts).
+    projectIdx: index("expenses_project_idx").on(table.projectId),
+  }),
+);
 
-export const tasks = pgTable("tasks", {
+export const tasks = pgTable(
+  "tasks",
+  {
   id: uuid("id").primaryKey().defaultRandom(),
   projectId: uuid("project_id")
     .notNull()
@@ -221,14 +249,21 @@ export const tasks = pgTable("tasks", {
   dueDate: date("due_date"),
   status: taskStatusEnum("status").notNull().default("todo"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+  },
+  (table) => ({
+    // Slice Z — routes/tasks.ts filters its list route by projectId alone.
+    projectIdx: index("tasks_project_idx").on(table.projectId),
+  }),
+);
 
 // Renovation scope changes constantly — this is the #1 workflow gap this
 // product exists to close. Approving a change order shifts the project's
 // LEGACY budgetTotal by amountDelta (see the route handler) — this is the
 // one sanctioned writer of that field, kept exactly as it was; it does not
 // touch Contract, BOQ, or BudgetItems (see docs/MIDAD_FINANCIAL_MODEL.md).
-export const changeOrders = pgTable("change_orders", {
+export const changeOrders = pgTable(
+  "change_orders",
+  {
   id: uuid("id").primaryKey().defaultRandom(),
   projectId: uuid("project_id")
     .notNull()
@@ -238,11 +273,19 @@ export const changeOrders = pgTable("change_orders", {
   amountDelta: numeric("amount_delta", { precision: 12, scale: 2 }).notNull(),
   status: changeOrderStatusEnum("status").notNull().default("pending"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+  },
+  (table) => ({
+    // Slice Z — routes/changeOrders.ts filters its list route by projectId
+    // alone.
+    projectIdx: index("change_orders_project_idx").on(table.projectId),
+  }),
+);
 
 // The single most-cited strength of the market leader (Buildertrend) is its
 // site activity / daily log feature — this is the lightweight MVP version.
-export const dailyLogs = pgTable("daily_logs", {
+export const dailyLogs = pgTable(
+  "daily_logs",
+  {
   id: uuid("id").primaryKey().defaultRandom(),
   projectId: uuid("project_id")
     .notNull()
@@ -250,7 +293,13 @@ export const dailyLogs = pgTable("daily_logs", {
   note: text("note").notNull(),
   logDate: date("log_date").notNull(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+  },
+  (table) => ({
+    // Slice Z — routes/dailyLogs.ts filters its list route by projectId
+    // alone.
+    projectIdx: index("daily_logs_project_idx").on(table.projectId),
+  }),
+);
 
 // Reset flows never leak whether an email exists — the route always answers
 // the same way. Only a hash of the token is stored, so a DB leak alone can't
@@ -268,7 +317,9 @@ export const passwordResetTokens = pgTable("password_reset_tokens", {
 
 // One company can have several users (owner + members) — an invite is how a
 // second person joins an existing company instead of creating a new one.
-export const companyInvites = pgTable("company_invites", {
+export const companyInvites = pgTable(
+  "company_invites",
+  {
   id: uuid("id").primaryKey().defaultRandom(),
   companyId: uuid("company_id")
     .notNull()
@@ -279,12 +330,19 @@ export const companyInvites = pgTable("company_invites", {
   expiresAt: timestamp("expires_at").notNull(),
   acceptedAt: timestamp("accepted_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+  },
+  (table) => ({
+    // Slice Z — routes/company.ts's GET /invites filters by companyId.
+    companyIdx: index("company_invites_company_idx").on(table.companyId),
+  }),
+);
 
 // A quote precedes a project — it's the estimate a contractor sends before
 // work (and money) starts. publicToken lets the client view/accept it
 // without an account, which is the whole point of a client-facing quote.
-export const quotes = pgTable("quotes", {
+export const quotes = pgTable(
+  "quotes",
+  {
   id: uuid("id").primaryKey().defaultRandom(),
   companyId: uuid("company_id")
     .notNull()
@@ -308,7 +366,13 @@ export const quotes = pgTable("quotes", {
   acceptedByName: text("accepted_by_name"),
   acceptedAt: timestamp("accepted_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+  },
+  (table) => ({
+    // Slice Z — routes/quotes.ts's company-wide GET / filters by
+    // companyId alone.
+    companyIdx: index("quotes_company_idx").on(table.companyId),
+  }),
+);
 
 export const quoteItems = pgTable("quote_items", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -324,7 +388,9 @@ export const quoteItems = pgTable("quote_items", {
 // either way it carries its own frozen snapshot of the tax rate, so a later
 // change to the company's default rate never rewrites an already-issued
 // invoice (a hard requirement everywhere VAT/tax invoices are regulated).
-export const invoices = pgTable("invoices", {
+export const invoices = pgTable(
+  "invoices",
+  {
   id: uuid("id").primaryKey().defaultRandom(),
   companyId: uuid("company_id")
     .notNull()
@@ -362,7 +428,16 @@ export const invoices = pgTable("invoices", {
   dueDate: date("due_date"),
   paidAt: timestamp("paid_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+  },
+  (table) => ({
+    // Slice Z — composite, not two separate indexes: routes/invoices.ts's
+    // company-wide GET / filters by companyId alone (uses the leading
+    // column), while the project-scoped GET (projectInvoicesRouter) filters
+    // by companyId AND projectId together — one composite index serves
+    // both query shapes.
+    companyProjectIdx: index("invoices_company_project_idx").on(table.companyId, table.projectId),
+  }),
+);
 
 export const invoiceItems = pgTable("invoice_items", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -693,7 +768,9 @@ export const costCodeCategoryEnum = pgEnum("cost_code_category", [
   "other",
 ]);
 
-export const costCodes = pgTable("cost_codes", {
+export const costCodes = pgTable(
+  "cost_codes",
+  {
   id: uuid("id").primaryKey().defaultRandom(),
   companyId: uuid("company_id")
     .notNull()
@@ -704,7 +781,14 @@ export const costCodes = pgTable("cost_codes", {
   category: costCodeCategoryEnum("category"),
   parentCostCodeId: uuid("parent_cost_code_id").references((): AnyPgColumn => costCodes.id),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+  },
+  (table) => ({
+    // Slice Z — routes/costCodes.ts's list route always filters by
+    // companyId (projectId is an optional additional filter on top of it,
+    // never used alone) — see the route's own where clause.
+    companyIdx: index("cost_codes_company_idx").on(table.companyId),
+  }),
+);
 
 // --- Contracts ---
 // Organization -> Project -> Contract, exactly as approved. contractType
@@ -722,7 +806,9 @@ export const costCodes = pgTable("cost_codes", {
 export const contractTypeEnum = pgEnum("contract_type", ["main", "amendment"]);
 export const contractStatusEnum = pgEnum("contract_status", ["draft", "active", "completed", "terminated"]);
 
-export const contracts = pgTable("contracts", {
+export const contracts = pgTable(
+  "contracts",
+  {
   id: uuid("id").primaryKey().defaultRandom(),
   companyId: uuid("company_id")
     .notNull()
@@ -748,7 +834,14 @@ export const contracts = pgTable("contracts", {
     .references(() => users.id),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+  },
+  (table) => ({
+    // Slice Z — routes/contracts.ts's list route filters by projectId
+    // alone (companyId is validated once against the parent project
+    // before this query runs).
+    projectIdx: index("contracts_project_idx").on(table.projectId),
+  }),
+);
 
 // --- BOQ ---
 // Versioned exactly like compliance_rule_versions: a revision is immutable
@@ -761,7 +854,9 @@ export const contracts = pgTable("contracts", {
 export const boqRevisionStatusEnum = pgEnum("boq_revision_status", ["draft", "published", "superseded"]);
 export const boqItemTypeEnum = pgEnum("boq_item_type", ["section", "item"]);
 
-export const boqRevisions = pgTable("boq_revisions", {
+export const boqRevisions = pgTable(
+  "boq_revisions",
+  {
   id: uuid("id").primaryKey().defaultRandom(),
   companyId: uuid("company_id")
     .notNull()
@@ -781,7 +876,12 @@ export const boqRevisions = pgTable("boq_revisions", {
     .references(() => users.id),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   publishedAt: timestamp("published_at"),
-});
+  },
+  (table) => ({
+    // Slice Z — routes/boq.ts's list route filters by projectId alone.
+    projectIdx: index("boq_revisions_project_idx").on(table.projectId),
+  }),
+);
 
 export const boqItems = pgTable("boq_items", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -819,7 +919,9 @@ export const boqItems = pgTable("boq_items", {
 // Phase 1 plan's risk posture explicitly steered away from touching.
 export const budgetRevisionStatusEnum = pgEnum("budget_revision_status", ["draft", "approved", "superseded"]);
 
-export const budgetRevisions = pgTable("budget_revisions", {
+export const budgetRevisions = pgTable(
+  "budget_revisions",
+  {
   id: uuid("id").primaryKey().defaultRandom(),
   companyId: uuid("company_id")
     .notNull()
@@ -836,7 +938,13 @@ export const budgetRevisions = pgTable("budget_revisions", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
   approvedBy: uuid("approved_by").references(() => users.id),
   approvedAt: timestamp("approved_at"),
-});
+  },
+  (table) => ({
+    // Slice Z — routes/budgetRevisions.ts's list route filters by
+    // projectId alone.
+    projectIdx: index("budget_revisions_project_idx").on(table.projectId),
+  }),
+);
 
 // --- Canonical audit trail ---
 // One audit-event model for the whole product going forward, per the
@@ -851,7 +959,9 @@ export const budgetRevisions = pgTable("budget_revisions", {
 // domain — this is intentionally NOT event-sourcing (no replay, no event
 // stream is the source of truth for current state; current state always
 // lives in its own table, this is only the trail of who-changed-what-when).
-export const auditEvents = pgTable("audit_events", {
+export const auditEvents = pgTable(
+  "audit_events",
+  {
   id: uuid("id").primaryKey().defaultRandom(),
   companyId: uuid("company_id")
     .notNull()
@@ -872,7 +982,13 @@ export const auditEvents = pgTable("audit_events", {
   // table's fixed column set.
   metadata: jsonb("metadata"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+  },
+  (table) => ({
+    // Slice Z — every audit-event read path (routes/auditEvents.ts,
+    // lib/audit.ts's listCompanyActivity) filters by companyId first.
+    companyIdx: index("audit_events_company_idx").on(table.companyId),
+  }),
+);
 
 // --- Evidence / file metadata ---
 // Metadata only — never the file bytes themselves (per the approved
@@ -886,7 +1002,9 @@ export const auditEvents = pgTable("audit_events", {
 // existing row, so historical evidence is never silently replaced.
 export const storageProviderEnum = pgEnum("storage_provider", ["local"]);
 
-export const files = pgTable("files", {
+export const files = pgTable(
+  "files",
+  {
   id: uuid("id").primaryKey().defaultRandom(),
   companyId: uuid("company_id")
     .notNull()
@@ -905,7 +1023,14 @@ export const files = pgTable("files", {
   entityId: uuid("entity_id").notNull(),
   version: integer("version").notNull().default(1),
   previousVersionId: uuid("previous_version_id").references((): AnyPgColumn => files.id),
-});
+  },
+  (table) => ({
+    // Slice Z — routes/documents.ts's list route filters by companyId
+    // (and entityType/entityId) — companyId is the leading, most-selective
+    // filter every document-access path checks first.
+    companyIdx: index("files_company_idx").on(table.companyId),
+  }),
+);
 
 export const costCodesRelations = relations(costCodes, ({ one, many }) => ({
   company: one(companies, { fields: [costCodes.companyId], references: [companies.id] }),
@@ -978,7 +1103,9 @@ export const filesRelations = relations(files, ({ one }) => ({
 export const supplierTypeEnum = pgEnum("supplier_type", ["supplier", "subcontractor"]);
 export const supplierStatusEnum = pgEnum("supplier_status", ["active", "inactive"]);
 
-export const suppliers = pgTable("suppliers", {
+export const suppliers = pgTable(
+  "suppliers",
+  {
   id: uuid("id").primaryKey().defaultRandom(),
   companyId: uuid("company_id")
     .notNull()
@@ -995,7 +1122,12 @@ export const suppliers = pgTable("suppliers", {
     .references(() => users.id),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+  },
+  (table) => ({
+    // Slice Z — routes/suppliers.ts's list route filters by companyId.
+    companyIdx: index("suppliers_company_idx").on(table.companyId),
+  }),
+);
 
 // --- Commitments ---
 // A Purchase Order or Subcontract — a binding commercial obligation to a
@@ -1031,7 +1163,9 @@ export const commitmentStatusEnum = pgEnum("commitment_status", [
   "cancelled",
 ]);
 
-export const commitments = pgTable("commitments", {
+export const commitments = pgTable(
+  "commitments",
+  {
   id: uuid("id").primaryKey().defaultRandom(),
   companyId: uuid("company_id")
     .notNull()
@@ -1074,7 +1208,13 @@ export const commitments = pgTable("commitments", {
   approvedBy: uuid("approved_by").references(() => users.id),
   approvedAt: timestamp("approved_at"),
   cancelledAt: timestamp("cancelled_at"),
-});
+  },
+  (table) => ({
+    // Slice Z — routes/commitments.ts's list route filters by projectId
+    // alone.
+    projectIdx: index("commitments_project_idx").on(table.projectId),
+  }),
+);
 
 // --- Commitment Lines ---
 // companyId is carried directly here too (not only reachable via
@@ -1123,7 +1263,9 @@ export const suppliersRelations = relations(suppliers, ({ one, many }) => ({
 // leaves the tested Invoice/Quote routes untouched).
 export const customerStatusEnum = pgEnum("customer_status", ["active", "inactive"]);
 
-export const customers = pgTable("customers", {
+export const customers = pgTable(
+  "customers",
+  {
   id: uuid("id").primaryKey().defaultRandom(),
   companyId: uuid("company_id")
     .notNull()
@@ -1141,7 +1283,12 @@ export const customers = pgTable("customers", {
     .references(() => users.id),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+  },
+  (table) => ({
+    // Slice Z — routes/customers.ts's list route filters by companyId.
+    companyIdx: index("customers_company_idx").on(table.companyId),
+  }),
+);
 
 export const customersRelations = relations(customers, ({ one, many }) => ({
   company: one(companies, { fields: [customers.companyId], references: [companies.id] }),
@@ -1186,7 +1333,9 @@ export const commitmentLinesRelations = relations(commitmentLines, ({ one }) => 
 
 export const measurementStatusEnum = pgEnum("measurement_status", ["draft", "submitted", "approved", "rejected"]);
 
-export const measurements = pgTable("measurements", {
+export const measurements = pgTable(
+  "measurements",
+  {
   id: uuid("id").primaryKey().defaultRandom(),
   companyId: uuid("company_id")
     .notNull()
@@ -1218,7 +1367,13 @@ export const measurements = pgTable("measurements", {
   rejectedBy: uuid("rejected_by").references(() => users.id),
   rejectedAt: timestamp("rejected_at"),
   rejectionReason: text("rejection_reason"),
-});
+  },
+  (table) => ({
+    // Slice Z — routes/measurements.ts's list route filters by projectId
+    // alone.
+    projectIdx: index("measurements_project_idx").on(table.projectId),
+  }),
+);
 
 export const measurementLines = pgTable("measurement_lines", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -1277,7 +1432,9 @@ export const measurementLinesRelations = relations(measurementLines, ({ one }) =
 
 export const ipcStatusEnum = pgEnum("ipc_status", ["draft", "submitted", "approved", "certified", "rejected"]);
 
-export const ipcs = pgTable("ipcs", {
+export const ipcs = pgTable(
+  "ipcs",
+  {
   id: uuid("id").primaryKey().defaultRandom(),
   companyId: uuid("company_id")
     .notNull()
@@ -1336,7 +1493,12 @@ export const ipcs = pgTable("ipcs", {
   rejectedBy: uuid("rejected_by").references(() => users.id),
   rejectedAt: timestamp("rejected_at"),
   rejectionReason: text("rejection_reason"),
-});
+  },
+  (table) => ({
+    // Slice Z — routes/ipcs.ts's list route filters by projectId alone.
+    projectIdx: index("ipcs_project_idx").on(table.projectId),
+  }),
+);
 
 export const ipcLines = pgTable("ipc_lines", {
   id: uuid("id").primaryKey().defaultRandom(),

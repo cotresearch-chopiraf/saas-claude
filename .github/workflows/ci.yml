@@ -56,5 +56,13 @@ jobs:
       - name: Test (server)
         run: npm test --workspace server
 
+      - name: Test (client)
+        # Slice Z — the client test suite (component/integration tests via
+        # React Testing Library + jsdom) existed and passed locally but was
+        # never actually executed in CI before this; it needs no database
+        # or running server (every test mocks apiFetch directly), so no
+        # extra env/service setup beyond what's already configured above.
+        run: npm test --workspace client
+
       - name: Build
         run: npm run build

@@ -1,0 +1,20 @@
+CREATE INDEX IF NOT EXISTS "audit_events_company_idx" ON "audit_events" USING btree ("company_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "boq_revisions_project_idx" ON "boq_revisions" USING btree ("project_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "budget_items_project_idx" ON "budget_items" USING btree ("project_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "budget_revisions_project_idx" ON "budget_revisions" USING btree ("project_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "change_orders_project_idx" ON "change_orders" USING btree ("project_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "commitments_project_idx" ON "commitments" USING btree ("project_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "company_invites_company_idx" ON "company_invites" USING btree ("company_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "contracts_project_idx" ON "contracts" USING btree ("project_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "cost_codes_company_idx" ON "cost_codes" USING btree ("company_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "customers_company_idx" ON "customers" USING btree ("company_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "daily_logs_project_idx" ON "daily_logs" USING btree ("project_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "expenses_project_idx" ON "expenses" USING btree ("project_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "files_company_idx" ON "files" USING btree ("company_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "invoices_company_project_idx" ON "invoices" USING btree ("company_id","project_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "ipcs_project_idx" ON "ipcs" USING btree ("project_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "measurements_project_idx" ON "measurements" USING btree ("project_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "projects_company_idx" ON "projects" USING btree ("company_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "quotes_company_idx" ON "quotes" USING btree ("company_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "suppliers_company_idx" ON "suppliers" USING btree ("company_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "tasks_project_idx" ON "tasks" USING btree ("project_id");
