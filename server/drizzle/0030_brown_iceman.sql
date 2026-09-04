@@ -1,0 +1,1 @@
+ALTER TABLE "zatca_submissions" ADD COLUMN "cleared_document_xml_base64" text;

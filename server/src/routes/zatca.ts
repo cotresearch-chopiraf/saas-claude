@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { db } from "../db/client.js";
+import type { zatcaSubmissionStateEnum } from "../db/schema.js";
 import { requirePermission } from "../lib/permissions.js";
 import { recordAuditEvent } from "../lib/audit.js";
 import { logger } from "../lib/logger.js";
@@ -20,6 +21,7 @@ import {
   findSubmissionForInvoice,
   createSubmission,
   recordSubmissionOutcome,
+  claimSubmissionForSubmit,
   findOwnedInvoiceWithItems,
   computeOnboardingStatus,
   claimNextIcv,
@@ -850,35 +852,55 @@ zatcaRouter.post(
   },
 );
 
-// Submission states meaning "already in flight or already has a real
-// ZATCA outcome" — /submit is idempotent and refuses to re-attempt any of
-// these, so a duplicate click can never create a second real submission.
-const SUBMISSION_INFLIGHT_OR_DONE_STATES = new Set(["submitting", "submitted", "cleared", "reported", "compliance_pending"]);
+// Submission states meaning "already in flight, already has a real ZATCA
+// outcome, or ZATCA already made a final business decision on this exact
+// document" — /submit is idempotent and refuses to re-attempt any of
+// these, so a duplicate click (or a genuinely concurrent request — see the
+// atomic claim below) can never create a second real submission. "rejected"
+// joins this set in Slice AB: a NOT_CLEARED/NOT_REPORTED outcome is a
+// deterministic business rejection of this exact document (same UUID/ICV/
+// hash every retry would produce), and this codebase's own retry-policy
+// rule is never to blindly retry one of those — see errors.ts's
+// ZatcaValidationError comment. "compliance_failed" and "retry_required"
+// deliberately stay OUT of this set: both remain legitimately resubmittable
+// (a configuration fix, a transient network/provider failure that clears
+// up), exactly as this route's existing retry behavior already worked
+// before this slice.
+const SUBMISSION_TERMINAL_OR_INFLIGHT_STATES: (typeof zatcaSubmissionStateEnum.enumValues)[number][] = [
+  "submitting",
+  "submitted",
+  "cleared",
+  "reported",
+  "rejected",
+  "compliance_pending",
+];
 
 // POST /api/zatca/submissions/:id/submit (Slice 4; real signer wired in
-// Slice 5 continuation) — the real Simulation submission attempt.
-// Regenerates the exact same XML that was hashed at /prepare time (see
-// documentBuilder.ts's issueTime comment) and refuses to proceed if it no
-// longer matches the persisted documentHash (the underlying invoice or
-// identity changed since prepare). Then requires a real signature via
-// lib/zatca/signer/ (XadesZatcaSigner — real XAdES signing, but still
-// fails honestly with a configuration error today because no EGS unit's
-// credential carries a private key yet: that only exists once CSR/CSID
-// onboarding, task #51, issues one) before any provider call: this route
-// never sends unsigned XML to ZATCA and never fabricates a submitted
-// state. The outcome (success or failure) is always persisted exactly as
-// derived from a real error/response, never guessed. The provider call
-// itself (clearInvoice for "standard"/B2B, reportInvoice for
-// "simplified"/B2C — see lib/zatca/provider/) is intentionally still not
-// wired in here: local signature verification (task #49) must run and
-// pass BEFORE any signed document is ever sent to ZATCA, and that
-// verification step does not exist yet — wiring the provider call ahead
-// of it would risk submitting an unverified signature.
+// Slice 5 continuation; real ZATCA provider call wired in Slice AB) — the
+// real submission attempt, Simulation or Production depending on this
+// EGS unit's own environment. Regenerates the exact same XML that was
+// hashed at /prepare time (see documentBuilder.ts's issueTime comment) and
+// refuses to proceed if it no longer matches the persisted documentHash
+// (the underlying invoice or identity changed since prepare). Requires a
+// real signature via lib/zatca/signer/ (XadesZatcaSigner) and a real local
+// (offline) signature verification pass — task #49 — BEFORE any signed
+// document is ever sent to ZATCA: this route never sends unsigned or
+// locally-unverified XML to ZATCA. Only then does it call the real
+// provider: clearInvoice for "standard" (B2B) documents, reportInvoice for
+// "simplified" (B2C) — the routing rule already established by
+// documentBuilder.ts's own subtype derivation, not invented here. The
+// outcome (cleared/reported/rejected on a real response, retry_required/
+// compliance_failed on a real error) is always persisted exactly as
+// derived, never guessed, and this route's own response never claims more
+// than the provider's response itself states — see Scope 24's own
+// no-compliance-inference rule: "cleared"/"reported" here means exactly
+// what ZATCA's own clearanceStatus/reportingStatus field said, nothing
+// about ZATCA-wide compliance completion.
 zatcaRouter.post("/submissions/:id/submit", requireSubmit, async (req: Request<{ id: string }>, res: Response) => {
   const submission = await getSubmission(req.companyId!, req.params.id);
   if (!submission) return res.status(404).json({ error: "غير موجود" });
 
-  if (SUBMISSION_INFLIGHT_OR_DONE_STATES.has(submission.state)) {
+  if (SUBMISSION_TERMINAL_OR_INFLIGHT_STATES.includes(submission.state)) {
     return res.json({ submission, alreadyAttempted: true });
   }
 
@@ -928,12 +950,22 @@ zatcaRouter.post("/submissions/:id/submit", requireSubmit, async (req: Request<{
     return res.status(409).json({ error: "المستند لم يعد مطابقاً لما تم تحضيره", submission: mismatched });
   }
 
-  await recordSubmissionOutcome(req.companyId!, submission.id, { state: "submitting", submittedAt: new Date() });
+  // Slice AB Scope F — the atomic claim: only THIS request's UPDATE, if it
+  // actually matches a non-terminal/non-in-flight row, may proceed to sign
+  // and call the real ZATCA provider. A genuinely concurrent second /submit
+  // request for the same submission finds 0 rows here (the first request's
+  // UPDATE already moved the state to "submitting" and committed), so it
+  // can never also sign and call the provider — closing the exact
+  // check-then-act race the old unconditional write above had. See
+  // domain/submissions.ts's claimSubmissionForSubmit for why this is a
+  // conditional UPDATE, never a SELECT-then-UPDATE.
+  const claimed = await claimSubmissionForSubmit(req.companyId!, submission.id, SUBMISSION_TERMINAL_OR_INFLIGHT_STATES);
+  if (!claimed) {
+    const current = await getSubmission(req.companyId!, submission.id);
+    return res.json({ submission: current ?? submission, alreadyAttempted: true });
+  }
 
   try {
-    // Fails today for every EGS unit that exists in this codebase (no
-    // credential carries a private key until CSR/CSID onboarding — task
-    // #51 — issues one) — see xadesZatcaSigner.ts.
     const signResult = await getZatcaSigner().sign({ canonicalXml: xml, credential });
 
     // Slice 5 continuation, task #49 — local (offline) verification MUST
@@ -948,25 +980,53 @@ zatcaRouter.post("/submissions/:id/submit", requireSubmit, async (req: Request<{
       );
     }
 
-    // Local verification passed — this is real, cryptographically valid
-    // signing, further than this codebase has ever gotten. The provider
-    // call itself (clearInvoice/reportInvoice) is intentionally still not
-    // wired in: no EGS unit's credential in this codebase carries a
-    // private key today (that requires real CSID onboarding — task #51,
-    // not yet built), so this code path is not exercised by any test
-    // that runs against this repository's actual routes/domain layer —
-    // only by xadesZatcaSigner.ts/verify.ts's own unit tests, which
-    // supply a locally-generated test credential directly. Wiring the
-    // provider call here ahead of task #51 would be dead code no
-    // integration test could actually exercise honestly.
-    throw new ZatcaError(
-      "internal",
-      "التوقيع صالح محلياً لكن الاتصال الفعلي بـ ZATCA غير مُفعّل بعد (يتطلب إصدار شهادة CSID حقيقية)",
-    );
+    // Local verification passed — real signing, real ZATCA provider call.
+    // Slice AB — the routing rule (standard/B2B -> clearance, simplified/
+    // B2C -> reporting) is documentBuilder.ts's own established subtype
+    // derivation, not decided here; this route only reads submission.subtype,
+    // which was frozen at /prepare time from that same derivation.
+    const provider = getZatcaProvider(unit.environment as "simulation" | "production");
+    const submissionInput = { invoiceXmlBase64: Buffer.from(signResult.signedXml, "utf8").toString("base64"), invoiceHashBase64: documentHash, uuid: submission.zatcaUuid };
+    const result =
+      submission.subtype === "standard"
+        ? await provider.clearInvoice(credential, submissionInput)
+        : await provider.reportInvoice(credential, submissionInput);
+
+    // Never claims more than ZATCA's own response says: result.status is
+    // exactly "cleared" | "reported" | "rejected" here (clearInvoice/
+    // reportInvoice never return "compliance_pending" — see
+    // fatooraProvider.ts's normalizers), and this is a real ZATCA business
+    // outcome, not a MIDAD interpretation of one — see Scope 24's own
+    // no-compliance-inference rule referenced in this route's file comment.
+    const responded = await recordSubmissionOutcome(req.companyId!, submission.id, {
+      state: result.status,
+      zatcaStatus: result.rawStatus ?? null,
+      correlationId: result.correlationId ?? null,
+      warnings: result.warnings ?? null,
+      clearedDocumentXmlBase64: result.clearedInvoiceXmlBase64 ?? null,
+      respondedAt: result.respondedAt,
+    });
+    await recordAuditEvent(db, {
+      companyId: req.companyId!,
+      actorUserId: req.userId!,
+      action: "zatca.submission.responseReceived",
+      entityType: "zatca_submission",
+      entityId: submission.id,
+      afterValue: { state: result.status, rawStatus: result.rawStatus ?? null, correlationId: result.correlationId ?? null },
+    });
+    logger.info("zatca_submission_response_received", { companyId: req.companyId, submissionId: submission.id, state: result.status });
+    return res.json({ submission: responded, alreadyAttempted: false });
   } catch (err) {
     if (err instanceof ZatcaError) {
+      // Slice AB — err.retryable (see errors.ts) decides the persisted
+      // state: a transient failure (network/timeout/rate-limited/an
+      // unreadable ZATCA response) lands on "retry_required" so the
+      // existing retry affordance (this same route, called again) is the
+      // correct next step; a non-retryable failure (bad credential, this
+      // tenant's own configuration, a malformed request) lands on
+      // "compliance_failed", unchanged from this route's prior behavior.
       const failed = await recordSubmissionOutcome(req.companyId!, submission.id, {
-        state: "compliance_failed",
+        state: err.retryable ? "retry_required" : "compliance_failed",
         zatcaErrorCode: err.category,
         zatcaErrorMessage: err.message,
         respondedAt: new Date(),
@@ -978,7 +1038,7 @@ zatcaRouter.post("/submissions/:id/submit", requireSubmit, async (req: Request<{
         action: "zatca.submission.failed",
         entityType: "zatca_submission",
         entityId: submission.id,
-        afterValue: { category: err.category, message: err.message },
+        afterValue: { category: err.category, message: err.message, retryable: err.retryable },
       });
       logger.warn("zatca_submission_failed", { companyId: req.companyId, submissionId: submission.id, category: err.category });
       return res.status(httpStatusForZatcaError(err)).json({ error: err.message, category: err.category, submission: failed });

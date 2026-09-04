@@ -7,7 +7,7 @@
 // giving a clear application-level error instead of a raw Postgres
 // constraint-violation message, not the source of truth for the invariant.
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, notInArray } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { db } from "../../../db/client.js";
 import {
@@ -131,6 +131,15 @@ export interface SubmissionOutcomeInput {
   zatcaErrorMessage?: string | null;
   requestId?: string | null;
   correlationId?: string | null;
+  // Slice AB — the provider's own diagnostic payload (e.g. Reporting/
+  // Clearance validationResults), stored verbatim for operational
+  // troubleshooting. Never secret material — see fatooraProvider.ts's
+  // normalizers for exactly what this can contain.
+  warnings?: unknown;
+  // Slice AB — only ever set on a genuine "cleared" outcome (see
+  // schema.ts's column comment). Omitted (left unchanged) on every other
+  // call, matching zatcaStatus's own "?? existing" fallback below.
+  clearedDocumentXmlBase64?: string | null;
   submittedAt?: Date;
   respondedAt?: Date;
   incrementRetryCount?: boolean;
@@ -155,6 +164,8 @@ export async function recordSubmissionOutcome(companyId: string, submissionId: s
       zatcaErrorMessage: input.zatcaErrorMessage ?? null,
       requestId: input.requestId ?? existing.requestId,
       correlationId: input.correlationId ?? existing.correlationId,
+      warnings: input.warnings ?? existing.warnings,
+      clearedDocumentXmlBase64: input.clearedDocumentXmlBase64 ?? existing.clearedDocumentXmlBase64,
       submittedAt: input.submittedAt ?? existing.submittedAt,
       respondedAt: input.respondedAt ?? existing.respondedAt,
       retryCount: input.incrementRetryCount ? existing.retryCount + 1 : existing.retryCount,
@@ -163,6 +174,36 @@ export async function recordSubmissionOutcome(companyId: string, submissionId: s
     .where(and(eq(zatcaSubmissions.id, submissionId), eq(zatcaSubmissions.companyId, companyId)))
     .returning();
   return updated;
+}
+
+// Slice AB Scope F — atomic claim: only succeeds if the submission's
+// state is not already one of the caller-supplied terminal/in-flight
+// states, closing the check-then-act race two concurrent /submit requests
+// would otherwise hit (both reading "ready_for_submission" before either
+// had written "submitting", then both proceeding to sign and call the
+// real ZATCA provider). Mirrors the same conditional-UPDATE pattern
+// already proven in routes/changeOrders.ts's decision route and Slice AA's
+// quote/invoice race hardening — never a SELECT-then-UPDATE. Returns
+// undefined if no row matched (already claimed by a concurrent request, or
+// already in a terminal state) — the caller never distinguishes those two
+// cases, same as every other tenant-scoped domain function here.
+export async function claimSubmissionForSubmit(
+  companyId: string,
+  submissionId: string,
+  excludedStates: (typeof zatcaSubmissionStateEnum.enumValues)[number][],
+) {
+  const [claimed] = await db
+    .update(zatcaSubmissions)
+    .set({ state: "submitting", submittedAt: new Date(), updatedAt: new Date() })
+    .where(
+      and(
+        eq(zatcaSubmissions.id, submissionId),
+        eq(zatcaSubmissions.companyId, companyId),
+        notInArray(zatcaSubmissions.state, excludedStates),
+      ),
+    )
+    .returning();
+  return claimed;
 }
 
 // Slice 4 — company-wide submission history (the tenant UI's History tab),

@@ -340,14 +340,18 @@ function SimulationCard({ simulationUnits, onChanged }: { simulationUnits: Zatca
       )}
 
       {submitOutcome && (
-        <div className="mt-3 rounded-md bg-warning-100 p-3 text-xs text-warning-700">
+        <div
+          className={`mt-3 rounded-md p-3 text-xs ${
+            submitOutcome.error ? "bg-warning-100 text-warning-700" : submissionOutcomePanelClasses[submissionStateTone(submitOutcome.state ?? "")]
+          }`}
+        >
           {submitOutcome.error ? (
             <>
               <p className="font-medium">لم يتم الإرسال إلى ZATCA فعلياً.</p>
               <p className="mt-1">{submitOutcome.error}</p>
             </>
           ) : (
-            <p>حالة المستند الآن: {submitOutcome.state}</p>
+            <p>حالة المستند الآن: {submissionStateLabel[submitOutcome.state ?? ""] ?? submitOutcome.state}</p>
           )}
         </div>
       )}
@@ -368,6 +372,23 @@ const submissionStateLabel: Record<string, string> = {
   retry_required: "بحاجة لإعادة محاولة",
   compliance_pending: "بانتظار فحص الامتثال",
   compliance_failed: "فشل الإرسال",
+};
+
+// Slice AB — shared by the History card's badges and SimulationCard's own
+// submit-outcome panel, so a real "cleared"/"reported" result is never
+// styled the same as a failure just because it flows through the same
+// generic panel. "cleared"/"reported" here means exactly what ZATCA's own
+// response field said — never a claim about ZATCA-wide compliance.
+function submissionStateTone(state: string): "neutral" | "success" | "danger" {
+  if (state === "compliance_failed" || state === "rejected") return "danger";
+  if (state === "cleared" || state === "reported") return "success";
+  return "neutral";
+}
+
+const submissionOutcomePanelClasses: Record<"neutral" | "success" | "danger", string> = {
+  neutral: "bg-stone-100 text-stone-600",
+  success: "bg-success-100 text-success-700",
+  danger: "bg-danger-100 text-danger-700",
 };
 
 // Remounted (via a changing `key`) by the parent's load() on every
@@ -400,9 +421,7 @@ function HistoryCard() {
             <div key={s.id} className="rounded-lg border border-stone-200 p-3 text-sm">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="font-medium text-stone-800">ICV #{s.icv} · {s.environment === "production" ? "إنتاج" : "محاكاة"}</span>
-                <Badge tone={s.state === "compliance_failed" || s.state === "rejected" ? "danger" : s.state === "cleared" || s.state === "reported" ? "success" : "neutral"}>
-                  {submissionStateLabel[s.state] ?? s.state}
-                </Badge>
+                <Badge tone={submissionStateTone(s.state)}>{submissionStateLabel[s.state] ?? s.state}</Badge>
               </div>
               <p className="mt-1 text-xs text-stone-400">{formatDateTime(s.createdAt)} · محاولات: {s.retryCount}</p>
               {s.zatcaErrorMessage && <p className="mt-1 text-xs text-danger-700">{s.zatcaErrorMessage}</p>}

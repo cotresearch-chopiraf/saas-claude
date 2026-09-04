@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1126.0",
+    "@aws-sdk/client-secrets-manager": "^3.1126.0",
     "@peculiar/x509": "^2.0.0",
     "@xmldom/xmldom": "^0.9.12",
     "bcryptjs": "^2.4.3",

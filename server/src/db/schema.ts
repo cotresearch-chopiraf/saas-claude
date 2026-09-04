@@ -2392,6 +2392,14 @@ export const zatcaSubmissions = pgTable(
     warnings: jsonb("warnings"),
     requestId: text("request_id"),
     correlationId: text("correlation_id"),
+    // Slice AB — the ZATCA-signed/stamped invoice XML (base64), returned
+    // only on a genuine "CLEARED" clearInvoice response (see
+    // provider/types.ts's ZatcaSubmissionResult.clearedInvoiceXmlBase64) —
+    // never fabricated, never populated for any other outcome. This is the
+    // tenant's actual legal cleared document; kept on the submission row
+    // (never written to audit_events, which stays free of large blobs) so
+    // GET /api/zatca/submissions/:id can return it.
+    clearedDocumentXmlBase64: text("cleared_document_xml_base64"),
     retryCount: integer("retry_count").notNull().default(0),
     submittedAt: timestamp("submitted_at"),
     respondedAt: timestamp("responded_at"),

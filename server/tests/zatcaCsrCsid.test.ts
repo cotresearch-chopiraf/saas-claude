@@ -1,6 +1,7 @@
 import "reflect-metadata";
-import { describe, it, expect, beforeAll, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterEach, vi } from "vitest";
 import { webcrypto } from "node:crypto";
+import http from "node:http";
 import * as x509 from "@peculiar/x509";
 import request from "supertest";
 import { buildApp } from "../src/app.js";
@@ -387,14 +388,48 @@ describe("POST /api/zatca/egs-units/:id/csid", () => {
     expect(verification.valid).toBe(true);
   });
 
-  it("FULL HTTP STACK: prepare -> submit through the real routes gets past real signing AND local verification, stopping only at the honest provider boundary", async () => {
+  const FATOORA_ENV_KEYS = [
+    "ZATCA_FATOORA_SIMULATION_BASE_URL",
+    "ZATCA_FATOORA_SIMULATION_COMPLIANCE_PATH",
+    "ZATCA_FATOORA_SIMULATION_CLEARANCE_PATH",
+    "ZATCA_FATOORA_SIMULATION_REPORTING_PATH",
+  ];
+  let mockZatcaServer: { close: () => Promise<void> } | undefined;
+
+  afterEach(async () => {
+    if (mockZatcaServer) await mockZatcaServer.close();
+    mockZatcaServer = undefined;
+    for (const key of FATOORA_ENV_KEYS) delete process.env[key];
+  });
+
+  it("FULL HTTP STACK: prepare -> submit through the real routes gets past real signing AND local verification, all the way to a real ZATCA provider outcome (Slice AB)", async () => {
     // The strongest available end-to-end proof: nothing here calls
-    // XadesZatcaSigner or verifyZatcaSignature directly — only real
-    // /api/zatca/* HTTP routes, exactly as a browser client would call
-    // them, using a credential this same flow (CSR -> CSID confirm)
-    // produced. If real signing or real local verification (task #49)
-    // regressed, this test would fail with "configuration" (missing key)
-    // or the local-verification failure message -- never silently pass.
+    // XadesZatcaSigner, verifyZatcaSignature, or FatooraProvider directly —
+    // only real /api/zatca/* HTTP routes, exactly as a browser client would
+    // call them, using a credential this same flow (CSR -> CSID confirm)
+    // produced, submitting against a real local HTTP server standing in
+    // for ZATCA's own Clearance endpoint (never the real ZATCA network —
+    // this environment cannot reach it, and automated tests must never
+    // call real production ZATCA). If real signing, real local
+    // verification (task #49), or the real provider wiring (Slice AB)
+    // regressed, this test would fail well before reaching "cleared".
+    const server = await new Promise<{ url: string; close: () => Promise<void> }>((resolve) => {
+      const s = http.createServer((req, res) => {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ validationResults: { status: "PASS" }, clearanceStatus: "CLEARED", clearedInvoice: "PGE+PC9hPg==" }));
+      });
+      s.listen(0, "127.0.0.1", () => {
+        const address = s.address();
+        const port = typeof address === "object" && address ? address.port : 0;
+        resolve({ url: `http://127.0.0.1:${port}`, close: () => new Promise((r) => s.close(() => r())) });
+      });
+    });
+    mockZatcaServer = server;
+    process.env.ZATCA_FATOORA_SIMULATION_BASE_URL = server.url;
+    process.env.ZATCA_FATOORA_SIMULATION_COMPLIANCE_PATH = "compliance/invoices";
+    process.env.ZATCA_FATOORA_SIMULATION_CLEARANCE_PATH = "invoices/clearance/single";
+    process.env.ZATCA_FATOORA_SIMULATION_REPORTING_PATH = "invoices/reporting/single";
+
     await request(app).patch("/api/zatca/config").set("Authorization", `Bearer ${tokenA}`).send({
       vatNumber: validFields.organizationIdentifier,
       commercialRegistration: "1010101010",
@@ -408,6 +443,8 @@ describe("POST /api/zatca/egs-units/:id/csid", () => {
       .send({ binarySecurityToken: matchingCert, secret: "s3cr3t", stage: "compliance" });
     expect(csidRes.status).toBe(200);
 
+    // clientTaxId present -> subtype "standard" (B2B) -> routed to
+    // clearInvoice, matching the mock server's CLEARED response above.
     const invoiceRes = await request(app)
       .post("/api/invoices")
       .set("Authorization", `Bearer ${tokenA}`)
@@ -418,19 +455,16 @@ describe("POST /api/zatca/egs-units/:id/csid", () => {
       .post(`/api/zatca/egs-units/${egsUnitId}/invoices/${invoiceRes.body.id}/prepare`)
       .set("Authorization", `Bearer ${tokenA}`);
     expect(prepareRes.status).toBe(201);
+    expect(prepareRes.body.submission.subtype).toBe("standard");
 
     const submitRes = await request(app)
       .post(`/api/zatca/submissions/${prepareRes.body.submission.id}/submit`)
       .set("Authorization", `Bearer ${tokenA}`);
 
-    // Never a fabricated success state.
-    expect(["cleared", "reported", "accepted", "submitted"]).not.toContain(submitRes.body.submission?.state);
-    // NOT a configuration failure (that would mean signing itself never
-    // even ran) and NOT not_implemented (the old NotImplementedSigner
-    // behavior) -- the real signer ran, real local verification ran and
-    // passed, and the route stopped only at the documented "provider call
-    // not wired yet" boundary (category "internal").
-    expect(submitRes.body.category).toBe("internal");
-    expect(submitRes.body.error).not.toMatch(/فشل التحقق المحلي/); // "local verification failed" -- must NOT be this
+    expect(submitRes.status).toBe(200);
+    expect(submitRes.body.submission.state).toBe("cleared");
+    expect(submitRes.body.submission.clearedDocumentXmlBase64).toBe("PGE+PC9hPg==");
+    // secret/credential material never leaks into the response.
+    expect(JSON.stringify(submitRes.body)).not.toContain("s3cr3t");
   });
 });

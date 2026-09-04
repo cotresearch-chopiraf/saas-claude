@@ -1,4 +1,5 @@
 import { DevInMemorySecretStore } from "./devSecretStore.js";
+import { AwsSecretsManagerZatcaSecretStore } from "./awsSecretsManagerStore.js";
 import { ZatcaConfigurationError } from "../errors.js";
 import type { ZatcaSecretStore } from "./types.js";
 
@@ -7,6 +8,14 @@ import type { ZatcaSecretStore } from "./types.js";
 // be unresolvable by the next. Swap the implementation constructed here
 // when a real production ZatcaSecretStore exists; nothing else changes.
 let singleton: ZatcaSecretStore | undefined;
+
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) {
+    throw new ZatcaConfigurationError(`ZATCA_SECRET_STORE_PROVIDER=aws-secrets-manager requires ${name} to be set`);
+  }
+  return value;
+}
 
 // Slice 5 — production-safety guard. This codebase has no other NODE_ENV
 // check anywhere (confirmed by a fresh grep before adding this), but the
@@ -36,8 +45,27 @@ export function assertSecretStoreSafeForEnvironment(): void {
   }
 }
 
+// Slice AB Scope A — an explicit ZATCA_SECRET_STORE_PROVIDER=aws-secrets-manager
+// is an informed operator choice, exactly like Slice AA's mailer/storage
+// providers: it bypasses assertSecretStoreSafeForEnvironment() entirely
+// (there is nothing unsafe to guard against — this IS the durable
+// production store the guard exists to demand), and is honored in every
+// NODE_ENV, not just production, so a staging/CI environment can also opt
+// into it deliberately. No explicit provider set falls through to the
+// existing, unchanged guard behavior below.
 export function getZatcaSecretStore(): ZatcaSecretStore {
   if (!singleton) {
+    const explicitProvider = process.env.ZATCA_SECRET_STORE_PROVIDER;
+    if (explicitProvider === "aws-secrets-manager") {
+      singleton = new AwsSecretsManagerZatcaSecretStore({
+        region: requireEnv("ZATCA_SECRETS_MANAGER_REGION"),
+        accessKeyId: requireEnv("ZATCA_SECRETS_MANAGER_ACCESS_KEY_ID"),
+        secretAccessKey: requireEnv("ZATCA_SECRETS_MANAGER_SECRET_ACCESS_KEY"),
+        keyPrefix: process.env.ZATCA_SECRETS_MANAGER_KEY_PREFIX || undefined,
+      });
+      return singleton;
+    }
+
     assertSecretStoreSafeForEnvironment();
     singleton = new DevInMemorySecretStore();
   }
