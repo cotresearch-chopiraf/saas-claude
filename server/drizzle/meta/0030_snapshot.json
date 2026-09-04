@@ -6747,6 +6747,12 @@
             "uuid"
           ]
         }
+      },
+      "checkConstraints": {
+        "zatca_submissions_exactly_one_document_reference": {
+          "name": "zatca_submissions_exactly_one_document_reference",
+          "value": "(\n        (CASE WHEN \"zatca_submissions\".\"invoice_id\" IS NOT NULL THEN 1 ELSE 0 END) +\n        (CASE WHEN \"zatca_submissions\".\"credit_note_id\" IS NOT NULL THEN 1 ELSE 0 END) +\n        (CASE WHEN \"zatca_submissions\".\"debit_note_id\" IS NOT NULL THEN 1 ELSE 0 END)\n      ) = 1"
+        }
       }
     }
   },

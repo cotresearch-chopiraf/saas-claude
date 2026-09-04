@@ -6,6 +6,7 @@ import type {
   ZatcaOnboardingStatusSummary,
   ZatcaPrepareResult,
   ZatcaSubmission,
+  ZatcaSubmissionsPage,
   ZatcaSubmitResult,
   ZatcaVerifyConnectionResult,
 } from "./types";
@@ -75,6 +76,18 @@ export function submitZatcaSubmission(submissionId: string): Promise<ZatcaSubmit
   return apiFetch<ZatcaSubmitResult>(`/zatca/submissions/${submissionId}/submit`, { method: "POST" });
 }
 
-export function listAllZatcaSubmissions(): Promise<ZatcaSubmission[]> {
-  return apiFetch<ZatcaSubmission[]>("/zatca/submissions");
+// AC-08 — paginated; the caller decides how much of the first page it
+// needs (see ZatcaSettings.tsx's HistoryCard, which shows only the most
+// recent submissions and does not need offset/limit controls of its own).
+export interface ListZatcaSubmissionsInput {
+  limit?: number;
+  offset?: number;
+}
+
+export function listAllZatcaSubmissions(input: ListZatcaSubmissionsInput = {}): Promise<ZatcaSubmissionsPage> {
+  const params = new URLSearchParams();
+  if (input.limit !== undefined) params.set("limit", String(input.limit));
+  if (input.offset !== undefined) params.set("offset", String(input.offset));
+  const qs = params.toString();
+  return apiFetch<ZatcaSubmissionsPage>(`/zatca/submissions${qs ? `?${qs}` : ""}`);
 }

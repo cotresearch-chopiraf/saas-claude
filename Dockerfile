@@ -59,6 +59,19 @@ USER app
 WORKDIR /app/server
 EXPOSE 4000
 
+# AC-10 — /ready (not /live) on purpose: plain Docker has one health signal,
+# not Kubernetes's separate liveness/readiness split, and this repo has no
+# Swarm/K8s manifest that would auto-replace an "unhealthy" container on a
+# transient DB blip — the real risk that split exists to avoid. What
+# actually matters here is docker-compose's `depends_on: condition:
+# service_healthy` and any host-level monitoring being able to tell "the
+# process is up but the database it needs is unreachable" apart from a
+# genuinely working container — exactly what /ready's `select 1` check
+# proves and /live (process-only) cannot. No curl/wget is installed in this
+# slim image and none is added for this alone — Node 22 has native fetch.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD node -e "fetch('http://localhost:'+(process.env.PORT||4000)+'/api/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
 # Configuration (DATABASE_URL, JWT_SECRET, PORT, CORS_ORIGIN, and any
 # ZATCA_* variables) is supplied entirely at runtime via environment
 # variables — nothing is baked into this image, and startupConfig.ts fails

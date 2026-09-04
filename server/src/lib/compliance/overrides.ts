@@ -3,6 +3,7 @@ import { db } from "../../db/client.js";
 import { companyComplianceProfiles, companyTaxOverrides, complianceRuleVersions } from "../../db/schema.js";
 import { recordAuditEvent } from "./audit.js";
 import { getRuleAtPath, isOverridableSettingKey } from "./rules.js";
+import { pgErrorInfo } from "../pgError.js";
 import type { ComplianceRules } from "./types.js";
 
 export class ComplianceValidationError extends Error {}
@@ -61,7 +62,9 @@ export async function createOverride(input: CreateOverrideInput) {
     // Postgres reports the partial unique index violation with SQLSTATE
     // 23505 regardless of driver — surfaced here rather than deep inside
     // the transaction so runCreateOverride stays a plain happy-path function.
-    if (err && typeof err === "object" && "code" in err && (err as { code: unknown }).code === UNIQUE_VIOLATION) {
+    // pgErrorInfo() unwraps drizzle-orm's DrizzleQueryError wrapper to reach
+    // the raw `pg` DatabaseError's `code`.
+    if (pgErrorInfo(err).code === UNIQUE_VIOLATION) {
       throw new ComplianceConflictError(
         `a concurrent request already created an active override for "${input.settingKey}" — reload and retry`,
       );

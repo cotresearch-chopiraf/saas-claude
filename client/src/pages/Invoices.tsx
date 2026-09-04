@@ -4,6 +4,8 @@ import { LanguageSelect } from "../components/LanguageSelect";
 import { apiFetch, ApiError, getToken } from "../api/client";
 import { listInvoices } from "../api/invoices";
 import type { DocumentLanguage, Invoice } from "../api/types";
+import { Skeleton } from "../ui/Skeleton";
+import { ErrorState } from "../ui/ErrorState";
 
 // Slice AA Scope G — GET /api/invoices is now paginated server-side (a
 // server-enforced max page size, closing the previous unbounded-query
@@ -40,11 +42,15 @@ async function downloadInvoicePdf(id: string, invoiceNumber: string) {
 }
 
 export function Invoices() {
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [invoices, setInvoices] = useState<Invoice[] | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [disabled, setDisabled] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function load() {
+    setInvoices(null);
+    setError(null);
+    setDisabled(false);
     try {
       const all: Invoice[] = [];
       let offset = 0;
@@ -57,7 +63,15 @@ export function Invoices() {
       }
       setInvoices(all);
     } catch (err) {
-      if (err instanceof ApiError) setDisabled(true);
+      // 403 from this specific route means exactly one thing — invoicing
+      // is off in company settings (see server's invoicesRouter feature
+      // -flag middleware, the only source of a 403 here). Any other
+      // failure (network, 401, 500) is a real error, not that.
+      if (err instanceof ApiError && err.status === 403) {
+        setDisabled(true);
+      } else {
+        setError(err instanceof ApiError ? err.message : "تعذّر تحميل الفواتير");
+      }
     }
   }
   useEffect(() => {
@@ -85,7 +99,7 @@ export function Invoices() {
     );
   }
 
-  const paidInvoices = invoices.filter((inv) => inv.status === "paid");
+  const paidInvoices = (invoices ?? []).filter((inv) => inv.status === "paid");
   const paidTaxTotal = paidInvoices.reduce((sum, inv) => sum + inv.taxAmount, 0);
   const paidRevenueTotal = paidInvoices.reduce((sum, inv) => sum + inv.total, 0);
 
@@ -98,7 +112,10 @@ export function Invoices() {
         </button>
       </div>
 
-      {paidInvoices.length > 0 && (
+      {error && <ErrorState message={error} onRetry={load} />}
+      {!error && invoices === null && <Skeleton rows={3} />}
+
+      {!error && invoices !== null && paidInvoices.length > 0 && (
         <div className="mb-6 grid gap-4 sm:grid-cols-2">
           <div className="rounded-lg border border-stone-200 bg-white p-4">
             <p className="text-xs text-stone-500">إجمالي المُحصَّل (فواتير مُسدَّدة)</p>
@@ -120,6 +137,7 @@ export function Invoices() {
         />
       )}
 
+      {!error && invoices !== null && (
       <ul className="space-y-2">
         {invoices.map((inv) => (
           <li key={inv.id} className="rounded-lg border border-stone-200 bg-white p-4">
@@ -162,6 +180,7 @@ export function Invoices() {
           <li className="rounded-lg border border-dashed border-stone-300 p-8 text-center text-stone-500">لا توجد فواتير بعد</li>
         )}
       </ul>
+      )}
     </Layout>
   );
 }

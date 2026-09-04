@@ -411,7 +411,7 @@ describe("Slice M — Compliance Attempt persistence: Test 7, no zatca_submissio
     await failingServer.close();
 
     const { listSubmissionsForCompany } = await import("../src/lib/zatca/domain/index.js");
-    const submissions = await listSubmissionsForCompany(companyA);
+    const { submissions } = await listSubmissionsForCompany(companyA, { limit: 20, offset: 0 });
     expect(submissions).toHaveLength(0);
   });
 });

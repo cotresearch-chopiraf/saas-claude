@@ -14,5 +14,8 @@
     "db:generate": "npm run db:generate --workspace server",
     "db:migrate": "npm run db:migrate --workspace server",
     "db:seed": "npm run db:seed --workspace server"
+  },
+  "devDependencies": {
+    "drizzle-orm": "0.45.2"
   }
 }

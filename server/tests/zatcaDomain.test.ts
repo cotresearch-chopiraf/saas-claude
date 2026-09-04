@@ -266,8 +266,9 @@ describe("Submissions — exactly-one-document-reference invariant", () => {
   it("DATABASE INVARIANT: the CHECK constraint itself rejects a multi-reference row bypassing the application layer", async () => {
     const unit = await createEgsUnit(companyA, { name: "Raw Insert Unit", environment: "simulation" });
     const invoiceId = await createInvoiceFor(tokenA);
-    await expect(
-      db.insert(zatcaSubmissions).values({
+    let caught: unknown;
+    try {
+      await db.insert(zatcaSubmissions).values({
         companyId: companyA,
         egsUnitId: unit.id,
         invoiceId,
@@ -279,8 +280,17 @@ describe("Submissions — exactly-one-document-reference invariant", () => {
         pih: GENESIS_PREVIOUS_INVOICE_HASH,
         documentHash: computeDocumentHash("x"),
         environment: "simulation",
-      }),
-    ).rejects.toThrow(/zatca_submissions_exactly_one_document_reference/);
+      });
+    } catch (err) {
+      caught = err;
+    }
+    // drizzle-orm wraps the raw pg driver error in a DrizzleQueryError whose
+    // own .message is the failed SQL text; the underlying Postgres error
+    // (with the constraint name) is preserved as .cause.
+    expect(caught).toBeInstanceOf(Error);
+    const pgError = (caught as { cause?: unknown }).cause;
+    expect(pgError).toBeInstanceOf(Error);
+    expect((pgError as Error).message).toMatch(/zatca_submissions_exactly_one_document_reference/);
   });
 
   it("CROSS-TENANT: rejects creating a submission for company A that references company B's invoice", async () => {

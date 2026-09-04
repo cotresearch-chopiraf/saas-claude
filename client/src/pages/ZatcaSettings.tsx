@@ -403,7 +403,7 @@ function HistoryCard() {
     setSubmissions(null);
     setError(null);
     listAllZatcaSubmissions()
-      .then(setSubmissions)
+      .then((page) => setSubmissions(page.submissions))
       .catch((err) => setError(err instanceof ApiError ? err.message : "تعذّر تحميل سجل الإرسالات"));
   }
   useEffect(load, []);

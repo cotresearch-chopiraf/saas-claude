@@ -22,8 +22,10 @@ Nothing below is marked done because it "should" work or because a similar syste
 - [x] Health/ready — `GET /api/health/ready` runs `SELECT 1` against Postgres, live-verified 200.
 - [x] Invoice transaction atomicity — `server/src/routes/invoices.ts POST /` wraps parent insert, audit event, and line-items insert in one `db.transaction`. Proven both by `tests/invoiceQuoteTransactionAtomicity.test.ts` (real DB-level failure, not mocked) and live via real HTTP (a genuine Postgres numeric-overflow error rolls back the parent row — verified count-before/count-after).
 - [x] Quote transaction atomicity — same pattern, `server/src/routes/quotes.ts POST /`. Same dual proof (test + live HTTP).
-- [x] Server tests — 588/588 passing (37 files).
-- [x] Client tests — 249/249 passing (29 files).
+- [x] Graceful shutdown — `server/src/lib/shutdown.ts` stops accepting new HTTP connections then closes the Postgres pool, bounded by a 10s timeout, on both `SIGTERM` and `SIGINT`. Covered by `tests/gracefulShutdown.test.ts`.
+- [x] Database pool bounds — `server/src/db/client.ts`'s `Pool` sets explicit `max` (10), `idleTimeoutMillis` (30s), `connectionTimeoutMillis` (5s), and `statement_timeout` (30s) — node-postgres's own unbounded defaults (in particular an infinite `connectionTimeoutMillis`) are never relied on. Covered by `tests/dbPoolResilience.test.ts`.
+- [x] Server tests — 1126/1126 passing (76 files, Slice AC).
+- [x] Client tests — 262/262 passing (30 files, Slice AC).
 - [x] Typecheck — server and client both clean (`tsc --noEmit`).
 - [x] Build — server and client production builds both clean.
 
@@ -33,7 +35,7 @@ Nothing below is marked done because it "should" work or because a similar syste
 - [x] Security headers confirmed — `helmet({ contentSecurityPolicy: false })` is applied (`server/src/app.ts`); live-verified `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy: no-referrer` present on real responses. CSP is deliberately left off: this server serves no HTML (pure JSON API + PDF/logo binary responses), so a document-level policy has nothing to apply to — forcing one on would be exactly the kind of blind policy this hardening pass was told not to add.
 - [x] Secrets not committed — `server/.env` is gitignored and confirmed untracked (`git ls-files` shows no `.env`); no hardcoded secret found anywhere in `server/src` or `client/src` (grepped in the pre-launch audit).
 - [x] JWT configuration confirmed — `JWT_SECRET` is required (the server throws at startup if unset), 7-day expiry, bcrypt password hashing (cost factor 10). `.env.example` documents `JWT_SECRET=change-me-to-a-long-random-string` as a placeholder that must be replaced before any real deployment.
-- [ ] **Rate limiting confirmed — NOT CONFIGURED / DEFERRED beyond auth.** `authRateLimit` (10 requests/15min/IP) already protects `/api/auth/*` and `/api/platform/auth/*`. A *general* rate limiter across every route was considered and deliberately **not** added this session: doing so safely requires a traffic-policy decision this repository cannot make on its own (what request volume is normal vs. abusive differs per route — a legitimate BOQ import might fire dozens of sequential requests; a scripted attack on `/api/customers` looks identical in shape). Concretely, several existing test files already fire many rapid sequential requests from the same in-process "IP," and a naive general limiter risked turning those into false-positive 429s — exactly the failure mode the task warned against. This is genuine post-launch hardening work, not something to guess at now.
+- [ ] **Rate limiting confirmed — NOT CONFIGURED / DEFERRED beyond auth.** `authRateLimit` (`server/src/middleware/rateLimit.ts`) protects `/api/auth/*` and `/api/platform/auth/*` at 10 requests/15min/IP in every real environment — production and development are never relaxed. (AC-05: the limit is raised to 100/15min/IP *only* when `NODE_ENV=test`, an explicit, documented, test-only exception closing a false-failure interaction with vitest's single-shared-process test runs — see that file's own comment and `tests/observabilityRateLimit.test.ts`.) A *general* rate limiter across every route remains deliberately **not** added: doing so safely requires a traffic-policy decision this repository cannot make on its own (what request volume is normal vs. abusive differs per route — a legitimate BOQ import might fire dozens of sequential requests; a scripted attack on `/api/customers` looks identical in shape). This is genuine post-launch hardening work, not something to guess at now.
 - [ ] **Production HTTPS confirmed — EXTERNAL CONFIRMATION REQUIRED.** HTTPS termination is an infrastructure/hosting-provider concern, not something this repository configures. Confirm the chosen host terminates TLS (most static/PaaS hosts do this by default) before launch.
 
 ## Database
@@ -46,14 +48,68 @@ Nothing below is marked done because it "should" work or because a similar syste
 
 ## Deployment
 
-- [ ] **API deployed — EXTERNAL CONFIRMATION REQUIRED.** No production hosting is configured in this repository. `server/package.json` has a working `start` script (`node dist/index.js` after `npm run build`) that a host can run directly.
-- [ ] **Client deployed — EXTERNAL CONFIRMATION REQUIRED.** `README.md` explicitly lists production hosting (Railway/Render/Vercel or similar) as something that still needs an external account connected to this repo — confirmed again by fresh discovery this session, not just carried over from a prior report. `server/src/app.ts` has no `express.static`/catch-all for `client/dist` and none was added this session, since the architecture doesn't clearly commit to the API server also serving the frontend (separate npm workspaces, independent build steps) — adding one speculatively would be exactly the kind of guessed infrastructure this task was told not to produce. **Decision needed:** either host `client/dist` on a static host/CDN, or explicitly decide the Express server should serve it (a small, deliberate follow-up if so).
+**Docker image (server/API only — see below for the client).** The root `Dockerfile` is a multi-stage build: it `npm ci`'s the full workspace, compiles the server with `tsc`, then produces a runtime image with production-only dependencies, a Playwright Chromium install (real PDF rendering, not optional), and the compiled `server/dist` + raw `server/drizzle/*.sql` migration files. Runs as a non-root user. CI validates this image builds from a clean checkout on every push/PR (`.github/workflows/ci.yml`'s "Build Docker image" step) — build-only, no registry push.
+
+```bash
+# Build (from the repo root, where the Dockerfile lives):
+docker build -t midad-server .
+
+# Apply migrations once, as a separate step — never automatically on every
+# container start (see the Slice Z implementation report for why):
+docker run --rm --env DATABASE_URL=... midad-server node dist/db/migrate.js
+
+# Run the server:
+docker run -d -p 4000:4000 \
+  --env DATABASE_URL=... --env JWT_SECRET=... \
+  --env MAIL_PROVIDER=resend --env RESEND_API_KEY=... --env MAIL_FROM_ADDRESS=... \
+  --env STORAGE_PROVIDER=s3 --env S3_BUCKET=... --env S3_REGION=... --env S3_ACCESS_KEY_ID=... --env S3_SECRET_ACCESS_KEY=... \
+  --env CORS_ORIGIN=https://app.example.com \
+  midad-server
+```
+
+The image declares a `HEALTHCHECK` (AC-10) that polls `GET /api/health/ready` (not `/live`) every 30s via Node's own `fetch` — no curl/wget is installed in the slim base image, and none is added for this alone. `/ready` (not `/live`) is deliberate: this repo has no Kubernetes/Swarm manifest that would auto-replace an "unhealthy" container on a transient DB blip (the real risk Kubernetes's separate liveness/readiness split exists to avoid), so what actually matters here is `docker-compose`'s `depends_on: condition: service_healthy` and host-level monitoring being able to tell "process up but database unreachable" apart from a genuinely working container.
+
+`docker-compose.yml` at the repo root currently defines only the Postgres service (local development) — it does not yet orchestrate the app image above; add an `app:` service there (or an equivalent in whatever orchestrator is chosen) when wiring a full docker-compose-based deployment.
+
+- [ ] **API deployed — EXTERNAL CONFIRMATION REQUIRED.** No production hosting account is configured in this repository, but the deployable artifact now exists and is CI-validated: the Docker image above (`server/package.json`'s `start` script, `node dist/index.js`, is what it runs). Any host that can run a Docker image (or a plain Node 22 process, with `npx playwright install --with-deps chromium` run once) can serve this.
+- [ ] **Client deployed — EXTERNAL CONFIRMATION REQUIRED.** The client is a static Vite build (`client/dist/`) meant to be served separately (a static host/CDN) — `server/src/app.ts` has no `express.static`/catch-all for it, and none was added, since the architecture deliberately keeps the two as independent deployment artifacts (separate npm workspaces, independent build steps, matching `CORS_ORIGIN`'s split-origin assumption). **Decision needed:** host `client/dist` on a static host/CDN, or explicitly decide the Express server should serve it (a small, deliberate follow-up if so).
 - [ ] **Client can reach API — EXTERNAL CONFIRMATION REQUIRED.** Depends on both of the above being deployed and the client's API base URL being configured to point at the real API origin.
-- [ ] **Production environment variables configured — EXTERNAL CONFIRMATION REQUIRED.** Required at minimum: `DATABASE_URL`, `JWT_SECRET` (a real random value, not the `.env.example` placeholder), `PORT` (optional, defaults to 4000). Newly relevant as of this session: `CORS_ORIGIN` (optional but recommended — see Security above).
+- [ ] **Production environment variables configured — EXTERNAL CONFIRMATION REQUIRED.** Required at minimum: `DATABASE_URL`, `JWT_SECRET` (a real random value, not the `.env.example` placeholder), `PORT` (optional, defaults to 4000), `CORS_ORIGIN` (recommended — see Security above). Production additionally requires an explicit `MAIL_PROVIDER`, `STORAGE_PROVIDER`, and (if using ZATCA in production) `ZATCA_SECRET_STORE_PROVIDER` — see Providers below; each fails closed (refuses to start/serve, never silently degrades) if left unset in `NODE_ENV=production`.
 - [ ] **Production domain configured — EXTERNAL CONFIRMATION REQUIRED.** Not chosen yet.
 - [ ] **CORS matches production client — EXTERNAL CONFIRMATION REQUIRED.** Mechanism ready (see Security above); needs the real domain once chosen.
-- [x] Health endpoints reachable — verified locally this session (`/api/health/live`, `/api/health/ready` both 200 against a real running instance). Re-verify against the actual production URL once deployed.
+- [x] Health endpoints reachable — verified locally (`/api/health/live`, `/api/health/ready` both 200 against a real running instance), and now also polled automatically by the Docker image's own `HEALTHCHECK`. Re-verify against the actual production URL once deployed.
 - [ ] **HTTPS working — EXTERNAL CONFIRMATION REQUIRED.** Same as Production HTTPS above.
+
+## Providers (storage, email, ZATCA secrets)
+
+Every provider below follows the same fail-closed rule: an **explicit** choice is always honored in any environment; only a **silently unset** provider refuses to start/serve in `NODE_ENV=production` (development/test may fall back to the safe local/console default). Full variable reference in `.env.example`.
+
+- **Email** (`server/src/lib/mailer.ts`) — `MAIL_PROVIDER=console` logs to the server console (dev/test default; refused in production unless explicitly set). `MAIL_PROVIDER=resend` sends real email via the Resend API and requires `RESEND_API_KEY` + `MAIL_FROM_ADDRESS`; the Resend HTTP call has a bounded 10s timeout (AC-07) so a hung connection can never block a request indefinitely.
+- **File storage** (`server/src/lib/storage/`) — `STORAGE_PROVIDER=local` writes to the local `uploads/` directory (dev default; lost on redeploy to an ephemeral host, refused in production unless explicitly set). `STORAGE_PROVIDER=s3` uses any S3-compatible object store (AWS S3, Cloudflare R2, MinIO — `S3_ENDPOINT` for non-AWS) via `S3_BUCKET`/`S3_REGION`/`S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY`.
+- **ZATCA secret store** (`server/src/lib/zatca/secretStore/`) — the in-memory dev store is non-durable and refuses to run in production unless `ZATCA_ALLOW_DEV_SECRET_STORE` is explicitly set (never do this in a real deployment). `ZATCA_SECRET_STORE_PROVIDER=aws-secrets-manager` uses AWS Secrets Manager for private-key/CSID credential storage — see the ZATCA environment variable table below for its own required variables.
+
+## ZATCA / FATOORA e-invoicing environment variables
+
+Every variable below is read verbatim by `server/src/lib/zatca/provider/fatooraClient.ts` — MIDAD never hardcodes a ZATCA hostname or path. Full reference copy lives in `.env.example`; this table is the launch-time summary. `{ENV}` stands for either `SIMULATION` (ZATCA sandbox) or `PRODUCTION` (live FATOORA gateway) — each environment's EGS units are configured independently, so both blocks can be set at once.
+
+| Variable | Required? | Secret? | Format | Used by |
+| --- | --- | --- | --- | --- |
+| `ZATCA_FATOORA_{ENV}_BASE_URL` | **Yes**, before any EGS unit in that environment submits | No (URL) | Base host, e.g. `https://gw-fatoora.zatca.gov.sa/e-invoicing` | Every submit call (clearance + reporting) |
+| `ZATCA_FATOORA_{ENV}_COMPLIANCE_PATH` | **Yes**, same as above | No (path) | e.g. `/core/compliance/invoices` | Compliance document checks |
+| `ZATCA_FATOORA_{ENV}_CLEARANCE_PATH` | **Yes**, same as above | No (path) | e.g. `/core/invoices/clearance/single` | `clearInvoice` (standard invoices) |
+| `ZATCA_FATOORA_{ENV}_REPORTING_PATH` | **Yes**, same as above | No (path) | e.g. `/core/invoices/reporting/single` | `reportInvoice` (simplified invoices) |
+| `ZATCA_FATOORA_{ENV}_COMPLIANCE_CSID_PATH` | No — no route calls the CSID-exchange provider methods yet | No (path) | e.g. `/core/compliance` | `requestComplianceCsid` (unused by any route today; reserved for future CSID-exchange work) |
+| `ZATCA_FATOORA_{ENV}_PRODUCTION_CSID_PATH` | No — same as above | No (path) | e.g. `/core/production/csids` | `requestProductionCsidOnboarding` / `requestProductionCsidRenewal` (unused by any route today) |
+| `ZATCA_FATOORA_{ENV}_API_VERSION` | No — defaults to `"V2"` | No (string) | ZATCA's published API version label | Every FATOORA HTTP call |
+| `ZATCA_FATOORA_TIMEOUT_MS` | No — defaults to `15000` | No (integer, ms) | Shared request timeout, both environments | Every FATOORA HTTP call |
+| `ZATCA_CSR_ECDSA_CURVE` | **Yes**, before any CSR is generated | No (string) | One of `P-256`, `P-384`, `P-521` | `server/src/lib/zatca/csr/` — refuses to run until set explicitly, since no curve is hardcoded |
+| `ZATCA_SECRET_STORE_PROVIDER` | **Yes in production** (or explicit `ZATCA_ALLOW_DEV_SECRET_STORE` opt-out — never use in real production) | No (string) | `aws-secrets-manager` (only supported non-dev value) | `secretStore/index.ts` — private-key/CSID credential storage |
+| `ZATCA_SECRETS_MANAGER_REGION` | **Yes** if `ZATCA_SECRET_STORE_PROVIDER=aws-secrets-manager` | No | AWS region, e.g. `eu-west-1` | `awsSecretsManagerStore.ts` |
+| `ZATCA_SECRETS_MANAGER_ACCESS_KEY_ID` | **Yes** if using AWS Secrets Manager and not relying on an instance/task role | **Yes — secret** | AWS access key ID | `awsSecretsManagerStore.ts` |
+| `ZATCA_SECRETS_MANAGER_SECRET_ACCESS_KEY` | Same as above | **Yes — secret** | AWS secret access key | `awsSecretsManagerStore.ts` |
+| `ZATCA_SECRETS_MANAGER_KEY_PREFIX` | No — defaults to `midad/zatca` | No (string) | Secret-name namespace prefix | `awsSecretsManagerStore.ts` |
+
+**Minimum for a real ZATCA Simulation launch:** the four `ZATCA_FATOORA_SIMULATION_*` URL/path variables, `ZATCA_CSR_ECDSA_CURVE`, and a real `ZATCA_SECRET_STORE_PROVIDER` (AWS Secrets Manager credentials) — never the in-memory dev store in a real deployment. The `_PRODUCTION_*` block is only needed once genuinely ready to submit against ZATCA's live gateway, and the `*_CSID_PATH` variables are only needed if/when a future slice wires the CSID-exchange provider methods to a route.
 
 ## Operations
 
@@ -71,10 +127,10 @@ Nothing below is marked done because it "should" work or because a similar syste
 
 ## Summary
 
-**Code-level items:** all verified complete as of this session (invoice/quote transaction atomicity, CORS restriction mechanism, security headers, and the full existing test/typecheck/build gate).
+**Code-level items:** verified complete as of Slice AC (invoice/quote transaction atomicity, graceful shutdown, database pool bounds, CORS restriction mechanism, security headers, real ZATCA production submission execution layer with AWS Secrets Manager credential storage, Docker image with CI-validated build and a `/ready` HEALTHCHECK, and the full existing test/typecheck/build gate).
 
 **Deliberately deferred (not launch blockers):** general rate limiting beyond auth endpoints, error-tracking service integration (see below).
 
-**Error tracking provider: NOT CONFIGURED.** No Sentry (or equivalent) package, DSN, or environment variable exists anywhere in this repository, and none was added this session — there is nothing to point it at without an account/DSN, and inventing one would violate this task's explicit instruction never to fabricate a service integration. Structured logs + request IDs remain the baseline for diagnosing a customer-reported issue; this is not a launch blocker, matching the pre-launch audit's own classification.
+**Error tracking provider: NOT CONFIGURED.** No Sentry (or equivalent) package, DSN, or environment variable exists anywhere in this repository — there is nothing to point it at without an account/DSN, and inventing one would violate the standing rule never to fabricate a service integration. Structured logs + request IDs remain the baseline for diagnosing a customer-reported issue; this is not a launch blocker.
 
-**Genuinely external, unverifiable from this repository:** production database provider/backups/PITR/restore-testing, and production client/API hosting + domain + HTTPS + the resulting CORS origin value. These require an actual infrastructure decision and account access this session does not have.
+**Genuinely external, unverifiable from this repository:** production database provider/backups/PITR/restore-testing, production client/API hosting + domain + HTTPS + the resulting CORS origin value, and CI branch protection on the repository's default branch (a GitHub repository setting, not something any file in this repo can prove or configure — verify directly in GitHub: Settings → Branches → Branch protection rules). These require an actual infrastructure decision and account/repository-admin access this session does not have.

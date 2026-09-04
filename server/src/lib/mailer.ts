@@ -45,10 +45,21 @@ export interface ResendMailProviderConfig {
   fromAddress: string;
 }
 
+// AC-07 — Resend is one authenticated POST with no expectation of a long
+// server-side operation (unlike ZATCA's clearance/reporting calls, which
+// document their own timeout separately); 10s is generous headroom above a
+// normal response while still bounding the request instead of letting a
+// hung TCP connection block the caller (and, for the callers that await
+// mail delivery inline, the HTTP response) indefinitely.
+const RESEND_TIMEOUT_MS = 10_000;
+
 export class ResendMailProvider implements MailProvider {
   constructor(private readonly config: ResendMailProviderConfig) {}
 
   async send(message: MailMessage): Promise<void> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), RESEND_TIMEOUT_MS);
+
     let res: Response;
     try {
       res = await fetch("https://api.resend.com/emails", {
@@ -64,12 +75,23 @@ export class ResendMailProvider implements MailProvider {
           text: message.text,
           ...(message.html ? { html: message.html } : {}),
         }),
+        signal: controller.signal,
       });
     } catch (err) {
-      // Never include the API key or the request body (may carry a reset/
-      // invite link) in a thrown error message — only the network failure
-      // reason.
+      // Same fail-closed classification pattern as fatooraClient.ts: only
+      // treat this as a timeout if OUR controller is the one that aborted
+      // it (a caller-supplied signal or an unrelated abort would look the
+      // same to `fetch` otherwise). Never include the API key or the
+      // request body (may carry a reset/invite link) in a thrown error
+      // message — only the network failure reason.
+      if (controller.signal.aborted) {
+        throw new MailDeliveryError(`انتهت مهلة الاتصال بمزوّد البريد الإلكتروني بعد ${RESEND_TIMEOUT_MS}ms`, {
+          cause: err,
+        });
+      }
       throw new MailDeliveryError("تعذّر الاتصال بمزوّد البريد الإلكتروني", { cause: err });
+    } finally {
+      clearTimeout(timeout);
     }
 
     if (!res.ok) {

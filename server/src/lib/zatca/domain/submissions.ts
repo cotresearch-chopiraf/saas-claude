@@ -206,13 +206,29 @@ export async function claimSubmissionForSubmit(
   return claimed;
 }
 
+// AC-08 — same limit/offset/hasMore pagination convention as
+// routes/invoices.ts and routes/quotes.ts's list routes: fetch limit+1
+// rows to detect hasMore without a separate COUNT query, deterministic
+// newest-first ordering (unchanged), server-enforced max page size. Only
+// this company-wide history needed it — listSubmissionsForEgsUnit (below)
+// stays unbounded, scoped to one EGS unit's naturally smaller volume,
+// exactly matching AC-08's own stated scope.
+export interface ListSubmissionsForCompanyOptions {
+  limit: number;
+  offset: number;
+}
+
 // Slice 4 — company-wide submission history (the tenant UI's History tab),
 // unlike listSubmissionsForEgsUnit which is scoped to one unit.
-export async function listSubmissionsForCompany(companyId: string) {
-  return db.query.zatcaSubmissions.findMany({
+export async function listSubmissionsForCompany(companyId: string, options: ListSubmissionsForCompanyOptions) {
+  const rows = await db.query.zatcaSubmissions.findMany({
     where: eq(zatcaSubmissions.companyId, companyId),
     orderBy: (s, { desc }) => [desc(s.createdAt)],
+    limit: options.limit + 1,
+    offset: options.offset,
   });
+  const hasMore = rows.length > options.limit;
+  return { submissions: hasMore ? rows.slice(0, options.limit) : rows, hasMore };
 }
 
 // Same "null means not found OR not yours" contract as getEgsUnit.

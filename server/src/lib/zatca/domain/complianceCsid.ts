@@ -47,6 +47,7 @@ import { createComplianceLifecycle, getComplianceLifecycleForCsrInstance } from 
 import { getZatcaSecretStore } from "../secretStore/index.js";
 import { getZatcaProvider } from "../provider/index.js";
 import { ZatcaConfigurationError, ZatcaDuplicateError, ZatcaValidationError } from "../errors.js";
+import { pgErrorInfo } from "../../pgError.js";
 
 export interface RequestComplianceCsidInput {
   companyId: string;
@@ -67,8 +68,7 @@ export interface RequestComplianceCsidInput {
 // TOCTOU gap between this function's own pre-check
 // (getComplianceLifecycleForCsrInstance) and the actual insert.
 function isDuplicateComplianceLifecycleRaceError(err: unknown): boolean {
-  if (typeof err !== "object" || err === null) return false;
-  const e = err as { code?: unknown; constraint?: unknown };
+  const e = pgErrorInfo(err);
   return e.code === "23505" && e.constraint === "zatca_compliance_lifecycles_csr_instance_unique";
 }
 

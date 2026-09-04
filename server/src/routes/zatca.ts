@@ -6,6 +6,7 @@ import type { zatcaSubmissionStateEnum } from "../db/schema.js";
 import { requirePermission } from "../lib/permissions.js";
 import { recordAuditEvent } from "../lib/audit.js";
 import { logger } from "../lib/logger.js";
+import { pgErrorInfo } from "../lib/pgError.js";
 import {
   createEgsUnit,
   getEgsUnit,
@@ -58,12 +59,11 @@ const requireSubmit = requirePermission("zatca.submit");
 
 // Slice 5 — detects a Postgres unique-violation (23505) on
 // zatca_submissions_egs_unit_invoice_unique specifically, never any other
-// constraint violation. A raw `pg` DatabaseError propagates through
-// drizzle unchanged, carrying `code`/`constraint` — this is standard
-// node-postgres error shape, not a ZATCA-specific assumption.
+// constraint violation. pgErrorInfo() unwraps drizzle-orm's
+// DrizzleQueryError to reach the raw `pg` DatabaseError's `code`/`constraint`
+// (standard node-postgres error shape, not a ZATCA-specific assumption).
 function isDuplicateSubmissionRaceError(err: unknown): boolean {
-  if (typeof err !== "object" || err === null) return false;
-  const e = err as { code?: unknown; constraint?: unknown };
+  const e = pgErrorInfo(err);
   return e.code === "23505" && e.constraint === "zatca_submissions_egs_unit_invoice_unique";
 }
 
@@ -718,10 +718,28 @@ zatcaRouter.get("/egs-units/:id/submissions", async (req: Request<{ id: string }
   res.json(await listSubmissionsForEgsUnit(req.companyId!, unit.id));
 });
 
+// AC-08 — same limit/offset/hasMore convention as routes/invoices.ts and
+// routes/quotes.ts's list routes.
+const DEFAULT_SUBMISSIONS_LIST_LIMIT = 20;
+const MAX_SUBMISSIONS_LIST_LIMIT = 100;
+
+const submissionsListQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(MAX_SUBMISSIONS_LIST_LIMIT).default(DEFAULT_SUBMISSIONS_LIST_LIMIT),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+
 // GET /api/zatca/submissions — company-wide history (the tenant UI's
-// History tab), across every EGS unit.
+// History tab), across every EGS unit. Paginated (AC-08): this list grows
+// without bound as a company submits invoices over time, unlike
+// /egs-units/:id/submissions above which stays scoped to one unit's
+// naturally smaller volume.
 zatcaRouter.get("/submissions", async (req: Request, res: Response) => {
-  res.json(await listSubmissionsForCompany(req.companyId!));
+  const parsed = submissionsListQuerySchema.safeParse(req.query);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
+  const { limit, offset } = parsed.data;
+
+  const { submissions, hasMore } = await listSubmissionsForCompany(req.companyId!, { limit, offset });
+  res.json({ submissions, limit, offset, hasMore });
 });
 
 // GET /api/zatca/submissions/:id — read-only.

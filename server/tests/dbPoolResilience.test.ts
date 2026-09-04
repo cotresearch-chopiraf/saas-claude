@@ -39,3 +39,21 @@ describe("Slice Z — Postgres pool resilience", () => {
     expect(JSON.stringify(loggedMeta ?? {})).not.toMatch(/postgres:\/\//);
   });
 });
+
+// AC-06 — the pool must never fall back to node-postgres's own unbounded
+// defaults (in particular connectionTimeoutMillis: 0, which waits forever
+// to acquire a client or open a connection). Asserted against the pool's
+// own resolved options rather than re-declared literals, so this fails
+// loudly if a future change accidentally drops one of these bounds.
+describe("AC-06 — Postgres pool has explicit, bounded configuration", () => {
+  it("max, idleTimeoutMillis, connectionTimeoutMillis, and statement_timeout are all explicitly set", () => {
+    expect(pool.options.max).toBe(10);
+    expect(pool.options.idleTimeoutMillis).toBe(30_000);
+    expect(pool.options.connectionTimeoutMillis).toBe(5_000);
+    expect(pool.options.statement_timeout).toBe(30_000);
+  });
+
+  it("connectionTimeoutMillis is bounded (never node-postgres's own default of 0 / wait forever)", () => {
+    expect(pool.options.connectionTimeoutMillis).toBeGreaterThan(0);
+  });
+});

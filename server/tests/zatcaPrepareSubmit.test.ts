@@ -298,7 +298,69 @@ describe("GET /api/zatca/submissions (company-wide history)", () => {
     const listA = await request(app).get("/api/zatca/submissions").set("Authorization", `Bearer ${tokenA}`);
     const listB = await request(app).get("/api/zatca/submissions").set("Authorization", `Bearer ${tokenB}`);
 
-    expect(listA.body.some((s: { egsUnitId: string }) => s.egsUnitId === egsUnitId)).toBe(true);
-    expect(listB.body.some((s: { egsUnitId: string }) => s.egsUnitId === egsUnitId)).toBe(false);
+    expect(listA.body.submissions.some((s: { egsUnitId: string }) => s.egsUnitId === egsUnitId)).toBe(true);
+    expect(listB.body.submissions.some((s: { egsUnitId: string }) => s.egsUnitId === egsUnitId)).toBe(false);
+  });
+});
+
+// AC-08 — same pagination contract as routes/invoices.ts and
+// routes/quotes.ts's list routes (limit/offset/hasMore, server-enforced
+// max page size), applied here because this list is company-wide and
+// unbounded over time, unlike /egs-units/:id/submissions.
+describe("GET /api/zatca/submissions pagination (AC-08)", () => {
+  // A dedicated fresh company — every other test in this file shares
+  // companyA/tokenA and accumulates submissions across the whole file (no
+  // resetDb() between tests here), so an exact-count pagination assertion
+  // needs its own isolated tenant instead.
+  let pageTokenA: string;
+
+  beforeAll(async () => {
+    const res = await request(app)
+      .post("/api/auth/register")
+      .send({ companyName: "Pagination Co", name: "Owner", email: "zatca-pagination@test.com", password: "password123" });
+    pageTokenA = res.body.token;
+    // Same "complete identity, ready to prepare" setup as companyA's own
+    // beforeAll above — prepare fails validation without it.
+    await request(app)
+      .patch("/api/zatca/config")
+      .set("Authorization", `Bearer ${pageTokenA}`)
+      .send({ vatNumber: "300000000000004", commercialRegistration: "1010101011" });
+  });
+
+  it("paginates with limit/offset and reports hasMore correctly", async () => {
+    const egsUnitId = await createEgsUnit(pageTokenA);
+    for (let i = 0; i < 3; i++) {
+      const invoiceId = await createInvoice(pageTokenA);
+      await request(app)
+        .post(`/api/zatca/egs-units/${egsUnitId}/invoices/${invoiceId}/prepare`)
+        .set("Authorization", `Bearer ${pageTokenA}`);
+    }
+
+    const firstPage = await request(app)
+      .get("/api/zatca/submissions?limit=2&offset=0")
+      .set("Authorization", `Bearer ${pageTokenA}`);
+    expect(firstPage.status).toBe(200);
+    expect(firstPage.body.submissions).toHaveLength(2);
+    expect(firstPage.body.hasMore).toBe(true);
+    expect(firstPage.body.limit).toBe(2);
+    expect(firstPage.body.offset).toBe(0);
+
+    const secondPage = await request(app)
+      .get("/api/zatca/submissions?limit=2&offset=2")
+      .set("Authorization", `Bearer ${pageTokenA}`);
+    expect(secondPage.body.submissions).toHaveLength(1);
+    expect(secondPage.body.hasMore).toBe(false);
+
+    const firstIds = new Set(firstPage.body.submissions.map((s: { id: string }) => s.id));
+    for (const s of secondPage.body.submissions) {
+      expect(firstIds.has(s.id)).toBe(false);
+    }
+  });
+
+  it("rejects a limit above the server-enforced maximum", async () => {
+    const res = await request(app)
+      .get("/api/zatca/submissions?limit=1000")
+      .set("Authorization", `Bearer ${pageTokenA}`);
+    expect(res.status).toBe(400);
   });
 });

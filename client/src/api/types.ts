@@ -1004,6 +1004,15 @@ export interface ZatcaSubmission {
   respondedAt: string | null;
 }
 
+// AC-08 — company-wide submission history is now paginated. Mirrors
+// InvoicesPage's shape exactly.
+export interface ZatcaSubmissionsPage {
+  submissions: ZatcaSubmission[];
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+}
+
 // MIDAD ZATCA onboarding (Slice 4) — server/src/lib/zatca/domain/onboarding.ts's
 // computed view, never a second status system. See that file's own
 // comment: status/csidStatus on each EGS unit remain the real, granular

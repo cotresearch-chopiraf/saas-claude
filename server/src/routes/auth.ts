@@ -10,6 +10,7 @@ import { authRateLimit } from "../middleware/rateLimit.js";
 import { generateToken, hashToken } from "../lib/tokens.js";
 import { sendMail } from "../lib/mailer.js";
 import { logger } from "../lib/logger.js";
+import { pgErrorInfo } from "../lib/pgError.js";
 
 export const authRouter = Router();
 authRouter.use(authRateLimit);
@@ -191,17 +192,49 @@ authRouter.post("/accept-invite", async (req, res) => {
   const existing = await db.query.users.findFirst({ where: eq(users.email, invite.email) });
   if (existing) return res.status(409).json({ error: "هذا البريد الإلكتروني مسجّل مسبقاً" });
 
-  const [user] = await db
-    .insert(users)
-    .values({
-      companyId: invite.companyId,
-      email: invite.email,
-      name: parsed.data.name,
-      passwordHash: await hashPassword(parsed.data.password),
-      role: invite.role,
-    })
+  // Atomically claim the invite (same conditional-UPDATE pattern used
+  // elsewhere for check-then-act races — invoice mark-paid, quote
+  // accept/reject, ZATCA submission claim). Two concurrent accept-invite
+  // requests for the same token both pass the SELECT above; only one can
+  // win this UPDATE, closing the TOCTOU gap that previously let both reach
+  // the insert below and crash the loser on the users.email unique
+  // constraint instead of returning a clean conflict.
+  const [claimedInvite] = await db
+    .update(companyInvites)
+    .set({ acceptedAt: new Date() })
+    .where(
+      and(
+        eq(companyInvites.id, invite.id),
+        isNull(companyInvites.acceptedAt),
+        gt(companyInvites.expiresAt, new Date()),
+      ),
+    )
     .returning();
-  await db.update(companyInvites).set({ acceptedAt: new Date() }).where(eq(companyInvites.id, invite.id));
+  if (!claimedInvite) {
+    return res.status(409).json({ error: "تم استخدام هذه الدعوة بالفعل" });
+  }
+
+  let user;
+  try {
+    [user] = await db
+      .insert(users)
+      .values({
+        companyId: invite.companyId,
+        email: invite.email,
+        name: parsed.data.name,
+        passwordHash: await hashPassword(parsed.data.password),
+        role: invite.role,
+      })
+      .returning();
+  } catch (err) {
+    // Defense in depth: a different invite racing for the same email
+    // (outside this token's own claim gate above) would still hit the
+    // users.email unique constraint — surface it as a conflict, not a 500.
+    if (pgErrorInfo(err).code === "23505") {
+      return res.status(409).json({ error: "هذا البريد الإلكتروني مسجّل مسبقاً" });
+    }
+    throw err;
+  }
 
   const token = signToken({ userId: user.id, companyId: user.companyId });
   res.status(201).json({ token, user: { id: user.id, name: user.name, email: user.email } });

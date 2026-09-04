@@ -196,3 +196,53 @@ describe("concurrency: password-reset token remains single-use under concurrent 
     }
   });
 });
+
+// AC-04 — accept-invite previously did a plain SELECT-then-INSERT: two
+// concurrent requests for the same invite token could both pass the
+// "not yet accepted" check and both attempt to insert a user with the
+// invite's email, crashing the loser on the users.email unique constraint
+// (raw 500) instead of a clean conflict. Fixed with the same conditional
+// -UPDATE atomic-claim pattern used elsewhere (invoice mark-paid, quote
+// accept/reject, ZATCA submission claim).
+describe("concurrency: accept-invite never creates more than one user for the same invite", () => {
+  let ownerToken: string;
+
+  beforeAll(async () => {
+    const res = await request(app)
+      .post("/api/auth/register")
+      .send({ companyName: "Invite Race Co", name: "Owner", email: "invite-race-owner@test.com", password: "password123" });
+    ownerToken = res.body.token;
+  });
+
+  it("2x: N simultaneous accept-invite calls with the same token — exactly one creates a user", async () => {
+    for (let trial = 0; trial < 2; trial++) {
+      const inviteEmail = `invite-race-${trial}@test.com`;
+      (sendMail as ReturnType<typeof vi.fn>).mockClear();
+      await request(app)
+        .post("/api/company/invites")
+        .set("Authorization", `Bearer ${ownerToken}`)
+        .send({ email: inviteEmail, role: "member" });
+      const mailCall = (sendMail as ReturnType<typeof vi.fn>).mock.calls.at(-1)!;
+      const token = extractToken(mailCall[2] as string);
+
+      const results = await Promise.all(
+        Array.from({ length: 4 }, (_, i) =>
+          request(app)
+            .post("/api/auth/accept-invite")
+            .send({ token, name: `Racer ${i}`, password: "racerPassword123" }),
+        ),
+      );
+      const successes = results.filter((r) => r.status === 201);
+      const conflicts = results.filter((r) => r.status === 409);
+      // Every one of the 4 concurrent requests must resolve to exactly one
+      // of these two outcomes — never a 5xx crash, never something else.
+      expect(successes.length + conflicts.length).toBe(4);
+      expect(successes.length).toBe(1);
+
+      const usersRes = await request(app)
+        .post("/api/auth/login")
+        .send({ email: inviteEmail, password: "racerPassword123" });
+      expect(usersRes.status).toBe(200);
+    }
+  });
+});

@@ -5,6 +5,8 @@ import { LanguageSelect } from "../components/LanguageSelect";
 import { apiFetch, ApiError, getToken } from "../api/client";
 import { listQuotes } from "../api/quotes";
 import type { DocumentLanguage, Quote } from "../api/types";
+import { Skeleton } from "../ui/Skeleton";
+import { ErrorState } from "../ui/ErrorState";
 
 const PAGE_SIZE = 20;
 
@@ -41,26 +43,33 @@ interface DraftItem {
 }
 
 export function Quotes() {
-  const [quotes, setQuotes] = useState<Quote[]>([]);
+  const [quotes, setQuotes] = useState<Quote[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const navigate = useNavigate();
 
   function load() {
-    listQuotes({ limit: PAGE_SIZE, offset: 0 }).then((page) => {
-      setQuotes(page.quotes);
-      setHasMore(page.hasMore);
-    });
+    setQuotes(null);
+    setError(null);
+    listQuotes({ limit: PAGE_SIZE, offset: 0 })
+      .then((page) => {
+        setQuotes(page.quotes);
+        setHasMore(page.hasMore);
+      })
+      .catch((err) => setError(err instanceof ApiError ? err.message : "تعذّر تحميل عروض الأسعار"));
   }
   useEffect(load, []);
 
   async function loadMore() {
     setLoadingMore(true);
     try {
-      const page = await listQuotes({ limit: PAGE_SIZE, offset: quotes.length });
-      setQuotes((prev) => [...prev, ...page.quotes]);
+      const page = await listQuotes({ limit: PAGE_SIZE, offset: quotes?.length ?? 0 });
+      setQuotes((prev) => [...(prev ?? []), ...page.quotes]);
       setHasMore(page.hasMore);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "تعذّر تحميل المزيد من عروض الأسعار");
     } finally {
       setLoadingMore(false);
     }
@@ -112,6 +121,9 @@ export function Quotes() {
         />
       )}
 
+      {error && <ErrorState message={error} onRetry={load} />}
+      {!error && quotes === null && <Skeleton rows={3} />}
+      {!error && quotes !== null && (
       <ul className="space-y-2">
         {quotes.map((quote) => (
           <li key={quote.id} className="rounded-lg border border-stone-200 bg-white p-4">
@@ -169,7 +181,8 @@ export function Quotes() {
           </li>
         )}
       </ul>
-      {hasMore && (
+      )}
+      {!error && quotes !== null && hasMore && (
         <div className="pt-4 text-center">
           <button
             disabled={loadingMore}

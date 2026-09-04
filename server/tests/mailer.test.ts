@@ -115,6 +115,33 @@ describe("ResendMailProvider.send()", () => {
       MailDeliveryError,
     );
   });
+
+  // AC-07 — never contacts the real Resend API: `fetch` is replaced with a
+  // promise that only ever settles when OUR AbortController's signal fires
+  // (exactly how a real hung TCP connection would behave under a real
+  // abort), proving the bounded timeout actually fires instead of hanging
+  // forever, without waiting 10 real seconds for it.
+  it("times out instead of hanging forever when Resend never responds", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(globalThis, "fetch").mockImplementation((_url, init) => {
+      return new Promise((_resolve, reject) => {
+        const signal = (init as RequestInit | undefined)?.signal;
+        signal?.addEventListener("abort", () => {
+          const err = new Error("This operation was aborted");
+          err.name = "AbortError";
+          reject(err);
+        });
+      });
+    });
+    const provider = new ResendMailProvider({ apiKey: "k", fromAddress: "noreply@example.com" });
+
+    const sendPromise = provider.send({ to: "user@example.com", subject: "s", text: "t" });
+    const assertion = expect(sendPromise).rejects.toThrow(MailDeliveryError);
+    await vi.advanceTimersByTimeAsync(10_000);
+    await assertion;
+
+    vi.useRealTimers();
+  });
 });
 
 describe("sendMail() (backward-compatible call-site shape)", () => {

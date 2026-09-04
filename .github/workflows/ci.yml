@@ -66,3 +66,16 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Build Docker image
+        # AC-11 — validates the production Dockerfile actually builds from a
+        # clean checkout (this runner has no local layer cache from a prior
+        # run) on every push/PR, catching a broken Dockerfile before it ever
+        # reaches a real deploy. Build-only: no registry login, no push, no
+        # image publish — this repo has no existing publish convention to
+        # match, and none is being introduced here. Never runs the
+        # container or contacts real ZATCA/AWS/Resend — the multi-stage
+        # build (npm ci, Playwright Chromium install, tsc build) needs none
+        # of that, only network access to npm/Debian package mirrors, which
+        # this runner already has for the steps above.
+        run: docker build -t midad-server:ci .
