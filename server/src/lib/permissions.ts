@@ -130,6 +130,19 @@ export const PERMISSIONS = {
   // action are gated.
   "zatca.configure": ["owner"],
   "zatca.submit": ["owner"],
+
+  // --- Slice AA — Tasks / Daily Logs ---
+  // Creating and updating a task or daily log stays member-open, exactly
+  // as it always has (see the file-level comment on measurement.approve
+  // above: this is site-level operational entry, not a financial
+  // instrument — the same class of action, deliberately left open to any
+  // company member). What was genuinely missing was the same posture this
+  // matrix already applies to every other domain's irreversible action —
+  // project.delete is owner-only while project create/update stays
+  // member-open; task.delete/dailyLog.delete apply that identical,
+  // already-established pattern, not a new one.
+  "task.delete": ["owner"],
+  "dailyLog.delete": ["owner"],
 } as const satisfies Record<string, readonly Role[]>;
 
 export type PermissionAction = keyof typeof PERMISSIONS;

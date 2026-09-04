@@ -9,6 +9,7 @@ import { requireAuth } from "../middleware/auth.js";
 import { authRateLimit } from "../middleware/rateLimit.js";
 import { generateToken, hashToken } from "../lib/tokens.js";
 import { sendMail } from "../lib/mailer.js";
+import { logger } from "../lib/logger.js";
 
 export const authRouter = Router();
 authRouter.use(authRateLimit);
@@ -107,11 +108,21 @@ authRouter.post("/request-password-reset", async (req, res) => {
       tokenHash: hashToken(token),
       expiresAt: new Date(Date.now() + 60 * 60 * 1000),
     });
-    sendMail(
-      user.email,
-      "إعادة تعيين كلمة المرور",
-      `رابط إعادة التعيين (صالح لساعة واحدة): /reset-password?token=${token}`,
-    );
+    // Slice AA — this response's own security property (never reveal
+    // whether the email exists) must hold regardless of delivery outcome,
+    // so a mail-provider failure is logged, not surfaced to the caller —
+    // changing the response here would itself be an account-enumeration
+    // side channel (a real user always gets one response shape, a
+    // production delivery failure must never produce a different one).
+    try {
+      await sendMail(
+        user.email,
+        "إعادة تعيين كلمة المرور",
+        `رابط إعادة التعيين (صالح لساعة واحدة): /reset-password?token=${token}`,
+      );
+    } catch {
+      logger.error("password_reset_email_failed", { userId: user.id });
+    }
   }
   res.json({ message: "إن كان البريد الإلكتروني مسجّلاً، سيصلك رابط إعادة التعيين" });
 });

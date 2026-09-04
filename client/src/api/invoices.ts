@@ -1,5 +1,5 @@
 import { apiFetch } from "./client";
-import type { Invoice } from "./types";
+import type { Invoice, InvoicesPage } from "./types";
 
 // Thin typed wrappers over the existing, verified invoice API
 // (server/src/routes/invoices.ts) — no calculation, no authorization
@@ -10,6 +10,21 @@ import type { Invoice } from "./types";
 // companyId AND projectId) — never the company-wide list filtered here.
 export function listProjectInvoices(projectId: string): Promise<Invoice[]> {
   return apiFetch<Invoice[]>(`/projects/${projectId}/invoices`);
+}
+
+// Slice AA Scope G — the company-wide list, now paginated. Mirrors
+// api/auditEvents.ts's listActivity exactly.
+export interface ListInvoicesInput {
+  limit?: number;
+  offset?: number;
+}
+
+export function listInvoices(input: ListInvoicesInput = {}): Promise<InvoicesPage> {
+  const params = new URLSearchParams();
+  if (input.limit !== undefined) params.set("limit", String(input.limit));
+  if (input.offset !== undefined) params.set("offset", String(input.offset));
+  const qs = params.toString();
+  return apiFetch<InvoicesPage>(`/invoices${qs ? `?${qs}` : ""}`);
 }
 
 export interface CreateInvoiceInput {

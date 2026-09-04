@@ -64,7 +64,7 @@ describe("TC-01: a quote's own frozen tax snapshot is used consistently on list,
     expect(Number(createRes.body.taxRatePercent)).toBe(15);
 
     const listRes = await request(app).get("/api/quotes").set("Authorization", `Bearer ${ownerToken}`);
-    const row = listRes.body.find((r: { id: string }) => r.id === createRes.body.id);
+    const row = listRes.body.quotes.find((r: { id: string }) => r.id === createRes.body.id);
     expect(row.taxAmount).toBe(150);
     expect(row.total).toBe(1150);
   });
@@ -97,7 +97,7 @@ describe("TC-01: a quote's own frozen tax snapshot is used consistently on list,
     expect(createRes.body.taxRatePercent).toBeNull();
 
     const listRes = await request(app).get("/api/quotes").set("Authorization", `Bearer ${ownerToken}`);
-    const row = listRes.body.find((r: { id: string }) => r.id === createRes.body.id);
+    const row = listRes.body.quotes.find((r: { id: string }) => r.id === createRes.body.id);
     expect(row.taxAmount).toBe(0);
     expect(row.total).toBe(500);
   });

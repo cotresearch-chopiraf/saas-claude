@@ -13,6 +13,17 @@ export interface Company {
   name: string;
 }
 
+export interface AppNotification {
+  id: string;
+  type: string;
+  title: string;
+  message: string;
+  readAt: string | null;
+  referenceEntityType: string | null;
+  referenceEntityId: string | null;
+  createdAt: string;
+}
+
 export type ProjectStatus = "active" | "on_hold" | "completed";
 
 export interface Project {
@@ -893,6 +904,22 @@ export interface ActivityEvent {
 
 export interface ActivityPage {
   events: ActivityEvent[];
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+}
+
+// Slice AA Scope G — same limit/offset/hasMore shape as ActivityPage, one
+// per paginated list endpoint.
+export interface QuotesPage {
+  quotes: Quote[];
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+}
+
+export interface InvoicesPage {
+  invoices: Invoice[];
   limit: number;
   offset: number;
   hasMore: boolean;

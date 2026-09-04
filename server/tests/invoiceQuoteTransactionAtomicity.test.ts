@@ -114,7 +114,7 @@ describe("invoice creation is transactional", () => {
   // invoices) — this proves the parent insert now rolls back with it.
   it("rolls back the parent invoice when a line-item insert fails, leaving no orphan", async () => {
     const before = await request(app).get("/api/invoices").set("Authorization", `Bearer ${ownerToken}`);
-    const countBefore = before.body.length;
+    const countBefore = before.body.invoices.length;
 
     const res = await request(app)
       .post("/api/invoices")
@@ -130,7 +130,7 @@ describe("invoice creation is transactional", () => {
     expect(res.status).toBeGreaterThanOrEqual(400);
 
     const after = await request(app).get("/api/invoices").set("Authorization", `Bearer ${ownerToken}`);
-    expect(after.body.length).toBe(countBefore);
+    expect(after.body.invoices.length).toBe(countBefore);
   });
 });
 
@@ -196,7 +196,7 @@ describe("quote creation is transactional", () => {
   // failed line-items insert instead of leaving an incomplete quote.
   it("rolls back the parent quote when a line-item insert fails, leaving no orphan", async () => {
     const before = await request(app).get("/api/quotes").set("Authorization", `Bearer ${ownerToken}`);
-    const countBefore = before.body.length;
+    const countBefore = before.body.quotes.length;
 
     const res = await request(app)
       .post("/api/quotes")
@@ -213,6 +213,6 @@ describe("quote creation is transactional", () => {
     expect(res.status).toBeGreaterThanOrEqual(400);
 
     const after = await request(app).get("/api/quotes").set("Authorization", `Bearer ${ownerToken}`);
-    expect(after.body.length).toBe(countBefore);
+    expect(after.body.quotes.length).toBe(countBefore);
   });
 });

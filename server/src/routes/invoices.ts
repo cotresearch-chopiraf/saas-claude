@@ -22,6 +22,7 @@ import { requirePermission, getUserRole, isPermittedRole } from "../lib/permissi
 import { recordAuditEvent } from "../lib/audit.js";
 import { logger } from "../lib/logger.js";
 import { calculateTax } from "../lib/compliance/engine.js";
+import { withIdempotency, IdempotencyConflictError } from "../lib/idempotency.js";
 
 export const invoicesRouter = Router();
 export const publicInvoicesRouter = Router();
@@ -38,24 +39,45 @@ invoicesRouter.use(async (req, res, next) => {
   next();
 });
 
+// Slice AA Scope G — company-wide invoice list is one of this slice's own
+// priority pagination targets. Same limit/offset/hasMore convention as
+// routes/auditEvents.ts and quotes.ts's list route: fetch limit+1 rows to
+// detect hasMore without a separate COUNT query, deterministic
+// newest-first ordering (unchanged), server-enforced max page size.
+const DEFAULT_LIST_LIMIT = 20;
+const MAX_LIST_LIMIT = 100;
+
+const listQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(MAX_LIST_LIMIT).default(DEFAULT_LIST_LIMIT),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+
 // Each invoice carries its own frozen tax rate, so the amount + tax shown
 // here is exactly what was true when it was issued — not recomputed from
 // today's company settings. This is also what "الضريبة" per paid invoice
 // means: the client sums taxAmount over status === "paid" rows itself.
 invoicesRouter.get("/", async (req, res) => {
+  const parsed = listQuerySchema.safeParse(req.query);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
+  const { limit, offset } = parsed.data;
+
   const rows = await db.query.invoices.findMany({
     where: eq(invoices.companyId, req.companyId!),
     orderBy: (i, { desc }) => [desc(i.createdAt)],
+    limit: limit + 1,
+    offset,
   });
+  const hasMore = rows.length > limit;
+  const page = hasMore ? rows.slice(0, limit) : rows;
 
   const withTotals = await Promise.all(
-    rows.map(async (invoice) => {
+    page.map(async (invoice) => {
       const items = await db.query.invoiceItems.findMany({ where: eq(invoiceItems.invoiceId, invoice.id) });
       const totals = computeTotals(items.map((item) => Number(item.amount)), Number(invoice.taxRatePercent));
       return { ...invoice, ...totals };
     }),
   );
-  res.json(withTotals);
+  res.json({ invoices: withTotals, limit, offset, hasMore });
 });
 
 // --- MIDAD UI-09: project-scoped invoices (Phase 2E's own gap, closed) ---
@@ -156,37 +178,38 @@ async function resolveInvoiceProjectContract(
   return {};
 }
 
-invoicesRouter.post("/", async (req, res) => {
-  const parsed = createSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
-
-  const relationship = await resolveInvoiceProjectContract(req.companyId!, {
-    projectId: parsed.data.projectId,
-    contractId: parsed.data.contractId,
+async function createInvoice(
+  companyId: string,
+  userId: string,
+  data: z.infer<typeof createSchema>,
+): Promise<{ error: string; status: 400 | 403 | 404 } | { invoice: typeof invoices.$inferSelect }> {
+  const relationship = await resolveInvoiceProjectContract(companyId, {
+    projectId: data.projectId,
+    contractId: data.contractId,
   });
-  if ("error" in relationship) return res.status(relationship.status).json({ error: relationship.error });
+  if ("error" in relationship) return relationship;
 
   // TC-02 fix: an explicit taxRatePercent bypasses the compliance engine
   // entirely — no ruleVersionId/override provenance gets recorded for it,
   // so a member could otherwise set an arbitrary rate with zero audit
   // trail. The engine-computed path below (taxRatePercent omitted) stays
   // open to any member; only a manual override needs owner.
-  if (parsed.data.taxRatePercent !== undefined) {
-    const role = await getUserRole(req.userId!);
+  if (data.taxRatePercent !== undefined) {
+    const role = await getUserRole(userId);
     if (!isPermittedRole("invoice.overrideTax", role)) {
-      return res.status(403).json({ error: "لا تملك صلاحية تحديد نسبة ضريبة يدوياً" });
+      return { error: "لا تملك صلاحية تحديد نسبة ضريبة يدوياً", status: 403 };
     }
   }
 
-  if (parsed.data.quoteId) {
+  if (data.quoteId) {
     const quote = await db.query.quotes.findFirst({
-      where: and(eq(quotes.id, parsed.data.quoteId), eq(quotes.companyId, req.companyId!)),
+      where: and(eq(quotes.id, data.quoteId), eq(quotes.companyId, companyId)),
     });
-    if (!quote) return res.status(404).json({ error: "عرض السعر غير موجود" });
+    if (!quote) return { error: "عرض السعر غير موجود", status: 404 };
   }
 
-  const company = await db.query.companies.findFirst({ where: eq(companies.id, req.companyId!) });
-  const invoiceNumber = await nextInvoiceNumber(req.companyId!);
+  const company = await db.query.companies.findFirst({ where: eq(companies.id, companyId) });
+  const invoiceNumber = await nextInvoiceNumber(companyId);
   const issueDate = new Date().toISOString().slice(0, 10);
 
   // An explicit taxRatePercent in the request always wins (preserves the
@@ -198,18 +221,18 @@ invoicesRouter.post("/", async (req, res) => {
   // compliance profile (the common case until the customer completes
   // country onboarding) falls back to the company's flat default rate,
   // exactly as it always has.
-  let taxRatePercent = parsed.data.taxRatePercent;
+  let taxRatePercent = data.taxRatePercent;
   let taxCategory: string | undefined;
   let ruleVersionId: string | undefined;
   let overrideReference: string | undefined;
 
   if (taxRatePercent === undefined) {
-    const category = parsed.data.taxCategory ?? "standard_rate";
+    const category = data.taxCategory ?? "standard_rate";
     const taxResult = await calculateTax({
-      companyId: req.companyId!,
+      companyId,
       transactionDate: issueDate,
       taxCategory: category,
-      itemAmounts: parsed.data.items.map((item) => item.amount),
+      itemAmounts: data.items.map((item) => item.amount),
     });
     if (taxResult.status === "calculated") {
       taxRatePercent = taxResult.taxRatePercent!;
@@ -231,22 +254,22 @@ invoicesRouter.post("/", async (req, res) => {
     const [created] = await tx
       .insert(invoices)
       .values({
-        companyId: req.companyId!,
-        quoteId: parsed.data.quoteId,
+        companyId,
+        quoteId: data.quoteId,
         projectId: relationship.projectId,
         contractId: relationship.contractId,
         invoiceNumber,
-        clientName: parsed.data.clientName,
-        clientAddress: parsed.data.clientAddress,
-        clientTaxId: parsed.data.clientTaxId,
+        clientName: data.clientName,
+        clientAddress: data.clientAddress,
+        clientTaxId: data.clientTaxId,
         taxRatePercent: String(taxRatePercent),
         taxCategory,
         ruleVersionId,
         overrideReference,
-        language: parsed.data.language,
+        language: data.language,
         publicToken: generateToken(),
         issueDate,
-        dueDate: parsed.data.dueDate,
+        dueDate: data.dueDate,
       })
       .returning();
 
@@ -256,17 +279,17 @@ invoicesRouter.post("/", async (req, res) => {
     // must be reconstructable via the canonical audit_events table, matching
     // every other domain's creation-event precedent.
     await recordAuditEvent(tx, {
-      companyId: req.companyId!,
-      actorUserId: req.userId!,
+      companyId,
+      actorUserId: userId,
       action: "invoice.created",
       entityType: "invoice",
       entityId: created.id,
       afterValue: created,
-      metadata: { projectId: relationship.projectId ?? null, contractId: relationship.contractId ?? null, quoteId: parsed.data.quoteId ?? null },
+      metadata: { projectId: relationship.projectId ?? null, contractId: relationship.contractId ?? null, quoteId: data.quoteId ?? null },
     });
 
     await tx.insert(invoiceItems).values(
-      parsed.data.items.map((item) => ({
+      data.items.map((item) => ({
         invoiceId: created.id,
         description: item.description,
         amount: String(item.amount),
@@ -276,7 +299,43 @@ invoicesRouter.post("/", async (req, res) => {
     return created;
   });
 
-  res.status(201).json(invoice);
+  return { invoice };
+}
+
+invoicesRouter.post("/", async (req, res) => {
+  const parsed = createSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
+
+  // Slice AA Scope E — opt-in idempotency: a client that supplies an
+  // Idempotency-Key header is protected from creating a duplicate invoice
+  // on a retried request; a client that doesn't send the header keeps the
+  // exact prior behavior.
+  const idempotencyKey = req.header("Idempotency-Key");
+  if (idempotencyKey) {
+    try {
+      const outcome = await withIdempotency<typeof invoices.$inferSelect | { error: string; status: number }>(
+        req.companyId!,
+        "invoice.create",
+        idempotencyKey,
+        req.body,
+        async () => {
+          const result = await createInvoice(req.companyId!, req.userId!, parsed.data);
+          if ("error" in result) return { status: result.status, body: result };
+          return { status: 201, body: result.invoice };
+        },
+      );
+      return res.status(outcome.status).json(outcome.body);
+    } catch (err) {
+      if (err instanceof IdempotencyConflictError) {
+        return res.status(409).json({ error: "تم استخدام مفتاح idempotency هذا مسبقاً بطلب مختلف" });
+      }
+      throw err;
+    }
+  }
+
+  const result = await createInvoice(req.companyId!, req.userId!, parsed.data);
+  if ("error" in result) return res.status(result.status).json({ error: result.error });
+  res.status(201).json(result.invoice);
 });
 
 async function findOwnedInvoice(companyId: string, invoiceId: string) {
@@ -314,11 +373,19 @@ invoicesRouter.patch("/:id/mark-paid", requirePermission("invoice.markPaid"), as
     return res.status(409).json({ error: "يجب إرسال الفاتورة أولاً قبل تسجيلها كمسدَّدة" });
   }
 
+  // Slice AA — conditional UPDATE (WHERE status = 'sent'), not a plain
+  // eq(id) — the findOwnedInvoice status checks above alone were a
+  // read-then-write race (two concurrent mark-paid requests could both
+  // pass them before either write executed). Only the request whose
+  // UPDATE still finds status='sent' at the moment it runs can succeed,
+  // mirroring the same pattern used in routes/changeOrders.ts and now
+  // routes/quotes.ts's accept/reject.
   const [updated] = await db
     .update(invoices)
     .set({ status: "paid", paidAt: new Date() })
-    .where(eq(invoices.id, invoice.id))
+    .where(and(eq(invoices.id, invoice.id), eq(invoices.status, "sent")))
     .returning();
+  if (!updated) return res.status(409).json({ error: "الفاتورة مُسدَّدة مسبقاً" });
   logger.info("financial_mutation", { action: "invoice.markPaid", userId: req.userId, companyId: req.companyId, invoiceId: invoice.id });
   res.json(updated);
 });

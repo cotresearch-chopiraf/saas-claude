@@ -161,8 +161,8 @@ describe("Historical compatibility", () => {
     await createInvoice({ projectId });
     const listRes = await request(app).get("/api/invoices").set("Authorization", `Bearer ${ownerToken}`);
     expect(listRes.status).toBe(200);
-    expect(listRes.body.some((i: { projectId: string | null }) => i.projectId === null)).toBe(true);
-    expect(listRes.body.some((i: { projectId: string | null }) => i.projectId === projectId)).toBe(true);
+    expect(listRes.body.invoices.some((i: { projectId: string | null }) => i.projectId === null)).toBe(true);
+    expect(listRes.body.invoices.some((i: { projectId: string | null }) => i.projectId === projectId)).toBe(true);
   });
 });
 

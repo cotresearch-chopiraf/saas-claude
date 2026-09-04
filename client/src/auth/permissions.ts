@@ -46,6 +46,13 @@ export const OWNER_ONLY_ACTIONS = [
   // above.
   "zatca.configure",
   "zatca.submit",
+  // Slice AA — mirrors server/src/lib/permissions.ts's new
+  // "task.delete"/"dailyLog.delete" (create/update remain member-open,
+  // matching this domain's long-established posture; only the
+  // irreversible action is owner-gated, same precedent as every other
+  // ".delete"-shaped action).
+  "task.delete",
+  "dailyLog.delete",
 ] as const;
 
 export type PermissionAction = (typeof OWNER_ONLY_ACTIONS)[number];

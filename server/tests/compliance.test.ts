@@ -102,7 +102,7 @@ describe("compliance: country onboarding, tax calculation, overrides, effective 
     expect(invoice.body.ruleVersionId).toBeTruthy();
 
     const list = await request(app).get("/api/invoices").set("Authorization", `Bearer ${token}`);
-    const row = list.body.find((r: { id: string }) => r.id === invoice.body.id);
+    const row = list.body.invoices.find((r: { id: string }) => r.id === invoice.body.id);
     expect(row.taxAmount).toBe(150);
     expect(row.total).toBe(1150);
   });
@@ -168,7 +168,7 @@ describe("compliance: country onboarding, tax calculation, overrides, effective 
     // The 15% invoice from the "auto-configures VAT 15%" test above,
     // created BEFORE the override to 10% just above, must still read 15%.
     const list = await request(app).get("/api/invoices").set("Authorization", `Bearer ${token}`);
-    const kasInvoice = list.body.find((r: { clientName: string }) => r.clientName === "KSA Client");
+    const kasInvoice = list.body.invoices.find((r: { clientName: string }) => r.clientName === "KSA Client");
     expect(Number(kasInvoice.taxRatePercent)).toBe(15);
 
     const reread = await request(app).get(`/api/invoices/${kasInvoice.id}`).set("Authorization", `Bearer ${token}`);

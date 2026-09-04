@@ -115,9 +115,9 @@ describe("invoice tax calculation", () => {
       .send({ clientName: "Client", items: [{ description: "A", amount: 100 }, { description: "B", amount: 50 }] });
 
     const list = await request(app).get("/api/invoices").set("Authorization", `Bearer ${token}`);
-    expect(list.body[0].subtotal).toBe(150);
-    expect(list.body[0].taxAmount).toBe(15);
-    expect(list.body[0].total).toBe(165);
+    expect(list.body.invoices[0].subtotal).toBe(150);
+    expect(list.body.invoices[0].taxAmount).toBe(15);
+    expect(list.body.invoices[0].total).toBe(165);
   });
 });
 

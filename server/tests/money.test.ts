@@ -120,7 +120,7 @@ describe("invoice financial precision via the real HTTP API", () => {
     expect(created.status).toBe(201);
 
     const list = await request(app).get("/api/invoices").set("Authorization", `Bearer ${token}`);
-    const row = list.body[0];
+    const row = list.body.invoices[0];
     expect(isTwoDecimalPrecise(row.subtotal)).toBe(true);
     expect(isTwoDecimalPrecise(row.taxAmount)).toBe(true);
     expect(isTwoDecimalPrecise(row.total)).toBe(true);

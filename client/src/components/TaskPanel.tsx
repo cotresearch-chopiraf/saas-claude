@@ -1,6 +1,10 @@
 import { FormEvent, useEffect, useState } from "react";
-import { apiFetch } from "../api/client";
+import { apiFetch, ApiError } from "../api/client";
 import type { Task, TaskStatus } from "../api/types";
+import { Skeleton } from "../ui/Skeleton";
+import { ErrorState } from "../ui/ErrorState";
+import { ConfirmDialog } from "../ui/ConfirmDialog";
+import { Can } from "../auth/Can";
 
 const statusLabel: Record<TaskStatus, string> = {
   todo: "لم تبدأ",
@@ -15,12 +19,20 @@ const nextStatus: Record<TaskStatus, TaskStatus> = {
 };
 
 export function TaskPanel({ projectId }: { projectId: string }) {
-  const [tasks, setTasks] = useState<Task[]>([]);
+  // Slice AA — null means "not loaded yet" (distinct from an empty list),
+  // matching the loading/error/empty-state pattern the rest of the
+  // product already uses (FinancialTable.tsx).
+  const [tasks, setTasks] = useState<Task[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [assigneeName, setAssigneeName] = useState("");
+  const [pendingDelete, setPendingDelete] = useState<Task | null>(null);
 
   function load() {
-    apiFetch<Task[]>(`/projects/${projectId}/tasks`).then(setTasks);
+    setError(null);
+    apiFetch<Task[]>(`/projects/${projectId}/tasks`)
+      .then(setTasks)
+      .catch((err) => setError(err instanceof ApiError ? err.message : "تعذّر تحميل المهام"));
   }
 
   useEffect(load, [projectId]);
@@ -44,10 +56,15 @@ export function TaskPanel({ projectId }: { projectId: string }) {
     load();
   }
 
-  async function removeTask(task: Task) {
-    await apiFetch(`/projects/${projectId}/tasks/${task.id}`, { method: "DELETE" });
+  async function confirmRemove() {
+    if (!pendingDelete) return;
+    await apiFetch(`/projects/${projectId}/tasks/${pendingDelete.id}`, { method: "DELETE" });
+    setPendingDelete(null);
     load();
   }
+
+  if (error) return <ErrorState message={error} onRetry={load} />;
+  if (tasks === null) return <Skeleton rows={3} />;
 
   return (
     <div>
@@ -73,9 +90,15 @@ export function TaskPanel({ projectId }: { projectId: string }) {
               >
                 {statusLabel[task.status]}
               </button>
-              <button onClick={() => removeTask(task)} className="text-stone-300 hover:text-red-500" aria-label="حذف المهمة">
-                ✕
-              </button>
+              <Can permission="task.delete">
+                <button
+                  onClick={() => setPendingDelete(task)}
+                  className="text-stone-300 hover:text-red-500"
+                  aria-label="حذف المهمة"
+                >
+                  ✕
+                </button>
+              </Can>
             </div>
           </li>
         ))}
@@ -98,6 +121,15 @@ export function TaskPanel({ projectId }: { projectId: string }) {
         />
         <button className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white">إضافة</button>
       </form>
+
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title="حذف المهمة"
+        message={`هل تريدين حذف المهمة "${pendingDelete?.title ?? ""}"؟ لا يمكن التراجع عن هذا الإجراء.`}
+        destructive
+        onConfirm={confirmRemove}
+        onCancel={() => setPendingDelete(null)}
+      />
     </div>
   );
 }

@@ -33,6 +33,7 @@ import { forecastRouter } from "./routes/forecast.js";
 import { cashflowRouter } from "./routes/cashflow.js";
 import { documentsRouter } from "./routes/documents.js";
 import { auditEventsRouter } from "./routes/auditEvents.js";
+import { notificationsRouter } from "./routes/notifications.js";
 import { zatcaRouter } from "./routes/zatca.js";
 import { platformZatcaRouter } from "./routes/platformZatca.js";
 import { platformAuthRouter } from "./routes/platformAuth.js";
@@ -105,6 +106,10 @@ export function buildApp() {
   app.use("/api/public/invoices", publicInvoicesRouter);
   app.use("/api/compliance", requireAuth, complianceRouter);
   app.use("/api/audit-events", requireAuth, auditEventsRouter);
+  // Slice AA Scope F — minimal notification foundation. See
+  // routes/notifications.ts and lib/notifications.ts for the ownership
+  // contract (companyId + recipientUserId, both from the verified JWT).
+  app.use("/api/notifications", requireAuth, notificationsRouter);
   // MIDAD ZATCA e-invoicing (Slice 3) — tenant-scoped configuration and
   // connection API. See routes/zatca.ts's own file comment.
   app.use("/api/zatca", requireAuth, zatcaRouter);

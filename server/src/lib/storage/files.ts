@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "../../db/client.js";
 import { files } from "../../db/schema.js";
-import { storageProvider } from "./localDiskProvider.js";
+import { storageProvider } from "./provider.js";
 
 export interface UploadFileInput {
   companyId: string;

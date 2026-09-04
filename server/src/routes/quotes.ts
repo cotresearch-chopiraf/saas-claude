@@ -12,18 +12,41 @@ import { computeTotals } from "../lib/money.js";
 import { requirePermission } from "../lib/permissions.js";
 import { logger } from "../lib/logger.js";
 import { calculateTax } from "../lib/compliance/engine.js";
+import { withIdempotency, IdempotencyConflictError } from "../lib/idempotency.js";
 
 export const quotesRouter = Router();
 export const publicQuotesRouter = Router();
 
+// Slice AA Scope G — company-wide quote list is one of this slice's own
+// priority pagination targets. Same limit/offset/hasMore convention as
+// routes/auditEvents.ts: fetch limit+1 rows to detect hasMore without a
+// separate COUNT query, deterministic newest-first ordering (unchanged),
+// server-enforced max page size (a client can never request an unbounded
+// page).
+const DEFAULT_LIST_LIMIT = 20;
+const MAX_LIST_LIMIT = 100;
+
+const listQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(MAX_LIST_LIMIT).default(DEFAULT_LIST_LIMIT),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+
 quotesRouter.get("/", async (req, res) => {
+  const parsed = listQuerySchema.safeParse(req.query);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
+  const { limit, offset } = parsed.data;
+
   const rows = await db.query.quotes.findMany({
     where: eq(quotes.companyId, req.companyId!),
     orderBy: (q, { desc }) => [desc(q.createdAt)],
+    limit: limit + 1,
+    offset,
   });
+  const hasMore = rows.length > limit;
+  const page = hasMore ? rows.slice(0, limit) : rows;
 
   const withTotals = await Promise.all(
-    rows.map(async (quote) => {
+    page.map(async (quote) => {
       const items = await db.query.quoteItems.findMany({ where: eq(quoteItems.quoteId, quote.id) });
       // Quotes are opt-in to tax (see createSchema above): a quote's own
       // frozen taxRatePercent is used when present, exactly as invoices.ts
@@ -34,7 +57,7 @@ quotesRouter.get("/", async (req, res) => {
       return { ...quote, ...totals };
     }),
   );
-  res.json(withTotals);
+  res.json({ quotes: withTotals, limit, offset, hasMore });
 });
 
 const languageEnum = z.enum(["ar", "fr", "en"]);
@@ -55,21 +78,18 @@ const createSchema = z.object({
     .min(1, "أضف بنداً واحداً على الأقل"),
 });
 
-quotesRouter.post("/", async (req, res) => {
-  const parsed = createSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
-
+async function createQuote(companyId: string, data: z.infer<typeof createSchema>) {
   let taxRatePercent: number | undefined;
   let taxCategory: string | undefined;
   let ruleVersionId: string | undefined;
   let overrideReference: string | undefined;
 
-  if (parsed.data.taxCategory) {
+  if (data.taxCategory) {
     const taxResult = await calculateTax({
-      companyId: req.companyId!,
+      companyId,
       transactionDate: new Date().toISOString().slice(0, 10),
-      taxCategory: parsed.data.taxCategory,
-      itemAmounts: parsed.data.items.map((item) => item.amount),
+      taxCategory: data.taxCategory,
+      itemAmounts: data.items.map((item) => item.amount),
     });
     if (taxResult.status === "calculated") {
       taxRatePercent = taxResult.taxRatePercent!;
@@ -87,16 +107,16 @@ quotesRouter.post("/", async (req, res) => {
   // this codebase already uses (contracts.ts, boq.ts, commitments.ts,
   // invoices.ts). Without it, a failure between the two inserts would
   // leave a permanently orphaned, item-less quote.
-  const quote = await db.transaction(async (tx) => {
+  return db.transaction(async (tx) => {
     const [created] = await tx
       .insert(quotes)
       .values({
-        companyId: req.companyId!,
-        quoteNumber: await nextQuoteNumber(req.companyId!),
-        clientName: parsed.data.clientName,
-        clientEmail: parsed.data.clientEmail || undefined,
-        projectName: parsed.data.projectName,
-        language: parsed.data.language,
+        companyId,
+        quoteNumber: await nextQuoteNumber(companyId),
+        clientName: data.clientName,
+        clientEmail: data.clientEmail || undefined,
+        projectName: data.projectName,
+        language: data.language,
         taxRatePercent: taxRatePercent !== undefined ? String(taxRatePercent) : undefined,
         taxCategory,
         ruleVersionId,
@@ -106,7 +126,7 @@ quotesRouter.post("/", async (req, res) => {
       .returning();
 
     await tx.insert(quoteItems).values(
-      parsed.data.items.map((item) => ({
+      data.items.map((item) => ({
         quoteId: created.id,
         description: item.description,
         amount: String(item.amount),
@@ -115,7 +135,33 @@ quotesRouter.post("/", async (req, res) => {
 
     return created;
   });
+}
 
+quotesRouter.post("/", async (req, res) => {
+  const parsed = createSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
+
+  // Slice AA Scope E — opt-in idempotency: a client that supplies an
+  // Idempotency-Key header is protected from creating a duplicate quote on
+  // a retried request (network timeout, double submit); a client that
+  // doesn't send the header keeps the exact prior behavior.
+  const idempotencyKey = req.header("Idempotency-Key");
+  if (idempotencyKey) {
+    try {
+      const outcome = await withIdempotency(req.companyId!, "quote.create", idempotencyKey, req.body, async () => {
+        const created = await createQuote(req.companyId!, parsed.data);
+        return { status: 201, body: created };
+      });
+      return res.status(outcome.status).json(outcome.body);
+    } catch (err) {
+      if (err instanceof IdempotencyConflictError) {
+        return res.status(409).json({ error: "تم استخدام مفتاح idempotency هذا مسبقاً بطلب مختلف" });
+      }
+      throw err;
+    }
+  }
+
+  const quote = await createQuote(req.companyId!, parsed.data);
   res.status(201).json(quote);
 });
 
@@ -230,21 +276,35 @@ publicQuotesRouter.post("/:token/accept", async (req: Request<{ token: string }>
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
 
   const quote = await db.query.quotes.findFirst({ where: eq(quotes.publicToken, req.params.token) });
-  if (!quote || quote.status !== "sent") return res.status(409).json({ error: "لا يمكن قبول عرض السعر هذا" });
+  if (!quote) return res.status(409).json({ error: "لا يمكن قبول عرض السعر هذا" });
 
+  // Slice AA — conditional UPDATE (WHERE status = 'sent'), not a plain
+  // eq(id) — the earlier findFirst's status check alone was a genuine
+  // read-then-write race: two concurrent accept requests (or an
+  // accept/reject race) could both pass that check before either write
+  // executed. Only the request whose UPDATE still finds status='sent' at
+  // the moment it runs can ever succeed now, mirroring the exact pattern
+  // already proven in routes/changeOrders.ts's decision route.
   const [updated] = await db
     .update(quotes)
     .set({ status: "accepted", acceptedByName: parsed.data.acceptedByName, acceptedAt: new Date() })
-    .where(eq(quotes.id, quote.id))
+    .where(and(eq(quotes.id, quote.id), eq(quotes.status, "sent")))
     .returning();
+  if (!updated) return res.status(409).json({ error: "لا يمكن قبول عرض السعر هذا" });
   res.json(updated);
 });
 
 publicQuotesRouter.post("/:token/reject", async (req: Request<{ token: string }>, res: Response) => {
   const quote = await db.query.quotes.findFirst({ where: eq(quotes.publicToken, req.params.token) });
-  if (!quote || quote.status !== "sent") return res.status(409).json({ error: "لا يمكن رفض عرض السعر هذا" });
+  if (!quote) return res.status(409).json({ error: "لا يمكن رفض عرض السعر هذا" });
 
-  const [updated] = await db.update(quotes).set({ status: "rejected" }).where(eq(quotes.id, quote.id)).returning();
+  // Slice AA — same conditional-UPDATE hardening as accept above.
+  const [updated] = await db
+    .update(quotes)
+    .set({ status: "rejected" })
+    .where(and(eq(quotes.id, quote.id), eq(quotes.status, "sent")))
+    .returning();
+  if (!updated) return res.status(409).json({ error: "لا يمكن رفض عرض السعر هذا" });
   res.json(updated);
 });
 

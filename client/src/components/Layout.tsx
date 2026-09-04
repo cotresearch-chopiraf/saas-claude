@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
+import { NotificationBell } from "./NotificationBell";
 import type { ReactNode } from "react";
 
 // fullWidth: pages that manage their own inner layout (currently only the
@@ -35,6 +36,7 @@ export function Layout({ children, fullWidth = false }: { children: ReactNode; f
           </div>
           {user && (
             <div className="flex items-center gap-4 text-sm text-stone-600">
+              <NotificationBell />
               <span>{user.name}</span>
               <button onClick={logout} className="text-stone-400 hover:text-stone-700">
                 تسجيل الخروج

@@ -2,7 +2,18 @@ import { FormEvent, useEffect, useState } from "react";
 import { Layout } from "../components/Layout";
 import { LanguageSelect } from "../components/LanguageSelect";
 import { apiFetch, ApiError, getToken } from "../api/client";
+import { listInvoices } from "../api/invoices";
 import type { DocumentLanguage, Invoice } from "../api/types";
+
+// Slice AA Scope G — GET /api/invoices is now paginated server-side (a
+// server-enforced max page size, closing the previous unbounded-query
+// finding). This page's own paid-revenue/paid-tax summary cards are
+// computed over the FULL invoice list (a real, pre-existing figure this
+// slice must not silently make partial), so load() walks every page here
+// rather than switching to a manual "load more" — each individual request
+// is still bounded, this only changes one large query into several capped
+// ones.
+const PAGE_SIZE = 100;
 
 const statusLabel: Record<Invoice["status"], string> = { draft: "مسودة", sent: "أُرسلت", paid: "مُسدَّدة" };
 const statusColor: Record<Invoice["status"], string> = {
@@ -33,14 +44,25 @@ export function Invoices() {
   const [showForm, setShowForm] = useState(false);
   const [disabled, setDisabled] = useState(false);
 
-  function load() {
-    apiFetch<Invoice[]>("/invoices")
-      .then(setInvoices)
-      .catch((err) => {
-        if (err instanceof ApiError) setDisabled(true);
-      });
+  async function load() {
+    try {
+      const all: Invoice[] = [];
+      let offset = 0;
+      let hasMore = true;
+      while (hasMore) {
+        const page = await listInvoices({ limit: PAGE_SIZE, offset });
+        all.push(...page.invoices);
+        hasMore = page.hasMore;
+        offset += page.invoices.length;
+      }
+      setInvoices(all);
+    } catch (err) {
+      if (err instanceof ApiError) setDisabled(true);
+    }
   }
-  useEffect(load, []);
+  useEffect(() => {
+    load();
+  }, []);
 
   async function sendInvoice(invoice: Invoice) {
     await apiFetch(`/invoices/${invoice.id}/send`, { method: "PATCH" });

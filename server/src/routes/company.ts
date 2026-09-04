@@ -225,13 +225,25 @@ companyRouter.post("/invites", requireOwner, async (req, res) => {
     })
     .returning({ id: companyInvites.id, email: companyInvites.email, role: companyInvites.role });
 
-  sendMail(
-    parsed.data.email,
-    "دعوة للانضمام إلى فريقك على نظام تشغيل المقاولين",
-    `رابط قبول الدعوة (صالح 7 أيام): /accept-invite?token=${token}`,
-  );
+  // Slice AA — the invite row already exists regardless of delivery
+  // outcome (an owner can always see it in GET /invites and resend by
+  // recreating it), so a mail failure is logged and reported back via
+  // emailDelivered rather than failing the whole request — this never
+  // claims the email was delivered when it wasn't (see this slice's own
+  // production-configuration rule).
+  let emailDelivered = true;
+  try {
+    await sendMail(
+      parsed.data.email,
+      "دعوة للانضمام إلى فريقك على نظام تشغيل المقاولين",
+      `رابط قبول الدعوة (صالح 7 أيام): /accept-invite?token=${token}`,
+    );
+  } catch {
+    emailDelivered = false;
+    logger.error("invite_email_failed", { companyId: req.companyId, inviteId: invite.id });
+  }
 
-  res.status(201).json(invite);
+  res.status(201).json({ ...invite, emailDelivered });
 });
 
 companyRouter.delete("/invites/:id", requireOwner, async (req, res) => {

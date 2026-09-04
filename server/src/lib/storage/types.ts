@@ -7,7 +7,7 @@
 // the `files` table's shape.
 
 export interface StoredFile {
-  storageProvider: "local";
+  storageProvider: "local" | "s3";
   storageKey: string;
   size: number;
   checksum: string;

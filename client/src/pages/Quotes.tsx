@@ -3,7 +3,10 @@ import { useNavigate } from "react-router-dom";
 import { Layout } from "../components/Layout";
 import { LanguageSelect } from "../components/LanguageSelect";
 import { apiFetch, ApiError, getToken } from "../api/client";
+import { listQuotes } from "../api/quotes";
 import type { DocumentLanguage, Quote } from "../api/types";
+
+const PAGE_SIZE = 20;
 
 const money = (n: number) => n.toLocaleString("ar", { maximumFractionDigits: 2 }) + " $";
 
@@ -39,13 +42,29 @@ interface DraftItem {
 
 export function Quotes() {
   const [quotes, setQuotes] = useState<Quote[]>([]);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const navigate = useNavigate();
 
   function load() {
-    apiFetch<Quote[]>("/quotes").then(setQuotes);
+    listQuotes({ limit: PAGE_SIZE, offset: 0 }).then((page) => {
+      setQuotes(page.quotes);
+      setHasMore(page.hasMore);
+    });
   }
   useEffect(load, []);
+
+  async function loadMore() {
+    setLoadingMore(true);
+    try {
+      const page = await listQuotes({ limit: PAGE_SIZE, offset: quotes.length });
+      setQuotes((prev) => [...prev, ...page.quotes]);
+      setHasMore(page.hasMore);
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   async function sendQuote(quote: Quote) {
     await apiFetch(`/quotes/${quote.id}/send`, { method: "PATCH" });
@@ -150,6 +169,17 @@ export function Quotes() {
           </li>
         )}
       </ul>
+      {hasMore && (
+        <div className="pt-4 text-center">
+          <button
+            disabled={loadingMore}
+            onClick={loadMore}
+            className="rounded-md border border-stone-300 px-4 py-2 text-sm text-stone-600 disabled:opacity-50"
+          >
+            {loadingMore ? "جارٍ التحميل..." : "تحميل المزيد"}
+          </button>
+        </div>
+      )}
     </Layout>
   );
 }

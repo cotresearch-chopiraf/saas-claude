@@ -1000,7 +1000,10 @@ export const auditEvents = pgTable(
 // schema change. A new version of an evidence file is a NEW row
 // (previousVersionId points back) — no route ever updates storageKey on an
 // existing row, so historical evidence is never silently replaced.
-export const storageProviderEnum = pgEnum("storage_provider", ["local"]);
+// Slice AA — "s3" added: any S3-compatible object store (see
+// lib/storage/s3Provider.ts). Purely additive — existing "local" rows are
+// unaffected.
+export const storageProviderEnum = pgEnum("storage_provider", ["local", "s3"]);
 
 export const files = pgTable(
   "files",
@@ -1029,6 +1032,84 @@ export const files = pgTable(
     // (and entityType/entityId) — companyId is the leading, most-selective
     // filter every document-access path checks first.
     companyIdx: index("files_company_idx").on(table.companyId),
+  }),
+);
+
+// --- Idempotency ledger ---
+// Slice AA Scope E — generic idempotency-key ledger for the two mutations
+// identified as genuinely duplicate-risk (invoice/quote creation: a network
+// retry or a double-click must never create two financial documents). Keyed
+// per (companyId, operation, key) so no two tenants' keys can ever collide,
+// and a request-body fingerprint so the SAME key reused with a materially
+// different payload is rejected instead of silently replaying a stale
+// result. This is intentionally separate from ZATCA's own submission-level
+// idempotency (zatcaSubmissions' natural-key uniqueness below) — that
+// mechanism belongs to the frozen ZATCA compliance architecture and is
+// neither reused nor modified here.
+export const idempotencyOperationEnum = pgEnum("idempotency_operation", ["invoice.create", "quote.create"]);
+export const idempotencyStatusEnum = pgEnum("idempotency_status", ["pending", "completed"]);
+
+export const idempotencyKeys = pgTable(
+  "idempotency_keys",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    operation: idempotencyOperationEnum("operation").notNull(),
+    key: text("key").notNull(),
+    requestFingerprint: text("request_fingerprint").notNull(),
+    // "pending" while the leader request is still executing the underlying
+    // mutation; a follower polls until this flips to "completed" rather
+    // than racing a second write. See lib/idempotency.ts.
+    status: idempotencyStatusEnum("status").notNull().default("pending"),
+    responseStatus: integer("response_status"),
+    responseBody: jsonb("response_body"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    companyOperationKeyUnique: uniqueIndex("idempotency_keys_company_operation_key_unique").on(
+      table.companyId,
+      table.operation,
+      table.key,
+    ),
+  }),
+);
+
+// --- Notifications ---
+// Slice AA Scope F — minimal tenant-scoped notification foundation. No
+// producer is wired up yet by this slice (F5: build the model + a minimal
+// API now; integrate specific event sources — tasks, approvals, invitations,
+// ZATCA operational events — only when that work is itself in scope).
+// recipientUserId is the sole ownership boundary: every route in
+// routes/notifications.ts filters by (companyId, recipientUserId) so a user
+// can never read or mark-read another user's notification, even within the
+// same company. "type" is deliberately free text, not an enum — the same
+// choice audit_events made for its own "action"/"entityType" columns — so a
+// future producer never needs a schema migration just to add a new kind of
+// notification.
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    recipientUserId: uuid("recipient_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    type: text("type").notNull(),
+    title: text("title").notNull(),
+    message: text("message").notNull(),
+    readAt: timestamp("read_at"),
+    referenceEntityType: text("reference_entity_type"),
+    referenceEntityId: uuid("reference_entity_id"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    // Every read path (list, unread-count) filters by exactly this triple
+    // and orders by createdAt — a single composite index covers both.
+    recipientIdx: index("notifications_recipient_idx").on(table.companyId, table.recipientUserId, table.createdAt),
   }),
 );
 
