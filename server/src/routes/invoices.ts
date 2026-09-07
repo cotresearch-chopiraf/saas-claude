@@ -23,10 +23,12 @@ import { recordAuditEvent } from "../lib/audit.js";
 import { logger } from "../lib/logger.js";
 import { calculateTax } from "../lib/compliance/engine.js";
 import { withIdempotency, IdempotencyConflictError } from "../lib/idempotency.js";
+import { publicDocumentRateLimit } from "../middleware/rateLimit.js";
 
 export const invoicesRouter = Router();
 export const publicInvoicesRouter = Router();
 export const projectInvoicesRouter = Router({ mergeParams: true });
+publicInvoicesRouter.use(publicDocumentRateLimit);
 
 // Invoicing is an optional module — a company that switched it off in
 // settings gets a clean 403 instead of the feature quietly still working.
@@ -430,7 +432,11 @@ invoicesRouter.get("/:id/pdf", async (req: Request<{ id: string }>, res: Respons
     res.setHeader("Content-Disposition", `inline; filename="invoice.pdf"`);
     res.send(pdf);
   } catch (err) {
-    console.error(err);
+    logger.error("invoice_pdf_generation_failed", {
+      companyId: req.companyId,
+      invoiceId: req.params.id,
+      message: err instanceof Error ? err.message : "unknown error",
+    });
     res.status(500).json({ error: "تعذّر إنشاء ملف PDF" });
   }
 });
@@ -470,7 +476,11 @@ publicInvoicesRouter.get("/:token/pdf", async (req: Request<{ token: string }>, 
     res.setHeader("Content-Disposition", `inline; filename="invoice.pdf"`);
     res.send(pdf);
   } catch (err) {
-    console.error(err);
+    logger.error("invoice_pdf_generation_failed", {
+      companyId: invoice.companyId,
+      invoiceId: invoice.id,
+      message: err instanceof Error ? err.message : "unknown error",
+    });
     res.status(500).json({ error: "تعذّر إنشاء ملف PDF" });
   }
 });

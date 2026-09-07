@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { and, eq, gt, isNull } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { companies, companyInvites, passwordResetTokens, users } from "../db/schema.js";
+import { companies, companyInvites, passwordResetTokens, userSessions, users } from "../db/schema.js";
 import { hashPassword, verifyPassword } from "../lib/password.js";
 import { signToken } from "../lib/jwt.js";
 import { requireAuth } from "../middleware/auth.js";
@@ -14,6 +14,16 @@ import { pgErrorInfo } from "../lib/pgError.js";
 
 export const authRouter = Router();
 authRouter.use(authRateLimit);
+
+// One userSessions row per issued token — see that table's own schema
+// comment. Every place this router hands out a token (register, login,
+// accept-invite) goes through this single helper so none of them can drift
+// out of sync with middleware/auth.ts's expectation that every sessionId
+// it verifies has a backing row.
+async function issueSessionToken(userId: string, companyId: string): Promise<string> {
+  const [session] = await db.insert(userSessions).values({ userId }).returning({ id: userSessions.id });
+  return signToken({ userId, companyId, sessionId: session.id });
+}
 
 const registerSchema = z.object({
   companyName: z.string().min(2, "اسم الشركة قصير جداً"),
@@ -46,7 +56,7 @@ authRouter.post("/register", async (req, res) => {
     })
     .returning();
 
-  const token = signToken({ userId: user.id, companyId: company.id });
+  const token = await issueSessionToken(user.id, company.id);
   res.status(201).json({
     token,
     user: { id: user.id, name: user.name, email: user.email },
@@ -71,7 +81,7 @@ authRouter.post("/login", async (req, res) => {
     return res.status(401).json({ error: "البريد الإلكتروني أو كلمة المرور غير صحيحة" });
   }
 
-  const token = signToken({ userId: user.id, companyId: user.companyId });
+  const token = await issueSessionToken(user.id, user.companyId);
   res.json({
     token,
     user: { id: user.id, name: user.name, email: user.email },
@@ -91,6 +101,16 @@ authRouter.get("/me", requireAuth, async (req, res) => {
     user: { id: user.id, name: user.name, email: user.email, role: user.role },
     company: company ? { id: company.id, name: company.name } : null,
   });
+});
+
+// Revokes only the current token's own session row — every other device
+// this user is logged in on keeps working, matching ordinary "log out of
+// this device" behavior. Idempotent: calling it twice, or with a token
+// whose session is already revoked, is a no-op both times (requireAuth
+// already refused the second call before this handler runs).
+authRouter.post("/logout", requireAuth, async (req, res) => {
+  await db.update(userSessions).set({ revokedAt: new Date() }).where(eq(userSessions.id, req.sessionId!));
+  res.json({ message: "تم تسجيل الخروج" });
 });
 
 const requestResetSchema = z.object({ email: z.string().email() });
@@ -161,6 +181,14 @@ authRouter.post("/reset-password", async (req, res) => {
     if (!record) return null;
 
     await tx.update(users).set({ passwordHash: newPasswordHash }).where(eq(users.id, record.userId));
+    // A password reset is exactly the moment an account may have just been
+    // compromised (or the owner is deliberately locking out a stolen
+    // device) — revoke every existing session so this new password is the
+    // only thing that gets back in, not just future logins.
+    await tx
+      .update(userSessions)
+      .set({ revokedAt: new Date() })
+      .where(and(eq(userSessions.userId, record.userId), isNull(userSessions.revokedAt)));
     return record;
   });
 
@@ -236,6 +264,6 @@ authRouter.post("/accept-invite", async (req, res) => {
     throw err;
   }
 
-  const token = signToken({ userId: user.id, companyId: user.companyId });
+  const token = await issueSessionToken(user.id, user.companyId);
   res.status(201).json({ token, user: { id: user.id, name: user.name, email: user.email } });
 });

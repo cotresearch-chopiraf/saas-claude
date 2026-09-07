@@ -133,6 +133,29 @@ export const users = pgTable("users", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+// Session revocation for regular (tenant) users — same "row per issued
+// token, revokedAt checked on every request" pattern already proven for
+// platform support sessions (see supportSessions below). A 7-day JWT alone
+// only proves who signed in, not whether that specific token should still
+// work right now; without this, a leaked token or a member removed by the
+// owner keeps working for up to 7 more days. id doubles as the JWT's "sid"
+// claim (lib/jwt.ts), so revoking a row immediately invalidates the one
+// token issued for it.
+export const userSessions = pgTable(
+  "user_sessions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    revokedAt: timestamp("revoked_at"),
+  },
+  (table) => ({
+    userIdx: index("user_sessions_user_idx").on(table.userId),
+  }),
+);
+
 export const projects = pgTable(
   "projects",
   {

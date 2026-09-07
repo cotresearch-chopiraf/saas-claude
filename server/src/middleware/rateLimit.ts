@@ -1,4 +1,13 @@
+import type { Request } from "express";
 import rateLimit from "express-rate-limit";
+
+// Same test-environment reasoning as AUTH_RATE_LIMIT_MAX below, generalized
+// so every limiter in this file scales the same way under vitest's one
+// -shared-process-per-file test runs (see that constant's own comment) —
+// production and development are never affected by this function.
+function limitFor(productionMax: number, testMax: number): number {
+  return process.env.NODE_ENV === "test" ? testMax : productionMax;
+}
 
 // 10 attempts per 15 minutes per IP in development and production — enough
 // headroom for a real user who mistypes a password a few times, tight
@@ -25,4 +34,43 @@ export const authRateLimit = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: "محاولات كثيرة جداً، الرجاء المحاولة لاحقاً" },
+});
+
+// Real ZATCA submissions have a cost/quota at the provider — an unbounded
+// retry loop against POST /submissions/:id/submit could exhaust it or get
+// the whole company temporarily blocked by ZATCA, which authRateLimit
+// (auth-routes only) never covered. Keyed by companyId, not IP: the actual
+// resource being protected is the company's own ZATCA quota, and req.userId
+// already went through requireAuth by the time this runs (see app.ts's
+// `requireAuth, zatcaRouter` mount), so every member of a company shares
+// one budget instead of each getting their own by switching IPs. 30/15min
+// is a conservative engineering default (no official ZATCA rate is
+// published anywhere this project could verify — see docs/zatca/) chosen
+// to comfortably cover a real batch of legitimate submissions while still
+// bounding a runaway retry loop or a compromised account.
+export const ZATCA_SUBMIT_RATE_LIMIT_MAX = limitFor(30, 300);
+
+export const zatcaSubmitRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: ZATCA_SUBMIT_RATE_LIMIT_MAX,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req: Request) => req.companyId ?? req.ip ?? "unknown",
+  message: { error: "عدد كبير جداً من محاولات إرسال ZATCA، الرجاء المحاولة لاحقاً" },
+});
+
+// Public, unauthenticated document links (a client viewing/downloading a
+// quote or invoice via its publicToken, no login) — currently the only
+// customer-facing routes with no rate limit of any kind. The token itself
+// is a random 32-byte value (lib/tokens.ts), not brute-forceable in any
+// practical sense; this is coarse abuse/scraping protection, not a
+// brute-force defense, hence the much higher ceiling than authRateLimit.
+export const PUBLIC_DOCUMENT_RATE_LIMIT_MAX = limitFor(60, 600);
+
+export const publicDocumentRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: PUBLIC_DOCUMENT_RATE_LIMIT_MAX,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "عدد كبير جداً من الطلبات، الرجاء المحاولة لاحقاً" },
 });

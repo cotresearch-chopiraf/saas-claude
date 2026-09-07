@@ -2,7 +2,7 @@ import type { NextFunction, Request, Response } from "express";
 import { eq } from "drizzle-orm";
 import { verifyToken } from "../lib/jwt.js";
 import { db } from "../db/client.js";
-import { users } from "../db/schema.js";
+import { users, userSessions } from "../db/schema.js";
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -10,6 +10,9 @@ declare global {
     interface Request {
       userId?: string;
       companyId?: string;
+      // Set alongside userId/companyId — routes/auth.ts's own /logout
+      // route is the only current reader (revokes this exact session).
+      sessionId?: string;
     }
   }
 }
@@ -49,7 +52,19 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     return res.status(401).json({ error: "تم إلغاء تفعيل هذا الحساب، يرجى التواصل مع مالك الشركة" });
   }
 
+  // Same re-read-on-every-request discipline as the status check above,
+  // applied to this specific token rather than the account as a whole —
+  // see userSessions' own schema comment for why this exists.
+  const session = await db.query.userSessions.findFirst({
+    where: eq(userSessions.id, payload.sessionId),
+    columns: { revokedAt: true },
+  });
+  if (!session || session.revokedAt) {
+    return res.status(401).json({ error: "جلسة غير صالحة، الرجاء تسجيل الدخول مجدداً" });
+  }
+
   req.userId = payload.userId;
   req.companyId = payload.companyId;
+  req.sessionId = payload.sessionId;
   next();
 }

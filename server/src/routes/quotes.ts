@@ -13,9 +13,11 @@ import { requirePermission } from "../lib/permissions.js";
 import { logger } from "../lib/logger.js";
 import { calculateTax } from "../lib/compliance/engine.js";
 import { withIdempotency, IdempotencyConflictError } from "../lib/idempotency.js";
+import { publicDocumentRateLimit } from "../middleware/rateLimit.js";
 
 export const quotesRouter = Router();
 export const publicQuotesRouter = Router();
+publicQuotesRouter.use(publicDocumentRateLimit);
 
 // Slice AA Scope G — company-wide quote list is one of this slice's own
 // priority pagination targets. Same limit/offset/hasMore convention as
@@ -242,7 +244,11 @@ quotesRouter.get("/:id/pdf", async (req: Request<{ id: string }>, res: Response)
     res.setHeader("Content-Disposition", `inline; filename="quote.pdf"`);
     res.send(pdf);
   } catch (err) {
-    console.error(err);
+    logger.error("quote_pdf_generation_failed", {
+      companyId: req.companyId,
+      quoteId: req.params.id,
+      message: err instanceof Error ? err.message : "unknown error",
+    });
     res.status(500).json({ error: "تعذّر إنشاء ملف PDF" });
   }
 });
@@ -318,7 +324,11 @@ publicQuotesRouter.get("/:token/pdf", async (req: Request<{ token: string }>, re
     res.setHeader("Content-Disposition", `inline; filename="quote.pdf"`);
     res.send(pdf);
   } catch (err) {
-    console.error(err);
+    logger.error("quote_pdf_generation_failed", {
+      companyId: quote.companyId,
+      quoteId: quote.id,
+      message: err instanceof Error ? err.message : "unknown error",
+    });
     res.status(500).json({ error: "تعذّر إنشاء ملف PDF" });
   }
 });

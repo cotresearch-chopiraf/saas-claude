@@ -7,6 +7,7 @@ import { requirePermission } from "../lib/permissions.js";
 import { recordAuditEvent } from "../lib/audit.js";
 import { logger } from "../lib/logger.js";
 import { pgErrorInfo } from "../lib/pgError.js";
+import { zatcaSubmitRateLimit } from "../middleware/rateLimit.js";
 import {
   createEgsUnit,
   getEgsUnit,
@@ -914,7 +915,7 @@ const SUBMISSION_TERMINAL_OR_INFLIGHT_STATES: (typeof zatcaSubmissionStateEnum.e
 // no-compliance-inference rule: "cleared"/"reported" here means exactly
 // what ZATCA's own clearanceStatus/reportingStatus field said, nothing
 // about ZATCA-wide compliance completion.
-zatcaRouter.post("/submissions/:id/submit", requireSubmit, async (req: Request<{ id: string }>, res: Response) => {
+zatcaRouter.post("/submissions/:id/submit", requireSubmit, zatcaSubmitRateLimit, async (req: Request<{ id: string }>, res: Response) => {
   const submission = await getSubmission(req.companyId!, req.params.id);
   if (!submission) return res.status(404).json({ error: "غير موجود" });
 
