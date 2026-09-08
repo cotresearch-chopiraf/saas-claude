@@ -67,9 +67,11 @@ export function buildApp() {
   // frameguard, etc.) is safe here and left on.
   app.use(helmet({ contentSecurityPolicy: false }));
   // CORS_ORIGIN is unset by default (local dev, CI, and every existing test
-  // never set it), so this is cors(undefined) — identical to the previous
-  // cors() call, zero behavior change until a real deployment sets it to
-  // its actual frontend origin(s). See lib/corsOrigins.ts.
+  // never set it), so outside production this is cors(undefined) —
+  // identical to the previous cors() call, zero behavior change until a
+  // real deployment sets it to its actual frontend origin(s). In production
+  // buildCorsOptions() throws instead of silently falling back to
+  // permissive CORS if CORS_ORIGIN isn't set — see lib/corsOrigins.ts.
   app.use(cors(buildCorsOptions(process.env.CORS_ORIGIN)));
   app.use(express.json());
   // Local-disk logo storage — see lib/uploads.ts for why this is a stopgap.

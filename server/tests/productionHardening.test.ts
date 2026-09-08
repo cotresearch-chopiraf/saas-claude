@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import request from "supertest";
 import { buildApp } from "../src/app.js";
-import { buildCorsOptions } from "../src/lib/corsOrigins.js";
+import { buildCorsOptions, CorsConfigError } from "../src/lib/corsOrigins.js";
 
 // MIDAD production launch hardening: CORS_ORIGIN restriction (opt-in via
 // env, never a hardcoded domain) and safe Helmet defaults (no CSP — this
@@ -23,6 +23,26 @@ describe("buildCorsOptions (pure)", () => {
   it("parses multiple comma-separated origins, trimming whitespace", () => {
     expect(buildCorsOptions("https://a.example.com, https://b.example.com")).toEqual({
       origin: ["https://a.example.com", "https://b.example.com"],
+    });
+  });
+
+  // CORS-001: outside production, a missing CORS_ORIGIN still returns
+  // undefined (permissive) — dev/test behavior is deliberately unchanged.
+  it("outside production, an unset CORS_ORIGIN still returns undefined (dev/test unaffected)", () => {
+    expect(buildCorsOptions(undefined, "development")).toBeUndefined();
+    expect(buildCorsOptions(undefined, "test")).toBeUndefined();
+    expect(buildCorsOptions(undefined, undefined)).toBeUndefined();
+  });
+
+  // CORS-001: production must never fall back to permissive CORS.
+  it("throws CorsConfigError when NODE_ENV=production and CORS_ORIGIN is unset", () => {
+    expect(() => buildCorsOptions(undefined, "production")).toThrow(CorsConfigError);
+    expect(() => buildCorsOptions("", "production")).toThrow(CorsConfigError);
+  });
+
+  it("does not throw when NODE_ENV=production and CORS_ORIGIN is configured", () => {
+    expect(buildCorsOptions("https://app.example.com", "production")).toEqual({
+      origin: ["https://app.example.com"],
     });
   });
 });
@@ -71,6 +91,46 @@ describe("CORS behavior over real HTTP", () => {
     const res = await request(app).get("/api/health/live");
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ status: "ok" });
+  });
+});
+
+// CORS-001: production must fail closed. These mutate NODE_ENV alongside
+// CORS_ORIGIN (restored in afterEach) and only ever touch the
+// unauthenticated /api/health endpoint, so they can't interact with
+// anything else that branches on NODE_ENV (mailer, storage provider, ZATCA
+// secret store) — none of those are reachable from a plain health check.
+describe("CORS behavior over real HTTP — production", () => {
+  const originalCorsOrigin = process.env.CORS_ORIGIN;
+  const originalNodeEnv = process.env.NODE_ENV;
+  afterEach(() => {
+    if (originalCorsOrigin === undefined) delete process.env.CORS_ORIGIN;
+    else process.env.CORS_ORIGIN = originalCorsOrigin;
+    if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = originalNodeEnv;
+  });
+
+  it("production + missing CORS_ORIGIN: buildApp() refuses to start instead of falling back to permissive CORS", () => {
+    process.env.NODE_ENV = "production";
+    delete process.env.CORS_ORIGIN;
+    expect(() => buildApp()).toThrow(CorsConfigError);
+  });
+
+  it("production + configured CORS_ORIGIN: the allowed origin is reflected", async () => {
+    process.env.NODE_ENV = "production";
+    process.env.CORS_ORIGIN = "https://allowed.example.com";
+    const app = buildApp();
+    const res = await request(app).get("/api/health").set("Origin", "https://allowed.example.com");
+    expect(res.status).toBe(200);
+    expect(res.headers["access-control-allow-origin"]).toBe("https://allowed.example.com");
+  });
+
+  it("production + configured CORS_ORIGIN: a disallowed origin gets no CORS headers", async () => {
+    process.env.NODE_ENV = "production";
+    process.env.CORS_ORIGIN = "https://allowed.example.com";
+    const app = buildApp();
+    const res = await request(app).get("/api/health").set("Origin", "https://evil.example.com");
+    expect(res.status).toBe(200);
+    expect(res.headers["access-control-allow-origin"]).toBeUndefined();
   });
 });
 

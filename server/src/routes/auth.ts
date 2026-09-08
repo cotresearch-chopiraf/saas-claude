@@ -3,7 +3,7 @@ import { z } from "zod";
 import { and, eq, gt, isNull } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { companies, companyInvites, passwordResetTokens, userSessions, users } from "../db/schema.js";
-import { hashPassword, verifyPassword } from "../lib/password.js";
+import { DUMMY_PASSWORD_HASH, hashPassword, verifyPassword } from "../lib/password.js";
 import { signToken } from "../lib/jwt.js";
 import { requireAuth } from "../middleware/auth.js";
 import { authRateLimit } from "../middleware/rateLimit.js";
@@ -77,7 +77,12 @@ authRouter.post("/login", async (req, res) => {
   const { email, password } = parsed.data;
 
   const user = await db.query.users.findFirst({ where: eq(users.email, email) });
-  if (!user || !(await verifyPassword(password, user.passwordHash))) {
+  // AUTH-002: always run bcrypt.compare(), even when no account matches —
+  // comparing against a fixed dummy hash instead of short-circuiting keeps
+  // this branch's cost the same as the real-user branch below, so response
+  // timing can't be used to tell whether an email is registered.
+  const passwordMatches = await verifyPassword(password, user ? user.passwordHash : DUMMY_PASSWORD_HASH);
+  if (!user || !passwordMatches) {
     return res.status(401).json({ error: "البريد الإلكتروني أو كلمة المرور غير صحيحة" });
   }
 
@@ -115,12 +120,21 @@ authRouter.post("/logout", requireAuth, async (req, res) => {
 
 const requestResetSchema = z.object({ email: z.string().email() });
 
+// AUTH-002: a nonexistent account does none of the work below (token
+// insert, mail send) and would otherwise respond measurably faster than a
+// real one — padding every response up to this floor absorbs that gap
+// without creating a token or sending mail for an account that doesn't
+// exist. It only ever adds wait time (max ~one floor's worth), never
+// removes the real work's own latency.
+const MIN_RESET_RESPONSE_MS = 150;
+
 // Always answers the same way whether or not the email exists — the
 // difference in response would otherwise let an attacker enumerate accounts.
 authRouter.post("/request-password-reset", async (req, res) => {
   const parsed = requestResetSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "بريد إلكتروني غير صالح" });
 
+  const startedAt = Date.now();
   const user = await db.query.users.findFirst({ where: eq(users.email, parsed.data.email) });
   if (user) {
     const token = generateToken();
@@ -144,6 +158,11 @@ authRouter.post("/request-password-reset", async (req, res) => {
     } catch {
       logger.error("password_reset_email_failed", { userId: user.id });
     }
+  }
+
+  const elapsedMs = Date.now() - startedAt;
+  if (elapsedMs < MIN_RESET_RESPONSE_MS) {
+    await new Promise((resolve) => setTimeout(resolve, MIN_RESET_RESPONSE_MS - elapsedMs));
   }
   res.json({ message: "إن كان البريد الإلكتروني مسجّلاً، سيصلك رابط إعادة التعيين" });
 });

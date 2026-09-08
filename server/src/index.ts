@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { validateStartupConfig, StartupConfigError } from "./lib/startupConfig.js";
+import { CorsConfigError } from "./lib/corsOrigins.js";
 import { logger } from "./lib/logger.js";
 import { createGracefulShutdown } from "./lib/shutdown.js";
 
@@ -29,7 +30,21 @@ async function main(): Promise<void> {
   const { buildApp } = await import("./app.js");
   const { pool } = await import("./db/client.js");
 
-  const app = buildApp();
+  let app;
+  try {
+    app = buildApp();
+  } catch (err) {
+    // CORS-001: buildApp() itself throws CorsConfigError when
+    // NODE_ENV=production has no CORS_ORIGIN configured — treated the same
+    // as a missing required env var above: log the safe message only, exit
+    // cleanly, never crash with a raw unhandled-rejection stack trace.
+    if (err instanceof CorsConfigError) {
+      logger.error("startup_configuration_invalid", { message: err.message });
+      process.exitCode = 1;
+      return;
+    }
+    throw err;
+  }
   const port = Number(process.env.PORT ?? 4000);
   const server = app.listen(port, () => {
     logger.info("server_listening", { port });
