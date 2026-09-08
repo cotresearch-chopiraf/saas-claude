@@ -8,6 +8,7 @@ import * as x509 from "@peculiar/x509";
 import request from "supertest";
 import { buildApp } from "../src/app.js";
 import { resetDb } from "./setup.js";
+import { useZatcaCsrCurve } from "./helpers/zatcaEnv.js";
 
 // Slice Y — architecture freeze guardrails.
 //
@@ -202,8 +203,8 @@ describe("Slice Y — self-billing independence guard (§6, §21 of the Slice Y 
 // the standard/simplified family check's outcome for positions 0/1 is
 // unaffected by whatever positions 2/3 (0-indexed) contain.
 
+useZatcaCsrCurve();
 beforeAll(() => {
-  process.env.ZATCA_CSR_ECDSA_CURVE = "P-256";
   x509.cryptoProvider.set(webcrypto as unknown as Crypto);
 });
 

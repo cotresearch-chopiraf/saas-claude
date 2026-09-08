@@ -1,7 +1,8 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import { generateEcdsaKeyPair, requireConfiguredEcdsaCurve, importEcdsaPrivateKeyFromPem } from "../src/lib/zatca/csr/keyPair.js";
 import { buildZatcaCsr, validateZatcaCsrFields, type ZatcaCsrFields } from "../src/lib/zatca/csr/csrBuilder.js";
 import { ZatcaConfigurationError, ZatcaValidationError } from "../src/lib/zatca/errors.js";
+import { useZatcaCsrCurve } from "./helpers/zatcaEnv.js";
 
 // Slice 5 continuation — CSR/key-pair generation. See csrBuilder.ts and
 // keyPair.ts file comments for full provenance (which fields/OIDs are
@@ -10,11 +11,7 @@ import { ZatcaConfigurationError, ZatcaValidationError } from "../src/lib/zatca/
 // real signed CSR, honest refusal to guess unverified detail) — never that
 // the output matches what a real ZATCA endpoint will accept.
 
-const originalCurve = process.env.ZATCA_CSR_ECDSA_CURVE;
-afterEach(() => {
-  if (originalCurve === undefined) delete process.env.ZATCA_CSR_ECDSA_CURVE;
-  else process.env.ZATCA_CSR_ECDSA_CURVE = originalCurve;
-});
+useZatcaCsrCurve();
 
 describe("requireConfiguredEcdsaCurve", () => {
   it("throws ZatcaConfigurationError (naming SPEC_TEXT_REQUIRED) when unset", () => {

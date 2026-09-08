@@ -326,6 +326,17 @@ commitmentsRouter.post(
     if (!commitment) return res.status(404).json({ error: "الالتزام غير موجود" });
 
     const result = await db.transaction(async (tx) => {
+      // Same parent-before-child lock order as boq.ts's publish route: the
+      // contract row (if any) is locked FOR UPDATE before the commitment
+      // row, so a contract that completes/terminates concurrently with
+      // this submit can never race past this check.
+      if (commitment.contractId) {
+        const [contractRow] = await tx.select().from(contracts).where(eq(contracts.id, commitment.contractId)).for("update");
+        if (contractRow && CONTRACT_EXECUTION_BLOCKED_STATUSES.includes(contractRow.status)) {
+          return { outcome: "contractBlocked" as const };
+        }
+      }
+
       const [locked] = await tx.select().from(commitments).where(eq(commitments.id, commitment.id)).for("update");
       if (!locked || locked.status !== "draft") return { outcome: "conflict" as const };
 
@@ -362,6 +373,9 @@ commitmentsRouter.post(
       return { outcome: "ok" as const, commitment: updated };
     });
 
+    if (result.outcome === "contractBlocked") {
+      return res.status(409).json({ error: "لا يمكن إرسال التزام مرتبط بعقد منتهٍ أو ملغى" });
+    }
     if (result.outcome === "conflict") {
       return res.status(409).json({ error: "لا يمكن إرسال التزام ليس في حالة مسودة" });
     }
@@ -384,13 +398,25 @@ commitmentsRouter.post(
     const existing = await findOwnedCommitment(req.companyId!, req.params.projectId, req.params.commitmentId);
     if (!existing) return res.status(404).json({ error: "الالتزام غير موجود" });
 
-    const approved = await db.transaction(async (tx) => {
+    const result = await db.transaction(async (tx) => {
+      // Same parent-before-child lock order as submit()/boq.ts's publish
+      // route — the contract row (if any) is locked FOR UPDATE before the
+      // commitment's own atomic conditional UPDATE below, so a contract
+      // that completes/terminates concurrently with this approval can
+      // never race past this check.
+      if (existing.contractId) {
+        const [contractRow] = await tx.select().from(contracts).where(eq(contracts.id, existing.contractId)).for("update");
+        if (contractRow && CONTRACT_EXECUTION_BLOCKED_STATUSES.includes(contractRow.status)) {
+          return { outcome: "contractBlocked" as const };
+        }
+      }
+
       const [updated] = await tx
         .update(commitments)
         .set({ status: "active", approvedBy: req.userId!, approvedAt: new Date(), updatedAt: new Date() })
         .where(and(eq(commitments.id, existing.id), eq(commitments.status, "pending_approval")))
         .returning();
-      if (!updated) return null;
+      if (!updated) return { outcome: "conflict" as const };
 
       await recordAuditEvent(tx, {
         companyId: req.companyId!,
@@ -402,13 +428,16 @@ commitmentsRouter.post(
         afterValue: { status: "active" },
       });
 
-      return updated;
+      return { outcome: "ok" as const, commitment: updated };
     });
 
-    if (!approved) {
+    if (result.outcome === "contractBlocked") {
+      return res.status(409).json({ error: "لا يمكن اعتماد التزام مرتبط بعقد منتهٍ أو ملغى" });
+    }
+    if (result.outcome === "conflict") {
       return res.status(409).json({ error: "لا يمكن اعتماد التزام ليس بانتظار الموافقة" });
     }
-    res.json(approved);
+    res.json(result.commitment);
   },
 );
 
@@ -492,6 +521,17 @@ commitmentsRouter.post(
     }
 
     const result = await db.transaction(async (tx) => {
+      // Same parent-before-child lock order as submit()/approve() above —
+      // the contract row (if any) is locked FOR UPDATE before the
+      // commitment row, so a contract that completes/terminates
+      // concurrently with this amend can never race past this check.
+      if (commitment.contractId) {
+        const [contractRow] = await tx.select().from(contracts).where(eq(contracts.id, commitment.contractId)).for("update");
+        if (contractRow && CONTRACT_EXECUTION_BLOCKED_STATUSES.includes(contractRow.status)) {
+          return { outcome: "contractBlocked" as const };
+        }
+      }
+
       const [locked] = await tx.select().from(commitments).where(eq(commitments.id, commitment.id)).for("update");
       if (!locked || !["active", "partially_fulfilled"].includes(locked.status)) {
         return { outcome: "conflict" as const };
@@ -541,6 +581,9 @@ commitmentsRouter.post(
       return { outcome: "ok" as const, commitment: updated };
     });
 
+    if (result.outcome === "contractBlocked") {
+      return res.status(409).json({ error: "لا يمكن تعديل التزام مرتبط بعقد منتهٍ أو ملغى" });
+    }
     if (result.outcome === "conflict") {
       return res.status(409).json({ error: "لا يمكن تعديل التزام في هذه الحالة" });
     }

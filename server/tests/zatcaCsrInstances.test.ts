@@ -6,6 +6,7 @@ import request from "supertest";
 import { buildApp } from "../src/app.js";
 import { resetDb } from "./setup.js";
 import { db } from "../src/db/client.js";
+import { useZatcaCsrCurve } from "./helpers/zatcaEnv.js";
 
 // Slice J — CSR Instance persistence (EGS Unit -> CSR Instance, 1:many,
 // historical). See docs/zatca (Slices D-I) for the architecture this
@@ -15,8 +16,8 @@ import { db } from "../src/db/client.js";
 
 vi.mock("../src/lib/mailer.js", () => ({ sendMail: vi.fn() }));
 
+useZatcaCsrCurve();
 beforeAll(() => {
-  process.env.ZATCA_CSR_ECDSA_CURVE = "P-256";
   x509.cryptoProvider.set(webcrypto as unknown as Crypto);
 });
 

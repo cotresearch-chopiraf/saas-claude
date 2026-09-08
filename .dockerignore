@@ -25,6 +25,8 @@ server/.env.*
 # image.
 uploads
 server/uploads
+private-uploads
+server/private-uploads
 
 # Editor/OS noise and logs.
 .DS_Store

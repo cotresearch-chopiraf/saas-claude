@@ -31,3 +31,24 @@ export interface StorageProvider {
   // Phase 1) — callers must handle that case rather than assume one exists.
   getPublicUrl(storageKey: string): string | null;
 }
+
+// P0.5 remediation — the only namespace ever meant to be reachable without
+// authentication (company branding logos). Every other namespace
+// (documents, subcontract-ipc-documents, and any future one) is private:
+// access must always go through the authenticated, company/project/entity
+// -scoped download route (routes/documents.ts, routes/
+// subcontractIpcDocuments.ts), never a public static mount or a
+// provider-constructed public URL. Both storage providers (local disk,
+// S3-compatible) consult this same set — a namespace never becomes public
+// just because a provider's configuration happens to make it reachable
+// (e.g. S3_PUBLIC_URL_BASE being set does not make "documents" public).
+export const PUBLIC_STORAGE_NAMESPACES = new Set<string>(["logos"]);
+
+// storageKey is always "<namespace>/<rest>" (see localDiskProvider.ts /
+// s3Provider.ts's save()) — recovering the namespace from a bare
+// storageKey is what lets readAsBuffer()/getPublicUrl() (which only take a
+// key, by this interface's own design) decide public-vs-private without
+// needing the namespace threaded through separately.
+export function namespaceOfStorageKey(storageKey: string): string {
+  return storageKey.split("/")[0] ?? "";
+}

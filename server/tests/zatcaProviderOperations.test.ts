@@ -7,6 +7,7 @@ import request from "supertest";
 import { buildApp } from "../src/app.js";
 import { resetDb } from "./setup.js";
 import { db } from "../src/db/client.js";
+import { useZatcaCsrCurve } from "./helpers/zatcaEnv.js";
 
 // Slice W — internal historical execution layer for Production CSID
 // Onboarding and Renewal (zatca_provider_operations). See
@@ -18,8 +19,8 @@ import { db } from "../src/db/client.js";
 
 vi.mock("../src/lib/mailer.js", () => ({ sendMail: vi.fn() }));
 
+useZatcaCsrCurve();
 beforeAll(() => {
-  process.env.ZATCA_CSR_ECDSA_CURVE = "P-256";
   x509.cryptoProvider.set(webcrypto as unknown as Crypto);
 });
 

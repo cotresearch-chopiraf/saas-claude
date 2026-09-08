@@ -8,13 +8,14 @@ import { buildZatcaInvoiceXml } from "../src/lib/zatca/xmlBuilder.js";
 import { computeCanonicalInvoiceHash } from "../src/lib/zatca/canonicalHash.js";
 import type { CanonicalZatcaDocument } from "../src/lib/zatca/types.js";
 import type { ResolvedZatcaCredential } from "../src/lib/zatca/provider/types.js";
+import { useZatcaCsrCurve } from "./helpers/zatcaEnv.js";
 
 // Slice 5 continuation, task #50 — real QR tags 6-8, tag 9 intentionally
 // never produced (see qrCryptographicTags.ts's file comment: it requires
 // a real ZATCA CA signature this environment cannot obtain).
 
+useZatcaCsrCurve();
 beforeAll(() => {
-  process.env.ZATCA_CSR_ECDSA_CURVE = "P-256";
   x509.cryptoProvider.set(webcrypto as unknown as Crypto);
 });
 

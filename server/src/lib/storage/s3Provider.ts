@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { createHash } from "node:crypto";
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import type { SaveFileInput, StorageProvider, StoredFile } from "./types.js";
+import { PUBLIC_STORAGE_NAMESPACES, namespaceOfStorageKey } from "./types.js";
 
 // Slice AA — the durable production storage provider this codebase's own
 // storage/types.ts header comment already anticipated: "an S3-compatible
@@ -101,6 +102,15 @@ export class S3StorageProvider implements StorageProvider {
 
   getPublicUrl(storageKey: string): string | null {
     if (!this.config.publicUrlBase) return null;
+    // P0.5 remediation (FILES-001) — S3_PUBLIC_URL_BASE being configured
+    // must never make a PRIVATE namespace (documents,
+    // subcontract-ipc-documents) publicly reachable by URL. Only
+    // PUBLIC_STORAGE_NAMESPACES (today, "logos") ever gets a real public
+    // URL back from this method, regardless of bucket/CDN configuration —
+    // the bucket policy/IAM setup is out of this codebase's control, but
+    // this application layer never itself constructs or hands out a
+    // public URL for a private document.
+    if (!PUBLIC_STORAGE_NAMESPACES.has(namespaceOfStorageKey(storageKey))) return null;
     return `${this.config.publicUrlBase.replace(/\/$/, "")}/${storageKey}`;
   }
 }

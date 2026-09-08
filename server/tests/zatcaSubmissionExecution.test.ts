@@ -6,6 +6,7 @@ import * as x509 from "@peculiar/x509";
 import request from "supertest";
 import { buildApp } from "../src/app.js";
 import { resetDb } from "./setup.js";
+import { useZatcaCsrCurve } from "./helpers/zatcaEnv.js";
 
 // Slice AB — real ZATCA provider submission wiring (routes/zatca.ts's
 // /submissions/:id/submit). These tests never touch the real ZATCA
@@ -17,8 +18,8 @@ import { resetDb } from "./setup.js";
 
 const app = buildApp();
 
+useZatcaCsrCurve();
 beforeAll(() => {
-  process.env.ZATCA_CSR_ECDSA_CURVE = "P-256";
   x509.cryptoProvider.set(webcrypto as unknown as Crypto);
 });
 

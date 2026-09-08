@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { customers, projects } from "../db/schema.js";
+import { budgetRevisions, commitments, customers, ipcs, projects } from "../db/schema.js";
 import { requirePermission } from "../lib/permissions.js";
 import { logger } from "../lib/logger.js";
 
@@ -131,11 +131,73 @@ projectsRouter.patch("/:id", async (req, res) => {
   res.json(updated);
 });
 
+// P0.5 remediation — a project with certified financial history (a
+// certified IPC, an approved budget revision, or a live commitment) must
+// never be destroyable by this route: projects.id cascades through the
+// entire execution-domain schema (contracts, boqRevisions, budgetRevisions,
+// commitments, measurements, ipcs, subcontractIpcs — all onDelete:
+// "cascade"), so an unconditional delete here previously destroyed audited,
+// certified payment history with no guard at all (confirmed live in the
+// pre-launch audit). No force-delete escape hatch is offered — a project
+// with real financial activity must be handled some other way (e.g. never
+// deleted at all), not bypassed with a flag.
+//
+// Race safety: every row this check reads is also FOR UPDATE-locked before
+// the check runs, not just SELECTed — this is what closes the race, not
+// just the ordering of statements. certify()/approve()/amend() elsewhere
+// (ipcs.ts, budgetRevisions.ts, commitments.ts) each acquire their own row
+// lock on the specific row they mutate before changing its status; by
+// locking every ipcs/budgetRevisions/commitments row belonging to this
+// project here FIRST, any such concurrent mutation attempting to lock one
+// of those same rows blocks until this transaction commits or rolls back —
+// ordinary Postgres row-lock contention provides the mutual exclusion, with
+// no change required to those other routes. The project row itself is
+// locked first (parent-most in the hierarchy, and not locked by any other
+// existing route), which also serializes two concurrent deletes of the
+// same project against each other.
 projectsRouter.delete("/:id", requirePermission("project.delete"), async (req, res) => {
   const existing = await findOwnedProject(req.companyId!, req.params.id);
   if (!existing) return res.status(404).json({ error: "المشروع غير موجود" });
 
-  await db.delete(projects).where(eq(projects.id, req.params.id));
+  const result = await db.transaction(async (tx) => {
+    const [locked] = await tx.select().from(projects).where(eq(projects.id, existing.id)).for("update");
+    if (!locked) return { outcome: "notFound" as const };
+
+    const lockedIpcs = await tx.select({ status: ipcs.status }).from(ipcs).where(eq(ipcs.projectId, locked.id)).for("update");
+    if (lockedIpcs.some((row) => row.status === "certified")) {
+      return { outcome: "hasFinancialHistory" as const };
+    }
+
+    const lockedBudgetRevisions = await tx
+      .select({ status: budgetRevisions.status })
+      .from(budgetRevisions)
+      .where(eq(budgetRevisions.projectId, locked.id))
+      .for("update");
+    if (lockedBudgetRevisions.some((row) => row.status === "approved")) {
+      return { outcome: "hasFinancialHistory" as const };
+    }
+
+    const lockedCommitments = await tx
+      .select({ status: commitments.status })
+      .from(commitments)
+      .where(eq(commitments.projectId, locked.id))
+      .for("update");
+    if (lockedCommitments.some((row) => row.status !== "cancelled")) {
+      return { outcome: "hasFinancialHistory" as const };
+    }
+
+    await tx.delete(projects).where(eq(projects.id, locked.id));
+    return { outcome: "ok" as const };
+  });
+
+  if (result.outcome === "notFound") return res.status(404).json({ error: "المشروع غير موجود" });
+  if (result.outcome === "hasFinancialHistory") {
+    // Deliberately generic — never names which specific IPC/revision/
+    // commitment is blocking deletion (that would be more detail than a
+    // delete-permission check needs to reveal).
+    return res.status(409).json({ error: "لا يمكن حذف المشروع لاحتوائه على سجل مالي" });
+  }
+
   logger.warn("destructive_mutation", { action: "project.delete", userId: req.userId, companyId: req.companyId, projectId: req.params.id });
   res.status(204).end();
 });

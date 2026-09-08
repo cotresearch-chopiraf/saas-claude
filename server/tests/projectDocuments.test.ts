@@ -7,7 +7,7 @@ import { files } from "../src/db/schema.js";
 import { eq } from "drizzle-orm";
 import fs from "node:fs";
 import path from "node:path";
-import { storageRoot } from "../src/lib/storage/localDiskProvider.js";
+import { privateStorageRoot } from "../src/lib/storage/localDiskProvider.js";
 import { PROJECT_DOCUMENT_ENTITY_TYPE } from "../src/routes/documents.js";
 
 // MIDAD UI-10 — project-scoped Documents. Closes the gap the existing
@@ -169,12 +169,14 @@ describe("Project Documents (UI-10)", () => {
     // Regardless, the actual on-disk storage key is always a fresh
     // namespace/uuid the server generated itself, never derived from the
     // client-supplied name at all — confirmed by reading the row directly
-    // and checking it resolves safely inside storageRoot.
+    // and checking it resolves safely inside privateStorageRoot (P0.5:
+    // "documents" is a private namespace, stored outside the public
+    // /uploads root entirely — see localDiskProvider.ts).
     const row = (await db.query.files.findFirst({ where: eq(files.id, res.body.id) }))!;
     expect(row.storageKey.startsWith("documents/")).toBe(true);
     expect(row.storageKey).not.toContain("..");
-    const resolved = path.resolve(storageRoot, row.storageKey);
-    expect(resolved.startsWith(storageRoot)).toBe(true);
+    const resolved = path.resolve(privateStorageRoot, row.storageKey);
+    expect(resolved.startsWith(privateStorageRoot)).toBe(true);
     expect(fs.existsSync(resolved)).toBe(true);
   });
 

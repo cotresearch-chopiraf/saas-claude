@@ -1,8 +1,9 @@
 import "reflect-metadata";
-import { describe, it, expect, beforeAll, afterEach } from "vitest";
+import { describe, it, expect, beforeAll } from "vitest";
 import { webcrypto } from "node:crypto";
 import * as x509 from "@peculiar/x509";
 import { XadesZatcaSigner } from "../src/lib/zatca/signer/xadesZatcaSigner.js";
+import { useZatcaCsrCurve } from "./helpers/zatcaEnv.js";
 import { generateEcdsaKeyPair } from "../src/lib/zatca/csr/keyPair.js";
 import { buildZatcaInvoiceXml } from "../src/lib/zatca/xmlBuilder.js";
 import { computeCanonicalInvoiceHash } from "../src/lib/zatca/canonicalHash.js";
@@ -19,15 +20,9 @@ import type { ResolvedZatcaCredential } from "../src/lib/zatca/provider/types.js
 // credential is incomplete — NOT that ZATCA itself will accept this exact
 // structure (unverifiable without a reachable primary source).
 
-const originalCurve = process.env.ZATCA_CSR_ECDSA_CURVE;
+useZatcaCsrCurve();
 beforeAll(() => {
-  process.env.ZATCA_CSR_ECDSA_CURVE = "P-256";
   x509.cryptoProvider.set(webcrypto as unknown as Crypto);
-});
-afterEach(() => {
-  if (originalCurve === undefined) delete process.env.ZATCA_CSR_ECDSA_CURVE;
-  else process.env.ZATCA_CSR_ECDSA_CURVE = originalCurve;
-  process.env.ZATCA_CSR_ECDSA_CURVE = "P-256";
 });
 
 const sampleDoc: CanonicalZatcaDocument = {

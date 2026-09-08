@@ -6,6 +6,7 @@ import * as x509 from "@peculiar/x509";
 import request from "supertest";
 import { buildApp } from "../src/app.js";
 import { resetDb } from "./setup.js";
+import { useZatcaCsrCurve } from "./helpers/zatcaEnv.js";
 
 // Slice 5 continuation, task #51 — CSR generation + CSID confirmation
 // routes. See domain/csr.ts's file comment for exactly what this does and
@@ -23,8 +24,8 @@ function extractInviteToken(mailBody: string): string {
   return match[1];
 }
 
+useZatcaCsrCurve();
 beforeAll(() => {
-  process.env.ZATCA_CSR_ECDSA_CURVE = "P-256";
   x509.cryptoProvider.set(webcrypto as unknown as Crypto);
 });
 

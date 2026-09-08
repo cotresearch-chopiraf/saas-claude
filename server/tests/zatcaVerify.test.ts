@@ -1,9 +1,10 @@
 import "reflect-metadata";
-import { describe, it, expect, beforeAll, afterEach } from "vitest";
+import { describe, it, expect, beforeAll } from "vitest";
 import { webcrypto } from "node:crypto";
 import * as x509 from "@peculiar/x509";
 import { XadesZatcaSigner } from "../src/lib/zatca/signer/xadesZatcaSigner.js";
 import { verifyZatcaSignature } from "../src/lib/zatca/signer/verify.js";
+import { useZatcaCsrCurve } from "./helpers/zatcaEnv.js";
 import { buildZatcaInvoiceXml } from "../src/lib/zatca/xmlBuilder.js";
 import type { CanonicalZatcaDocument } from "../src/lib/zatca/types.js";
 import type { ResolvedZatcaCredential } from "../src/lib/zatca/provider/types.js";
@@ -15,12 +16,9 @@ import type { ResolvedZatcaCredential } from "../src/lib/zatca/provider/types.js
 // actually detects tampering in each of the elements it checks, not just
 // that it accepts a well-formed signature.
 
+useZatcaCsrCurve();
 beforeAll(() => {
-  process.env.ZATCA_CSR_ECDSA_CURVE = "P-256";
   x509.cryptoProvider.set(webcrypto as unknown as Crypto);
-});
-afterEach(() => {
-  process.env.ZATCA_CSR_ECDSA_CURVE = "P-256";
 });
 
 const sampleDoc: CanonicalZatcaDocument = {
