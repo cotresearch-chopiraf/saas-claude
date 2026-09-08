@@ -1045,3 +1045,253 @@ describe("MIDAD Phase 3.2 remediation — database uniqueness backstop (DB-001)"
     ).rejects.toThrow();
   });
 });
+
+describe("MIDAD Phase 3.2 hardening — QTY-001: BOQ item quantity normalization", () => {
+  async function createContractForProject() {
+    const projectId = await createProject();
+    const contract = await createContract(projectId);
+    return { projectId, contractId: contract.id };
+  }
+
+  it("a quantity with more than 3 decimal places is normalized to 3dp before both storage and amount calculation", async () => {
+    const { projectId, contractId } = await createContractForProject();
+    const revRes = await request(app)
+      .post(`/api/projects/${projectId}/boq-revisions`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ contractId });
+
+    const itemRes = await request(app)
+      .post(`/api/projects/${projectId}/boq-revisions/${revRes.body.id}/items`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ description: "Excavation", quantity: 1.23456, rate: 10 });
+    expect(itemRes.status).toBe(201);
+    expect(Number(itemRes.body.quantity)).toBe(1.235);
+    expect(Number(itemRes.body.amount)).toBe(12.35); // 1.235 * 10, not 1.23456 * 10
+  });
+
+  it("a quantity already within 3dp precision is unchanged", async () => {
+    const { projectId, contractId } = await createContractForProject();
+    const revRes = await request(app)
+      .post(`/api/projects/${projectId}/boq-revisions`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ contractId });
+
+    const itemRes = await request(app)
+      .post(`/api/projects/${projectId}/boq-revisions/${revRes.body.id}/items`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ description: "Excavation", quantity: 1.234, rate: 10 });
+    expect(itemRes.status).toBe(201);
+    expect(Number(itemRes.body.quantity)).toBe(1.234);
+  });
+
+  it("a whole-number quantity is unchanged", async () => {
+    const { projectId, contractId } = await createContractForProject();
+    const revRes = await request(app)
+      .post(`/api/projects/${projectId}/boq-revisions`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ contractId });
+
+    const itemRes = await request(app)
+      .post(`/api/projects/${projectId}/boq-revisions/${revRes.body.id}/items`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ description: "Excavation", quantity: 5, rate: 10 });
+    expect(itemRes.status).toBe(201);
+    expect(Number(itemRes.body.quantity)).toBe(5);
+  });
+});
+
+describe("MIDAD Phase 3.2 hardening — VAL-001: finite numeric validation", () => {
+  async function createContractForProject() {
+    const projectId = await createProject();
+    const contract = await createContract(projectId);
+    return { projectId, contractId: contract.id };
+  }
+
+  it('the string "Infinity" for a BOQ item quantity is rejected with 400, not a 500', async () => {
+    const { projectId, contractId } = await createContractForProject();
+    const revRes = await request(app)
+      .post(`/api/projects/${projectId}/boq-revisions`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ contractId });
+
+    const res = await request(app)
+      .post(`/api/projects/${projectId}/boq-revisions/${revRes.body.id}/items`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ description: "Excavation", quantity: "Infinity", rate: 10 });
+    expect(res.status).toBe(400);
+  });
+
+  it('the string "-Infinity" for a BOQ item rate is rejected with 400', async () => {
+    const { projectId, contractId } = await createContractForProject();
+    const revRes = await request(app)
+      .post(`/api/projects/${projectId}/boq-revisions`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ contractId });
+
+    const res = await request(app)
+      .post(`/api/projects/${projectId}/boq-revisions/${revRes.body.id}/items`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ description: "Excavation", quantity: 10, rate: "-Infinity" });
+    expect(res.status).toBe(400);
+  });
+
+  it('the string "Infinity" for contract originalValue is rejected with 400 at creation', async () => {
+    const projectId = await createProject();
+    const res = await request(app)
+      .post(`/api/projects/${projectId}/contracts`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ originalValue: "Infinity" });
+    expect(res.status).toBe(400);
+  });
+
+  it('the string "NaN" for contract revisedValue is rejected with 400 on update', async () => {
+    const projectId = await createProject();
+    const contract = await createContract(projectId);
+    const res = await request(app)
+      .patch(`/api/projects/${projectId}/contracts/${contract.id}`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ revisedValue: "NaN" });
+    expect(res.status).toBe(400);
+  });
+
+  it("normal valid numeric values still work for both BOQ items and contracts", async () => {
+    const { projectId, contractId } = await createContractForProject();
+    const revRes = await request(app)
+      .post(`/api/projects/${projectId}/boq-revisions`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ contractId });
+
+    const itemRes = await request(app)
+      .post(`/api/projects/${projectId}/boq-revisions/${revRes.body.id}/items`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ description: "Excavation", quantity: 10, rate: 5 });
+    expect(itemRes.status).toBe(201);
+  });
+});
+
+describe("MIDAD Phase 3.2 hardening — INFO-001: BOQ item audit events", () => {
+  async function createContractForProject() {
+    const projectId = await createProject();
+    const contract = await createContract(projectId);
+    return { projectId, contractId: contract.id };
+  }
+
+  it("creating a BOQ item creates the expected persistent audit event", async () => {
+    const { projectId, contractId } = await createContractForProject();
+    const revRes = await request(app)
+      .post(`/api/projects/${projectId}/boq-revisions`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ contractId });
+
+    const itemRes = await request(app)
+      .post(`/api/projects/${projectId}/boq-revisions/${revRes.body.id}/items`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ description: "Excavation", quantity: 10, rate: 5 });
+    expect(itemRes.status).toBe(201);
+
+    const event = await db.query.auditEvents.findFirst({
+      where: eq(auditEvents.entityId, itemRes.body.id),
+    });
+    expect(event).toBeTruthy();
+    expect(event!.action).toBe("boqItem.added");
+    expect(event!.entityType).toBe("boq_item");
+    const metadata = event!.metadata as { boqRevisionId?: string; contractId?: string; projectId?: string };
+    expect(metadata.boqRevisionId).toBe(revRes.body.id);
+    expect(metadata.contractId).toBe(contractId);
+    expect(metadata.projectId).toBe(projectId);
+  });
+
+  it("deleting a BOQ item creates the expected persistent audit event", async () => {
+    const { projectId, contractId } = await createContractForProject();
+    const revRes = await request(app)
+      .post(`/api/projects/${projectId}/boq-revisions`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ contractId });
+    const itemRes = await request(app)
+      .post(`/api/projects/${projectId}/boq-revisions/${revRes.body.id}/items`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ description: "Excavation", quantity: 10, rate: 5 });
+
+    const deleteRes = await request(app)
+      .delete(`/api/projects/${projectId}/boq-revisions/${revRes.body.id}/items/${itemRes.body.id}`)
+      .set("Authorization", `Bearer ${ownerToken}`);
+    expect(deleteRes.status).toBe(204);
+
+    const events = await db.query.auditEvents.findMany({ where: eq(auditEvents.entityId, itemRes.body.id) });
+    const removedEvent = events.find((e) => e.action === "boqItem.removed");
+    expect(removedEvent).toBeTruthy();
+    expect(removedEvent!.entityType).toBe("boq_item");
+    const before = removedEvent!.beforeValue as { id: string; description: string };
+    expect(before.id).toBe(itemRes.body.id);
+    expect(before.description).toBe("Excavation");
+  });
+
+  it("a failed add (published revision) does not leave a boqItem.added audit event", async () => {
+    const { projectId, contractId } = await createContractForProject();
+    const revRes = await request(app)
+      .post(`/api/projects/${projectId}/boq-revisions`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ contractId });
+    await request(app)
+      .post(`/api/projects/${projectId}/boq-revisions/${revRes.body.id}/publish`)
+      .set("Authorization", `Bearer ${ownerToken}`);
+
+    const before = await db.query.auditEvents.findMany({ where: eq(auditEvents.action, "boqItem.added") });
+
+    const failedAdd = await request(app)
+      .post(`/api/projects/${projectId}/boq-revisions/${revRes.body.id}/items`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ description: "Too late", quantity: 1, rate: 1 });
+    expect(failedAdd.status).toBe(409);
+
+    const after = await db.query.auditEvents.findMany({ where: eq(auditEvents.action, "boqItem.added") });
+    expect(after.length).toBe(before.length);
+  });
+
+  it("a failed delete (published revision) does not leave a boqItem.removed audit event", async () => {
+    const { projectId, contractId } = await createContractForProject();
+    const revRes = await request(app)
+      .post(`/api/projects/${projectId}/boq-revisions`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ contractId });
+    const itemRes = await request(app)
+      .post(`/api/projects/${projectId}/boq-revisions/${revRes.body.id}/items`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ description: "Excavation", quantity: 10, rate: 5 });
+    await request(app)
+      .post(`/api/projects/${projectId}/boq-revisions/${revRes.body.id}/publish`)
+      .set("Authorization", `Bearer ${ownerToken}`);
+
+    const failedDelete = await request(app)
+      .delete(`/api/projects/${projectId}/boq-revisions/${revRes.body.id}/items/${itemRes.body.id}`)
+      .set("Authorization", `Bearer ${ownerToken}`);
+    expect(failedDelete.status).toBe(409);
+
+    const events = await db.query.auditEvents.findMany({ where: eq(auditEvents.entityId, itemRes.body.id) });
+    expect(events.some((e) => e.action === "boqItem.removed")).toBe(false);
+  });
+
+  it("BOQ item audit events remain inaccessible across tenants", async () => {
+    const { projectId, contractId } = await createContractForProject();
+    const revRes = await request(app)
+      .post(`/api/projects/${projectId}/boq-revisions`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ contractId });
+    const itemRes = await request(app)
+      .post(`/api/projects/${projectId}/boq-revisions/${revRes.body.id}/items`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ description: "Excavation", quantity: 10, rate: 5 });
+
+    const ownScoped = await request(app)
+      .get("/api/audit-events")
+      .query({ entityType: "boq_item", limit: 100 })
+      .set("Authorization", `Bearer ${ownerToken}`);
+    expect(ownScoped.body.events.some((e: { entityId: string }) => e.entityId === itemRes.body.id)).toBe(true);
+
+    const otherScoped = await request(app)
+      .get("/api/audit-events")
+      .query({ entityType: "boq_item", limit: 100 })
+      .set("Authorization", `Bearer ${companyBToken}`);
+    expect(otherScoped.body.events.some((e: { entityId: string }) => e.entityId === itemRes.body.id)).toBe(false);
+  });
+});

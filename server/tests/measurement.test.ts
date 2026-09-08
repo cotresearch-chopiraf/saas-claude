@@ -659,3 +659,59 @@ describe("Architectural invariant: Measurement never touches the canonical finan
     expect(contractAfter.body.revisedValue).toBe(contractBefore.body.revisedValue);
   });
 });
+
+describe("Phase 3.2 hardening — QTY-001: quantity normalization", () => {
+  it("a measuredQuantity with more than 3 decimal places is normalized to 3dp before both storage and valuation", async () => {
+    const { projectId, contractId, revisionId, boqItemId } = await setupPublishedBoq(100, 10);
+    const m = await createDraftMeasurement(projectId, contractId, revisionId);
+
+    const lineRes = await addLine(projectId, m.id, { boqItemId, measuredQuantity: 1.23456 });
+    expect(lineRes.status).toBe(201);
+    expect(Number(lineRes.body.measuredQuantity)).toBe(1.235);
+    expect(Number(lineRes.body.value)).toBe(12.35); // 1.235 * 10, not 1.23456 * 10
+  });
+
+  it("a quantity already within 3dp precision is unchanged", async () => {
+    const { projectId, contractId, revisionId, boqItemId } = await setupPublishedBoq(100, 10);
+    const m = await createDraftMeasurement(projectId, contractId, revisionId);
+
+    const lineRes = await addLine(projectId, m.id, { boqItemId, measuredQuantity: 1.234 });
+    expect(lineRes.status).toBe(201);
+    expect(Number(lineRes.body.measuredQuantity)).toBe(1.234);
+  });
+
+  it("a whole-number quantity is unchanged", async () => {
+    const { projectId, contractId, revisionId, boqItemId } = await setupPublishedBoq(100, 10);
+    const m = await createDraftMeasurement(projectId, contractId, revisionId);
+
+    const lineRes = await addLine(projectId, m.id, { boqItemId, measuredQuantity: 5 });
+    expect(lineRes.status).toBe(201);
+    expect(Number(lineRes.body.measuredQuantity)).toBe(5);
+  });
+});
+
+describe("Phase 3.2 hardening — VAL-001: finite numeric validation", () => {
+  it('the string "Infinity" for measuredQuantity is rejected with 400, not a 500', async () => {
+    const { projectId, contractId, revisionId, boqItemId } = await setupPublishedBoq(100, 10);
+    const m = await createDraftMeasurement(projectId, contractId, revisionId);
+
+    const res = await addLine(projectId, m.id, { boqItemId, measuredQuantity: "Infinity" });
+    expect(res.status).toBe(400);
+  });
+
+  it('the string "NaN" for measuredQuantity is rejected with 400', async () => {
+    const { projectId, contractId, revisionId, boqItemId } = await setupPublishedBoq(100, 10);
+    const m = await createDraftMeasurement(projectId, contractId, revisionId);
+
+    const res = await addLine(projectId, m.id, { boqItemId, measuredQuantity: "NaN" });
+    expect(res.status).toBe(400);
+  });
+
+  it("a normal valid quantity still works", async () => {
+    const { projectId, contractId, revisionId, boqItemId } = await setupPublishedBoq(100, 10);
+    const m = await createDraftMeasurement(projectId, contractId, revisionId);
+
+    const res = await addLine(projectId, m.id, { boqItemId, measuredQuantity: 42 });
+    expect(res.status).toBe(201);
+  });
+});

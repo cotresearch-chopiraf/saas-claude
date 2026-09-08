@@ -5,7 +5,7 @@ import { db } from "../db/client.js";
 import { commitments, commitmentLines, subcontractIpcLines, subcontractIpcs, projects } from "../db/schema.js";
 import { requirePermission } from "../lib/permissions.js";
 import { recordAuditEvent } from "../lib/audit.js";
-import { roundMoney, sumMoney } from "../lib/money.js";
+import { roundMoney, roundQuantity, sumMoney } from "../lib/money.js";
 
 // MIDAD Phase 2 — Subcontractor IPC. See the schema.ts section comment
 // above subcontractIpcs for the full architectural rationale: this is a
@@ -143,8 +143,8 @@ const lineSchema = z.object({
   // Exactly one of these is used, depending on whether the referenced
   // commitment line carries quantity+rate or is amount-only — never both,
   // never inferred; see resolveLineValue below.
-  currentQuantity: z.coerce.number().nonnegative().optional(),
-  currentValue: z.coerce.number().nonnegative().optional(),
+  currentQuantity: z.coerce.number().finite().nonnegative().optional(),
+  currentValue: z.coerce.number().finite().nonnegative().optional(),
   description: z.string().optional(),
   sortOrder: z.coerce.number().int().optional(),
 });
@@ -192,8 +192,12 @@ function resolveLineValue(
     if (data.currentQuantity === undefined) {
       return { error: "الكمية الحالية مطلوبة لهذا البند" };
     }
+    // Phase 3.2 hardening (QTY-001) — normalized once, here; the caller
+    // uses this same returned value for both the ceiling check and the
+    // stored quantity (see lib/money.ts's roundQuantity comment).
+    const currentQuantity = roundQuantity(data.currentQuantity);
     const rate = Number(commitmentLine.rate);
-    return { currentQuantity: data.currentQuantity, rate, currentValue: roundMoney(data.currentQuantity * rate) };
+    return { currentQuantity, rate, currentValue: roundMoney(currentQuantity * rate) };
   }
   if (data.currentValue === undefined) {
     return { error: "قيمة التصديق مطلوبة لهذا البند (بند بمبلغ إجمالي بلا كمية/سعر)" };
@@ -464,11 +468,17 @@ subcontractIpcsRouter.post(
     const ipc = await findOwnedSubcontractIpc(req.companyId!, req.params.projectId, req.params.id);
     if (!ipc) return res.status(404).json({ error: "الشهادة غير موجودة" });
 
-    const commitment = await db.query.commitments.findFirst({ where: eq(commitments.id, ipc.commitmentId) });
-
     const result = await db.transaction(async (tx) => {
       const [locked] = await tx.select().from(subcontractIpcs).where(eq(subcontractIpcs.id, ipc.id)).for("update");
       if (!locked || locked.status !== "approved") return { outcome: "conflict" as const };
+
+      // Phase 3.2 hardening (IPC-002) — lock the parent commitment row
+      // before reading its retentionPercent, same reasoning as ipcs.ts's
+      // certify(): read unlocked, a concurrent mutation of the
+      // commitment's retention rate between that read and this
+      // transaction's write could freeze a stale rate into the certified
+      // snapshot.
+      const [commitment] = await tx.select().from(commitments).where(eq(commitments.id, ipc.commitmentId)).for("update");
 
       const lines = await tx.select().from(subcontractIpcLines).where(eq(subcontractIpcLines.subcontractIpcId, ipc.id));
       const commitmentLineIds = [...new Set(lines.map((l) => l.commitmentLineId))].sort();

@@ -21,6 +21,26 @@ export function sumMoney(amounts: number[]): number {
   return fromCents(amounts.reduce((cents, amount) => cents + toCents(amount), 0));
 }
 
+// Quantities in this app are 3-decimal-precision (numeric(14,3) in the
+// schema — boqItems.quantity, ipcLines.currentQuantity, etc.). Same
+// integer-arithmetic discipline as the cents helpers above, but at the
+// milli-unit scale: a route that computes an amount from a raw input like
+// 1.23456 and separately stores that same raw input would silently
+// disagree with itself the moment Postgres rounds the stored column to
+// 1.235 — round once, here, and use the SAME resulting number for both
+// the stored quantity and any calculation derived from it.
+export function toMilli(quantity: number): number {
+  return Math.round(quantity * 1000);
+}
+
+export function fromMilli(milli: number): number {
+  return milli / 1000;
+}
+
+export function roundQuantity(quantity: number): number {
+  return fromMilli(toMilli(quantity));
+}
+
 export interface MoneyTotals {
   subtotal: number;
   taxAmount: number;

@@ -804,3 +804,87 @@ describe("Architectural invariant: Phase 2A never uses projects.budgetTotal as i
     expect(projectRow?.budgetTotal).toBe(originalBudgetTotal);
   });
 });
+
+describe("Phase 3.2 hardening — QTY-001: quantity normalization", () => {
+  it("a quantity with more than 3 decimal places is normalized to 3dp before both storage and amount calculation", async () => {
+    const projectId = await createProject();
+    const supplier = await createSupplier();
+    const commitment = await createDraftCommitment(projectId, supplier.id);
+
+    const lineRes = await addLine(projectId, commitment.id, { description: "Rebar", quantity: 1.23456, rate: 10 });
+    expect(lineRes.status).toBe(201);
+    expect(Number(lineRes.body.quantity)).toBe(1.235);
+    expect(Number(lineRes.body.amount)).toBe(12.35); // 1.235 * 10, not 1.23456 * 10
+  });
+
+  it("a quantity already within 3dp precision is unchanged", async () => {
+    const projectId = await createProject();
+    const supplier = await createSupplier();
+    const commitment = await createDraftCommitment(projectId, supplier.id);
+
+    const lineRes = await addLine(projectId, commitment.id, { description: "Rebar", quantity: 1.234, rate: 10 });
+    expect(lineRes.status).toBe(201);
+    expect(Number(lineRes.body.quantity)).toBe(1.234);
+  });
+
+  it("a whole-number quantity is unchanged", async () => {
+    const projectId = await createProject();
+    const supplier = await createSupplier();
+    const commitment = await createDraftCommitment(projectId, supplier.id);
+
+    const lineRes = await addLine(projectId, commitment.id, { description: "Rebar", quantity: 5, rate: 10 });
+    expect(lineRes.status).toBe(201);
+    expect(Number(lineRes.body.quantity)).toBe(5);
+  });
+
+  it("normalization also applies through amend() (the same resolveLineAmount path)", async () => {
+    const projectId = await createProject();
+    const supplier = await createSupplier();
+    const commitment = await createDraftCommitment(projectId, supplier.id);
+    await addLine(projectId, commitment.id, { description: "Rebar", amount: 100 });
+    await request(app).post(`/api/projects/${projectId}/commitments/${commitment.id}/submit`).set("Authorization", `Bearer ${ownerToken}`);
+    await request(app).post(`/api/projects/${projectId}/commitments/${commitment.id}/approve`).set("Authorization", `Bearer ${ownerToken}`);
+
+    const amendRes = await request(app)
+      .post(`/api/projects/${projectId}/commitments/${commitment.id}/amend`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ lines: [{ description: "Extra rebar", quantity: 2.99999, rate: 10 }] });
+    expect(amendRes.status).toBe(200);
+
+    const linesRes = await request(app)
+      .get(`/api/projects/${projectId}/commitments/${commitment.id}`)
+      .set("Authorization", `Bearer ${ownerToken}`);
+    const newLine = linesRes.body.lines.find((l: { description: string }) => l.description === "Extra rebar");
+    expect(Number(newLine.quantity)).toBe(3); // 2.99999 rounds to 3.000 at 3dp
+    expect(Number(newLine.amount)).toBe(30); // 3 * 10, not 2.99999 * 10
+  });
+});
+
+describe("Phase 3.2 hardening — VAL-001: finite numeric validation", () => {
+  it('the string "Infinity" for quantity is rejected with 400, not a 500', async () => {
+    const projectId = await createProject();
+    const supplier = await createSupplier();
+    const commitment = await createDraftCommitment(projectId, supplier.id);
+
+    const res = await addLine(projectId, commitment.id, { description: "Rebar", quantity: "Infinity", rate: 10 });
+    expect(res.status).toBe(400);
+  });
+
+  it('the string "NaN" for amount is rejected with 400', async () => {
+    const projectId = await createProject();
+    const supplier = await createSupplier();
+    const commitment = await createDraftCommitment(projectId, supplier.id);
+
+    const res = await addLine(projectId, commitment.id, { description: "Rebar", amount: "NaN" });
+    expect(res.status).toBe(400);
+  });
+
+  it("a normal valid quantity/rate line still works", async () => {
+    const projectId = await createProject();
+    const supplier = await createSupplier();
+    const commitment = await createDraftCommitment(projectId, supplier.id);
+
+    const res = await addLine(projectId, commitment.id, { description: "Rebar", quantity: 10, rate: 5 });
+    expect(res.status).toBe(201);
+  });
+});

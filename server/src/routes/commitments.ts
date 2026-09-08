@@ -14,7 +14,7 @@ import {
 } from "../db/schema.js";
 import { requirePermission } from "../lib/permissions.js";
 import { recordAuditEvent } from "../lib/audit.js";
-import { roundMoney, sumMoney } from "../lib/money.js";
+import { roundMoney, roundQuantity, sumMoney } from "../lib/money.js";
 import { CONTRACT_EXECUTION_BLOCKED_STATUSES } from "./contracts.js";
 
 type ProjectParams = { projectId: string };
@@ -154,20 +154,26 @@ const lineSchema = z.object({
   costCodeId: z.string().uuid().optional(),
   boqItemId: z.string().uuid().optional(),
   description: z.string().min(1, "الوصف مطلوب"),
-  quantity: z.coerce.number().nonnegative().optional(),
-  rate: z.coerce.number().nonnegative().optional(),
-  amount: z.coerce.number().nonnegative().optional(),
+  quantity: z.coerce.number().finite().nonnegative().optional(),
+  rate: z.coerce.number().finite().nonnegative().optional(),
+  amount: z.coerce.number().finite().nonnegative().optional(),
   sortOrder: z.coerce.number().int().optional(),
 });
 
 // A line's amount is either supplied directly or computed from
 // quantity*rate (same discipline as boqItems.amount, lib/money.ts) — one
-// of the two must be resolvable, never left ambiguous or NaN.
-function resolveLineAmount(data: z.infer<typeof lineSchema>): number | null {
+// of the two must be resolvable, never left ambiguous or NaN. Also
+// returns the normalized quantity (Phase 3.2 hardening, QTY-001) so every
+// caller stores the SAME value it computed the amount from, rather than
+// the raw input.
+function resolveLineAmount(
+  data: z.infer<typeof lineSchema>,
+): { amount: number; quantity?: number } | null {
   if (data.quantity !== undefined && data.rate !== undefined) {
-    return roundMoney(data.quantity * data.rate);
+    const quantity = roundQuantity(data.quantity);
+    return { amount: roundMoney(quantity * data.rate), quantity };
   }
-  if (data.amount !== undefined) return roundMoney(data.amount);
+  if (data.amount !== undefined) return { amount: roundMoney(data.amount) };
   return null;
 }
 
@@ -219,8 +225,8 @@ commitmentsRouter.post(
     const parsed = lineSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
 
-    const amount = resolveLineAmount(parsed.data);
-    if (amount === null) {
+    const resolved = resolveLineAmount(parsed.data);
+    if (resolved === null) {
       return res.status(400).json({ error: "يجب تحديد المبلغ أو الكمية والسعر معاً" });
     }
 
@@ -239,9 +245,9 @@ commitmentsRouter.post(
           costCodeId: parsed.data.costCodeId,
           boqItemId: parsed.data.boqItemId,
           description: parsed.data.description,
-          quantity: parsed.data.quantity !== undefined ? String(parsed.data.quantity) : undefined,
+          quantity: resolved.quantity !== undefined ? String(resolved.quantity) : undefined,
           rate: parsed.data.rate !== undefined ? String(parsed.data.rate) : undefined,
-          amount: String(amount),
+          amount: String(resolved.amount),
           sortOrder: parsed.data.sortOrder ?? 0,
         })
         .returning();
@@ -474,15 +480,15 @@ commitmentsRouter.post(
     const parsed = amendSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
 
-    const resolvedLines: Array<{ data: z.infer<typeof lineSchema>; amount: number }> = [];
+    const resolvedLines: Array<{ data: z.infer<typeof lineSchema>; amount: number; quantity?: number }> = [];
     for (const lineData of parsed.data.lines) {
-      const amount = resolveLineAmount(lineData);
-      if (amount === null) {
+      const resolved = resolveLineAmount(lineData);
+      if (resolved === null) {
         return res.status(400).json({ error: "يجب تحديد المبلغ أو الكمية والسعر معاً لكل بند" });
       }
       const refError = await validateLineReferences(req.companyId!, req.params.projectId, lineData);
       if (refError) return res.status(404).json({ error: refError });
-      resolvedLines.push({ data: lineData, amount });
+      resolvedLines.push({ data: lineData, amount: resolved.amount, quantity: resolved.quantity });
     }
 
     const result = await db.transaction(async (tx) => {
@@ -494,13 +500,13 @@ commitmentsRouter.post(
       const insertedLines = await tx
         .insert(commitmentLines)
         .values(
-          resolvedLines.map(({ data, amount }) => ({
+          resolvedLines.map(({ data, amount, quantity }) => ({
             companyId: req.companyId!,
             commitmentId: commitment.id,
             costCodeId: data.costCodeId,
             boqItemId: data.boqItemId,
             description: data.description,
-            quantity: data.quantity !== undefined ? String(data.quantity) : undefined,
+            quantity: quantity !== undefined ? String(quantity) : undefined,
             rate: data.rate !== undefined ? String(data.rate) : undefined,
             amount: String(amount),
             sortOrder: data.sortOrder ?? 0,

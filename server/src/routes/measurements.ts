@@ -5,7 +5,7 @@ import { db } from "../db/client.js";
 import { boqItems, boqRevisions, contracts, measurementLines, measurements, projects } from "../db/schema.js";
 import { requirePermission } from "../lib/permissions.js";
 import { recordAuditEvent } from "../lib/audit.js";
-import { roundMoney } from "../lib/money.js";
+import { roundMoney, roundQuantity } from "../lib/money.js";
 import { CONTRACT_EXECUTION_BLOCKED_STATUSES } from "./contracts.js";
 
 type ProjectParams = { projectId: string };
@@ -124,7 +124,7 @@ measurementsRouter.get("/:measurementId", async (req: Request<MeasurementParams>
 
 const lineSchema = z.object({
   boqItemId: z.string().uuid(),
-  measuredQuantity: z.coerce.number().nonnegative(),
+  measuredQuantity: z.coerce.number().finite().nonnegative(),
   notes: z.string().optional(),
 });
 
@@ -171,7 +171,11 @@ measurementsRouter.post(
     );
     if (refError) return res.status(404).json({ error: refError });
 
-    const value = boqItem!.rate !== null ? roundMoney(parsed.data.measuredQuantity * Number(boqItem!.rate)) : null;
+    // Phase 3.2 hardening (QTY-001) — normalized once, here, and the same
+    // value used for both the value calculation and the stored quantity
+    // below (see lib/money.ts's roundQuantity comment).
+    const measuredQuantity = roundQuantity(parsed.data.measuredQuantity);
+    const value = boqItem!.rate !== null ? roundMoney(measuredQuantity * Number(boqItem!.rate)) : null;
 
     const line = await db.transaction(async (tx) => {
       const [locked] = await tx.select().from(measurements).where(eq(measurements.id, measurement.id)).for("update");
@@ -183,7 +187,7 @@ measurementsRouter.post(
           companyId: req.companyId!,
           measurementId: measurement.id,
           boqItemId: parsed.data.boqItemId,
-          measuredQuantity: String(parsed.data.measuredQuantity),
+          measuredQuantity: String(measuredQuantity),
           value: value !== null ? String(value) : undefined,
           notes: parsed.data.notes,
         })

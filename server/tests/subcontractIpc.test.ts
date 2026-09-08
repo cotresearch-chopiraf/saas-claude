@@ -647,6 +647,76 @@ describe("Cross-ledger independence (mandatory)", () => {
   });
 });
 
+describe("Phase 3.2 hardening — IPC-002: certify() locks the parent commitment row", () => {
+  it("certify() uses the retentionPercent that is current at certification time, not one cached before the request began", async () => {
+    const { projectId, commitmentId, qtyLineId } = await setupActiveSubcontract(100, 50, 5);
+    const ipcRes = await createSubcontractIpc(projectId, commitmentId);
+    await addLine(projectId, ipcRes.body.id, { commitmentLineId: qtyLineId, currentQuantity: 100 });
+    await submit(projectId, ipcRes.body.id);
+    await approve(projectId, ipcRes.body.id);
+
+    // No PATCH route exists to change a Commitment's retentionPercent
+    // through the API (unlike Contract) — this is the same DB-level write
+    // this file's own setupActiveSubcontract helper already uses to set
+    // it in the first place, applied here mid-lifecycle instead of at
+    // setup, to prove certify() reads the CURRENT value rather than one
+    // captured earlier.
+    await db.update(commitments).set({ retentionPercent: "20" }).where(eq(commitments.id, commitmentId));
+
+    const certifyRes = await certify(projectId, ipcRes.body.id);
+    expect(certifyRes.status).toBe(200);
+    expect(Number(certifyRes.body.retentionAmount)).toBe(1000); // grossValue 5000 * 20%
+    expect(Number(certifyRes.body.netCertified)).toBe(4000);
+  });
+});
+
+describe("Phase 3.2 hardening — QTY-001: quantity normalization", () => {
+  it("a currentQuantity with more than 3 decimal places is normalized to 3dp before both storage and valuation", async () => {
+    const { projectId, commitmentId, qtyLineId } = await setupActiveSubcontract(100, 10);
+    const ipcRes = await createSubcontractIpc(projectId, commitmentId);
+
+    const lineRes = await addLine(projectId, ipcRes.body.id, { commitmentLineId: qtyLineId, currentQuantity: 1.23456 });
+    expect(lineRes.status).toBe(201);
+    expect(Number(lineRes.body.currentQuantity)).toBe(1.235);
+    expect(Number(lineRes.body.currentValue)).toBe(12.35); // 1.235 * 10, not 1.23456 * 10
+  });
+
+  it("a quantity already within 3dp precision is unchanged", async () => {
+    const { projectId, commitmentId, qtyLineId } = await setupActiveSubcontract(100, 10);
+    const ipcRes = await createSubcontractIpc(projectId, commitmentId);
+
+    const lineRes = await addLine(projectId, ipcRes.body.id, { commitmentLineId: qtyLineId, currentQuantity: 1.234 });
+    expect(lineRes.status).toBe(201);
+    expect(Number(lineRes.body.currentQuantity)).toBe(1.234);
+  });
+});
+
+describe("Phase 3.2 hardening — VAL-001: finite numeric validation", () => {
+  it('the string "Infinity" for currentQuantity is rejected with 400, not a 500', async () => {
+    const { projectId, commitmentId, qtyLineId } = await setupActiveSubcontract(100, 10);
+    const ipcRes = await createSubcontractIpc(projectId, commitmentId);
+
+    const res = await addLine(projectId, ipcRes.body.id, { commitmentLineId: qtyLineId, currentQuantity: "Infinity" });
+    expect(res.status).toBe(400);
+  });
+
+  it('the string "NaN" for currentValue (amount-only line) is rejected with 400', async () => {
+    const { projectId, commitmentId, amountLineId } = await setupActiveSubcontract(100, 10);
+    const ipcRes = await createSubcontractIpc(projectId, commitmentId);
+
+    const res = await addLine(projectId, ipcRes.body.id, { commitmentLineId: amountLineId, currentValue: "NaN" });
+    expect(res.status).toBe(400);
+  });
+
+  it("a normal valid quantity still works", async () => {
+    const { projectId, commitmentId, qtyLineId } = await setupActiveSubcontract(100, 10);
+    const ipcRes = await createSubcontractIpc(projectId, commitmentId);
+
+    const res = await addLine(projectId, ipcRes.body.id, { commitmentLineId: qtyLineId, currentQuantity: 42 });
+    expect(res.status).toBe(201);
+  });
+});
+
 // ---------------------------------------------------------------------------
 describe("Concurrency", () => {
   it("two concurrent certify() calls on IPCs sharing the same commitment line: only one may consume overlapping remaining capacity", async () => {

@@ -786,3 +786,136 @@ describe("Architectural invariant: IPC never rewrites the canonical financial ba
     expect(boqAfter.body.items[0].amount).toBe(boqBefore.body.items[0].amount);
   });
 });
+
+describe("Phase 3.2 hardening — IPC-002: certify() locks the parent contract row", () => {
+  async function approvedIpc(retentionPercent: number) {
+    const { projectId, contractId, revisionId, boqItemId } = await setupPublishedBoq(100, 10, retentionPercent);
+    await approveMeasurement(projectId, contractId, revisionId, boqItemId, 100);
+    const ipc = await createDraftIpc(projectId, contractId, revisionId);
+    await addLine(projectId, ipc.id, { boqItemId, currentQuantity: 100 });
+    await submit(projectId, ipc.id);
+    await approve(projectId, ipc.id);
+    return { projectId, contractId, ipc };
+  }
+
+  it("certify() uses the retentionPercent that is current at certification time, not one cached before the request began", async () => {
+    const { projectId, contractId, ipc } = await approvedIpc(5);
+
+    const patchRes = await request(app)
+      .patch(`/api/projects/${projectId}/contracts/${contractId}`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ retentionPercent: 15 });
+    expect(patchRes.status).toBe(200);
+
+    const certifyRes = await certify(projectId, ipc.id);
+    expect(certifyRes.status).toBe(200);
+    expect(Number(certifyRes.body.retentionAmount)).toBe(150); // grossValue 1000 * 15%
+    expect(Number(certifyRes.body.netCertified)).toBe(850);
+  });
+
+  it("3x: a contract retentionPercent PATCH concurrent with certify() never produces a retentionAmount inconsistent with either rate", async () => {
+    for (let i = 0; i < 3; i++) {
+      const { projectId, contractId, ipc } = await approvedIpc(5);
+
+      const [patchRes, certifyRes] = await Promise.all([
+        request(app)
+          .patch(`/api/projects/${projectId}/contracts/${contractId}`)
+          .set("Authorization", `Bearer ${ownerToken}`)
+          .send({ retentionPercent: 20 }),
+        certify(projectId, ipc.id),
+      ]);
+
+      expect(patchRes.status).toBe(200);
+      expect(certifyRes.status).toBe(200);
+
+      const grossValue = 1000;
+      const atOldRate = 50; // 1000 * 5%
+      const atNewRate = 200; // 1000 * 20%
+      const retentionAmount = Number(certifyRes.body.retentionAmount);
+      expect([atOldRate, atNewRate]).toContain(retentionAmount);
+      // Whichever rate was actually used, the certified snapshot must be
+      // internally consistent — never a torn read mixing part of one rate
+      // with part of another.
+      expect(Number(certifyRes.body.netCertified)).toBe(grossValue - retentionAmount);
+    }
+  });
+});
+
+describe("Phase 3.2 hardening — QTY-001: quantity normalization", () => {
+  it("a currentQuantity with more than 3 decimal places is normalized to 3dp before both storage and valuation", async () => {
+    const { projectId, contractId, revisionId, boqItemId } = await setupPublishedBoq(100, 10);
+    await approveMeasurement(projectId, contractId, revisionId, boqItemId, 100);
+    const ipc = await createDraftIpc(projectId, contractId, revisionId);
+
+    const lineRes = await addLine(projectId, ipc.id, { boqItemId, currentQuantity: 1.23456 });
+    expect(lineRes.status).toBe(201);
+    expect(Number(lineRes.body.currentQuantity)).toBe(1.235);
+    expect(Number(lineRes.body.currentValue)).toBe(12.35); // 1.235 * 10, not 1.23456 * 10
+
+    const stored = await db.query.ipcLines.findFirst({ where: eq(ipcLines.id, lineRes.body.id) });
+    expect(Number(stored!.currentQuantity)).toBe(1.235);
+  });
+
+  it("a quantity already within 3dp precision is unchanged", async () => {
+    const { projectId, contractId, revisionId, boqItemId } = await setupPublishedBoq(100, 10);
+    await approveMeasurement(projectId, contractId, revisionId, boqItemId, 100);
+    const ipc = await createDraftIpc(projectId, contractId, revisionId);
+
+    const lineRes = await addLine(projectId, ipc.id, { boqItemId, currentQuantity: 1.234 });
+    expect(lineRes.status).toBe(201);
+    expect(Number(lineRes.body.currentQuantity)).toBe(1.234);
+  });
+
+  it("a whole-number quantity is unchanged", async () => {
+    const { projectId, contractId, revisionId, boqItemId } = await setupPublishedBoq(100, 10);
+    await approveMeasurement(projectId, contractId, revisionId, boqItemId, 100);
+    const ipc = await createDraftIpc(projectId, contractId, revisionId);
+
+    const lineRes = await addLine(projectId, ipc.id, { boqItemId, currentQuantity: 5 });
+    expect(lineRes.status).toBe(201);
+    expect(Number(lineRes.body.currentQuantity)).toBe(5);
+  });
+});
+
+describe("Phase 3.2 hardening — VAL-001: finite numeric validation", () => {
+  // z.coerce.number() runs Number(input) first — a JSON body can never
+  // carry a literal Infinity/NaN (JSON.stringify turns those into null
+  // before the request is even sent), so the realistic attack surface is
+  // the STRING "Infinity"/"NaN", which Number() happily turns into the
+  // non-finite value these tests exist to catch.
+  it('the string "Infinity" for currentQuantity is rejected with 400, not a 500', async () => {
+    const { projectId, contractId, revisionId, boqItemId } = await setupPublishedBoq(100, 10);
+    await approveMeasurement(projectId, contractId, revisionId, boqItemId, 100);
+    const ipc = await createDraftIpc(projectId, contractId, revisionId);
+
+    const res = await addLine(projectId, ipc.id, { boqItemId, currentQuantity: "Infinity" });
+    expect(res.status).toBe(400);
+  });
+
+  it('the string "-Infinity" for currentQuantity is rejected with 400', async () => {
+    const { projectId, contractId, revisionId, boqItemId } = await setupPublishedBoq(100, 10);
+    await approveMeasurement(projectId, contractId, revisionId, boqItemId, 100);
+    const ipc = await createDraftIpc(projectId, contractId, revisionId);
+
+    const res = await addLine(projectId, ipc.id, { boqItemId, currentQuantity: "-Infinity" });
+    expect(res.status).toBe(400);
+  });
+
+  it('the string "NaN" for currentQuantity is rejected with 400', async () => {
+    const { projectId, contractId, revisionId, boqItemId } = await setupPublishedBoq(100, 10);
+    await approveMeasurement(projectId, contractId, revisionId, boqItemId, 100);
+    const ipc = await createDraftIpc(projectId, contractId, revisionId);
+
+    const res = await addLine(projectId, ipc.id, { boqItemId, currentQuantity: "NaN" });
+    expect(res.status).toBe(400);
+  });
+
+  it("a normal valid quantity still works", async () => {
+    const { projectId, contractId, revisionId, boqItemId } = await setupPublishedBoq(100, 10);
+    await approveMeasurement(projectId, contractId, revisionId, boqItemId, 100);
+    const ipc = await createDraftIpc(projectId, contractId, revisionId);
+
+    const res = await addLine(projectId, ipc.id, { boqItemId, currentQuantity: 42 });
+    expect(res.status).toBe(201);
+  });
+});

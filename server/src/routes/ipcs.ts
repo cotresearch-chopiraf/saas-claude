@@ -5,7 +5,7 @@ import { db } from "../db/client.js";
 import { boqItems, boqRevisions, contracts, ipcLines, ipcs, measurementLines, projects } from "../db/schema.js";
 import { requirePermission } from "../lib/permissions.js";
 import { recordAuditEvent } from "../lib/audit.js";
-import { roundMoney, sumMoney } from "../lib/money.js";
+import { roundMoney, roundQuantity, sumMoney } from "../lib/money.js";
 import { sumApprovedQuantity } from "./measurements.js";
 import { CONTRACT_EXECUTION_BLOCKED_STATUSES } from "./contracts.js";
 
@@ -135,7 +135,7 @@ ipcsRouter.get("/:ipcId", async (req: Request<IpcParams>, res: Response) => {
 
 const lineSchema = z.object({
   boqItemId: z.string().uuid(),
-  currentQuantity: z.coerce.number().nonnegative(),
+  currentQuantity: z.coerce.number().finite().nonnegative(),
   description: z.string().optional(),
   sortOrder: z.coerce.number().int().optional(),
 });
@@ -201,8 +201,13 @@ ipcsRouter.post(
     // Fast-path check (not the authoritative one — certify() re-checks
     // this under lock): reject up front if there's no approved measured
     // quantity at all, or not enough of it, to back this line.
+    // Phase 3.2 hardening (QTY-001) — normalized once, here, and the same
+    // value used for the overrun check, the value calculation, and the
+    // stored quantity below (see lib/money.ts's roundQuantity comment).
+    const currentQuantity = roundQuantity(parsed.data.currentQuantity);
+
     const remaining = await certifiableRemaining(db, parsed.data.boqItemId);
-    if (parsed.data.currentQuantity > remaining + 1e-9) {
+    if (currentQuantity > remaining + 1e-9) {
       return res.status(400).json({
         error: "الكمية المطلوبة تتجاوز الكمية المعتمدة القابلة للتصديق لهذا البند",
         boqItemId: parsed.data.boqItemId,
@@ -210,7 +215,7 @@ ipcsRouter.post(
       });
     }
 
-    const currentValue = roundMoney(parsed.data.currentQuantity * Number(boqItem!.rate));
+    const currentValue = roundMoney(currentQuantity * Number(boqItem!.rate));
 
     const line = await db.transaction(async (tx) => {
       const [locked] = await tx.select().from(ipcs).where(eq(ipcs.id, ipc.id)).for("update");
@@ -223,7 +228,7 @@ ipcsRouter.post(
           ipcId: ipc.id,
           boqItemId: parsed.data.boqItemId,
           description: parsed.data.description,
-          currentQuantity: String(parsed.data.currentQuantity),
+          currentQuantity: String(currentQuantity),
           rate: boqItem!.rate!,
           currentValue: String(currentValue),
           sortOrder: parsed.data.sortOrder ?? 0,
@@ -441,11 +446,20 @@ ipcsRouter.post(
     const ipc = await findOwnedIpc(req.companyId!, req.params.projectId, req.params.ipcId);
     if (!ipc) return res.status(404).json({ error: "الشهادة غير موجودة" });
 
-    const contract = await db.query.contracts.findFirst({ where: eq(contracts.id, ipc.contractId) });
-
     const result = await db.transaction(async (tx) => {
       const [locked] = await tx.select().from(ipcs).where(eq(ipcs.id, ipc.id)).for("update");
       if (!locked || locked.status !== "approved") return { outcome: "conflict" as const };
+
+      // Phase 3.2 hardening (IPC-002) — lock the parent contract row
+      // before reading its retentionPercent: read unlocked (as this used
+      // to be, before this transaction even started), a concurrent PATCH
+      // to the contract's retention rate between that read and this
+      // transaction's write could freeze a stale rate into the certified
+      // snapshot. Locking it here, after the IPC row, means a concurrent
+      // contract-status/retention update either committed before this
+      // transaction started (so this read already sees it) or blocks
+      // until this transaction finishes — never an in-between value.
+      const [contract] = await tx.select().from(contracts).where(eq(contracts.id, ipc.contractId)).for("update");
 
       const lines = await tx.select().from(ipcLines).where(eq(ipcLines.ipcId, ipc.id));
       const boqItemIds = [...new Set(lines.map((l) => l.boqItemId))].sort();

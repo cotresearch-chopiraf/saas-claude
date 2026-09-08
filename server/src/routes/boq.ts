@@ -5,7 +5,7 @@ import { db } from "../db/client.js";
 import { boqItems, boqRevisions, contracts, costCodes, projects } from "../db/schema.js";
 import { requirePermission } from "../lib/permissions.js";
 import { recordAuditEvent } from "../lib/audit.js";
-import { roundMoney } from "../lib/money.js";
+import { roundMoney, roundQuantity } from "../lib/money.js";
 import { CONTRACT_EXECUTION_BLOCKED_STATUSES } from "./contracts.js";
 
 type ProjectParams = { projectId: string };
@@ -223,8 +223,8 @@ const itemSchema = z.object({
   code: z.string().optional(),
   description: z.string().min(1, "الوصف مطلوب"),
   unit: z.string().optional(),
-  quantity: z.coerce.number().nonnegative().optional(),
-  rate: z.coerce.number().nonnegative().optional(),
+  quantity: z.coerce.number().finite().nonnegative().optional(),
+  rate: z.coerce.number().finite().nonnegative().optional(),
   costCodeId: z.string().uuid().optional(),
   sortOrder: z.coerce.number().int().optional(),
 });
@@ -275,10 +275,15 @@ boqRouter.post(
       if (!costCode) return res.status(404).json({ error: "بند التكلفة غير موجود" });
     }
 
+    // Phase 3.2 hardening (QTY-001) — normalized ONCE, here, to the same
+    // 3-decimal precision the quantity column itself stores at
+    // (numeric(14,3)); the resulting number is used for BOTH the stored
+    // quantity and the amount calculation below, so the two can never
+    // silently disagree because Postgres would have rounded the raw input
+    // differently than the JS-side amount calculation did.
+    const quantity = parsed.data.quantity !== undefined ? roundQuantity(parsed.data.quantity) : undefined;
     const amount =
-      parsed.data.quantity !== undefined && parsed.data.rate !== undefined
-        ? roundMoney(parsed.data.quantity * parsed.data.rate)
-        : undefined;
+      quantity !== undefined && parsed.data.rate !== undefined ? roundMoney(quantity * parsed.data.rate) : undefined;
 
     const item = await db.transaction(async (tx) => {
       const [locked] = await tx.select().from(boqRevisions).where(eq(boqRevisions.id, revision.id)).for("update");
@@ -293,13 +298,28 @@ boqRouter.post(
           code: parsed.data.code,
           description: parsed.data.description,
           unit: parsed.data.unit,
-          quantity: parsed.data.quantity !== undefined ? String(parsed.data.quantity) : undefined,
+          quantity: quantity !== undefined ? String(quantity) : undefined,
           rate: parsed.data.rate !== undefined ? String(parsed.data.rate) : undefined,
           amount: amount !== undefined ? String(amount) : undefined,
           costCodeId: parsed.data.costCodeId,
           sortOrder: parsed.data.sortOrder ?? 0,
         })
         .returning();
+
+      // Phase 3.2 hardening (INFO-001) — BOQ revision create/publish were
+      // already audited; item add/delete were not. Written inside the
+      // same transaction as the insert, so it can never exist without the
+      // mutation it describes (or vice versa).
+      await recordAuditEvent(tx, {
+        companyId: req.companyId!,
+        actorUserId: req.userId!,
+        action: "boqItem.added",
+        entityType: "boq_item",
+        entityId: inserted.id,
+        afterValue: inserted,
+        metadata: { boqRevisionId: revision.id, contractId: revision.contractId, projectId: req.params.projectId },
+      });
+
       return inserted;
     });
 
@@ -334,6 +354,22 @@ boqRouter.delete(
       if (!locked || locked.status !== "draft") return null;
 
       const [row] = await tx.delete(boqItems).where(eq(boqItems.id, existing.id)).returning();
+      if (!row) return null;
+
+      // Phase 3.2 hardening (INFO-001) — see the add-item route above for
+      // why this is new; same discipline: inside the same transaction as
+      // the delete, so it only exists alongside a mutation that actually
+      // happened.
+      await recordAuditEvent(tx, {
+        companyId: req.companyId!,
+        actorUserId: req.userId!,
+        action: "boqItem.removed",
+        entityType: "boq_item",
+        entityId: existing.id,
+        beforeValue: existing,
+        metadata: { boqRevisionId: revision.id, contractId: revision.contractId, projectId: req.params.projectId },
+      });
+
       return row;
     });
 
