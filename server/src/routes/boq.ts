@@ -6,6 +6,7 @@ import { boqItems, boqRevisions, contracts, costCodes, projects } from "../db/sc
 import { requirePermission } from "../lib/permissions.js";
 import { recordAuditEvent } from "../lib/audit.js";
 import { roundMoney } from "../lib/money.js";
+import { CONTRACT_EXECUTION_BLOCKED_STATUSES } from "./contracts.js";
 
 type ProjectParams = { projectId: string };
 type RevisionParams = ProjectParams & { revisionId: string };
@@ -50,6 +51,11 @@ boqRouter.post(
       where: and(eq(contracts.id, parsed.data.contractId), eq(contracts.projectId, req.params.projectId)),
     });
     if (!contract) return res.status(404).json({ error: "العقد غير موجود" });
+    // Phase 3.2 remediation (CTR-001) — a contract that is completed or
+    // terminated must not accept new execution activity.
+    if (CONTRACT_EXECUTION_BLOCKED_STATUSES.includes(contract.status)) {
+      return res.status(409).json({ error: "لا يمكن إنشاء نسخة جدول كميات على عقد منتهٍ أو ملغى" });
+    }
 
     // The MAX+1 subquery alone is not race-safe: two concurrent INSERTs can
     // each read the same prior MAX before either commits. Locking the
@@ -126,7 +132,7 @@ boqRouter.post(
     const existing = await findOwnedRevision(req.companyId!, req.params.projectId, req.params.revisionId);
     if (!existing) return res.status(404).json({ error: "نسخة جدول الكميات غير موجودة" });
 
-    const published = await db.transaction(async (tx) => {
+    const result = await db.transaction(async (tx) => {
       // Lock the parent contract row for the duration of this
       // transaction. Without this, two DIFFERENT draft revisions of the
       // SAME contract published concurrently would each pass their own
@@ -138,14 +144,22 @@ boqRouter.post(
       // supersedesRevisionId link below can never race each other —
       // whichever transaction gets here first finishes (commit or
       // rollback) before the other proceeds past this point.
-      await tx.select().from(contracts).where(eq(contracts.id, existing.contractId)).for("update");
+      const [contractRow] = await tx.select().from(contracts).where(eq(contracts.id, existing.contractId)).for("update");
+
+      // Phase 3.2 remediation (CTR-001) — authoritative re-check under the
+      // same lock: a contract that just moved to completed/terminated
+      // (or already was) must not gain a newly-published revision, even
+      // if the fast-path check at revision-creation time passed earlier.
+      if (!contractRow || CONTRACT_EXECUTION_BLOCKED_STATUSES.includes(contractRow.status)) {
+        return { outcome: "contractBlocked" as const };
+      }
 
       const [updated] = await tx
         .update(boqRevisions)
         .set({ status: "published", publishedAt: new Date() })
         .where(and(eq(boqRevisions.id, existing.id), eq(boqRevisions.status, "draft")))
         .returning();
-      if (!updated) return null;
+      if (!updated) return { outcome: "conflict" as const };
 
       // Supersede whichever revision(s) were previously published for
       // this same contract — a contract has at most one published BOQ
@@ -190,13 +204,16 @@ boqRouter.post(
         afterValue: { status: "published", supersedesRevisionId: finalRevision.supersedesRevisionId ?? null },
       });
 
-      return finalRevision;
+      return { outcome: "ok" as const, revision: finalRevision };
     });
 
-    if (!published) {
+    if (result.outcome === "contractBlocked") {
+      return res.status(409).json({ error: "لا يمكن نشر نسخة جدول كميات على عقد منتهٍ أو ملغى" });
+    }
+    if (result.outcome === "conflict") {
       return res.status(409).json({ error: "لا يمكن نشر نسخة ليست في حالة مسودة" });
     }
-    res.json(published);
+    res.json(result.revision);
   },
 );
 

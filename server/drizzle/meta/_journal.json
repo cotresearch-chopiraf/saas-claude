@@ -225,6 +225,13 @@
       "when": 1788819793173,
       "tag": "0031_needy_veda",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1788863947069,
+      "tag": "0032_green_jack_murdock",
+      "breakpoints": true
     }
   ]
 }

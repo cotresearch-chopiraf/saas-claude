@@ -15,6 +15,7 @@ import {
 import { requirePermission } from "../lib/permissions.js";
 import { recordAuditEvent } from "../lib/audit.js";
 import { roundMoney, sumMoney } from "../lib/money.js";
+import { CONTRACT_EXECUTION_BLOCKED_STATUSES } from "./contracts.js";
 
 type ProjectParams = { projectId: string };
 type CommitmentParams = ProjectParams & { commitmentId: string };
@@ -75,6 +76,11 @@ commitmentsRouter.post(
         where: and(eq(contracts.id, parsed.data.contractId), eq(contracts.projectId, req.params.projectId)),
       });
       if (!contract) return res.status(404).json({ error: "العقد غير موجود" });
+      // Phase 3.2 remediation (CTR-001) — a contract that is completed or
+      // terminated must not accept new execution activity.
+      if (CONTRACT_EXECUTION_BLOCKED_STATUSES.includes(contract.status)) {
+        return res.status(409).json({ error: "لا يمكن إنشاء التزام مرتبط بعقد منتهٍ أو ملغى" });
+      }
     }
 
     // The MAX+1 subquery alone is not race-safe: two concurrent INSERTs can

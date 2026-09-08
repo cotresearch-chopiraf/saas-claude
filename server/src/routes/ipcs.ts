@@ -7,6 +7,7 @@ import { requirePermission } from "../lib/permissions.js";
 import { recordAuditEvent } from "../lib/audit.js";
 import { roundMoney, sumMoney } from "../lib/money.js";
 import { sumApprovedQuantity } from "./measurements.js";
+import { CONTRACT_EXECUTION_BLOCKED_STATUSES } from "./contracts.js";
 
 type ProjectParams = { projectId: string };
 type IpcParams = ProjectParams & { ipcId: string };
@@ -52,6 +53,11 @@ ipcsRouter.post("/", requirePermission("ipc.manage"), async (req: Request<Projec
     where: and(eq(contracts.id, parsed.data.contractId), eq(contracts.projectId, req.params.projectId)),
   });
   if (!contract) return res.status(404).json({ error: "العقد غير موجود" });
+  // Phase 3.2 remediation (CTR-001) — a contract that is completed or
+  // terminated must not accept new execution activity.
+  if (CONTRACT_EXECUTION_BLOCKED_STATUSES.includes(contract.status)) {
+    return res.status(409).json({ error: "لا يمكن إنشاء شهادة على عقد منتهٍ أو ملغى" });
+  }
 
   // Must be a PUBLISHED revision of THIS contract — same discipline as
   // Measurement creation.

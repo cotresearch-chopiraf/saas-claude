@@ -903,6 +903,13 @@ export const boqRevisions = pgTable(
   (table) => ({
     // Slice Z — routes/boq.ts's list route filters by projectId alone.
     projectIdx: index("boq_revisions_project_idx").on(table.projectId),
+    // Phase 3.2 remediation (DB-001) — defense-in-depth backstop for the
+    // per-contract sequential numbering routes/boq.ts already claims
+    // atomically via a contract-row-locked MAX+1 subquery.
+    revisionNumberUnique: uniqueIndex("boq_revisions_contract_revision_unique").on(
+      table.contractId,
+      table.revisionNumber,
+    ),
   }),
 );
 
@@ -966,6 +973,16 @@ export const budgetRevisions = pgTable(
     // Slice Z — routes/budgetRevisions.ts's list route filters by
     // projectId alone.
     projectIdx: index("budget_revisions_project_idx").on(table.projectId),
+    // Phase 3.2 remediation (DB-001) — defense-in-depth backstop for the
+    // per-project sequential numbering routes/budgetRevisions.ts already
+    // claims atomically via a project-row-locked MAX+1 subquery; this
+    // constraint doesn't replace that lock (it can't provide the "claim
+    // the next number" behavior on its own), it only guarantees the DB
+    // itself will reject a duplicate if that discipline is ever bypassed.
+    revisionNumberUnique: uniqueIndex("budget_revisions_project_revision_unique").on(
+      table.projectId,
+      table.revisionNumber,
+    ),
   }),
 );
 
@@ -1317,6 +1334,13 @@ export const commitments = pgTable(
     // Slice Z — routes/commitments.ts's list route filters by projectId
     // alone.
     projectIdx: index("commitments_project_idx").on(table.projectId),
+    // Phase 3.2 remediation (DB-001) — defense-in-depth backstop for the
+    // per-company sequential numbering routes/commitments.ts already
+    // claims atomically via a company-row-locked MAX+1 subquery.
+    commitmentNumberUnique: uniqueIndex("commitments_company_number_unique").on(
+      table.companyId,
+      table.commitmentNumber,
+    ),
   }),
 );
 
@@ -1601,6 +1625,10 @@ export const ipcs = pgTable(
   (table) => ({
     // Slice Z — routes/ipcs.ts's list route filters by projectId alone.
     projectIdx: index("ipcs_project_idx").on(table.projectId),
+    // Phase 3.2 remediation (DB-001) — defense-in-depth backstop for the
+    // per-contract sequential numbering routes/ipcs.ts already claims
+    // atomically via a contract-row-locked MAX+1 subquery.
+    ipcNumberUnique: uniqueIndex("ipcs_contract_number_unique").on(table.contractId, table.ipcNumber),
   }),
 );
 
@@ -1752,6 +1780,14 @@ export const subcontractIpcs = pgTable(
     projectIdx: index("subcontract_ipcs_project_idx").on(table.projectId),
     commitmentIdx: index("subcontract_ipcs_commitment_idx").on(table.commitmentId),
     statusIdx: index("subcontract_ipcs_status_idx").on(table.status),
+    // Phase 3.2 remediation (DB-001) — defense-in-depth backstop for the
+    // per-commitment sequential numbering routes/subcontractIpcs.ts
+    // already claims atomically via a commitment-row-locked MAX+1
+    // subquery.
+    ipcNumberUnique: uniqueIndex("subcontract_ipcs_commitment_number_unique").on(
+      table.commitmentId,
+      table.ipcNumber,
+    ),
   }),
 );
 

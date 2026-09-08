@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, vi } from "vitest";
 import request from "supertest";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { buildApp } from "../src/app.js";
 import { resetDb } from "./setup.js";
 import { db } from "../src/db/client.js";
@@ -72,6 +72,23 @@ async function createContract(projectId: string, overrides: Record<string, unkno
     .send({ contractNumber: "C-1", clientName: "Client", originalValue: 50000, ...overrides });
   expect(res.status).toBe(201);
   return res.body as { id: string; revisedValue: string; originalValue: string; contractType: string };
+}
+
+function patchContractStatus(projectId: string, contractId: string, status: string, token = ownerToken) {
+  return request(app)
+    .patch(`/api/projects/${projectId}/contracts/${contractId}`)
+    .set("Authorization", `Bearer ${token}`)
+    .send({ status });
+}
+
+// Walks a freshly-created (always "draft") contract to the given status via
+// the only valid path (draft -> active -> completed/terminated) — used by
+// tests below that need to exercise a *downstream* rule (BOQ/IPC/Measurement
+// gating) against a contract already in a terminal state, without each test
+// re-deriving the walk.
+async function advanceContractTo(projectId: string, contractId: string, target: "active" | "completed" | "terminated") {
+  await patchContractStatus(projectId, contractId, "active");
+  if (target !== "active") await patchContractStatus(projectId, contractId, target);
 }
 
 describe("MIDAD Phase 1 — Contract foundation", () => {
@@ -676,5 +693,355 @@ describe("MIDAD Phase 1 — Budget revisions", () => {
 
     const stillDraft = await db.query.budgetRevisions.findFirst({ where: eq(budgetRevisions.id, revRes.body.id) });
     expect(stillDraft?.status).toBe("draft");
+  });
+});
+
+describe("MIDAD Phase 3.2 remediation — Contract status lifecycle (CTR-001)", () => {
+  it("valid transitions: draft -> active -> completed", async () => {
+    const projectId = await createProject();
+    const contract = await createContract(projectId);
+
+    const toActive = await patchContractStatus(projectId, contract.id, "active");
+    expect(toActive.status).toBe(200);
+    expect(toActive.body.status).toBe("active");
+
+    const toCompleted = await patchContractStatus(projectId, contract.id, "completed");
+    expect(toCompleted.status).toBe(200);
+    expect(toCompleted.body.status).toBe("completed");
+  });
+
+  it("valid transition: active -> terminated", async () => {
+    const projectId = await createProject();
+    const contract = await createContract(projectId);
+    await patchContractStatus(projectId, contract.id, "active");
+
+    const toTerminated = await patchContractStatus(projectId, contract.id, "terminated");
+    expect(toTerminated.status).toBe(200);
+    expect(toTerminated.body.status).toBe("terminated");
+  });
+
+  it("re-sending the current status is a no-op, not a rejected transition", async () => {
+    const projectId = await createProject();
+    const contract = await createContract(projectId);
+    const res = await patchContractStatus(projectId, contract.id, "draft");
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("draft");
+  });
+
+  it("PATCHing non-status fields alongside an unrelated field never triggers the transition check", async () => {
+    const projectId = await createProject();
+    const contract = await createContract(projectId);
+    const res = await request(app)
+      .patch(`/api/projects/${projectId}/contracts/${contract.id}`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ clientName: "New Client" });
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("draft");
+  });
+
+  const invalidTransitions: Array<["draft" | "active" | "completed" | "terminated", "active" | "completed" | "terminated"]> = [
+    ["terminated", "active"],
+    ["completed", "active"],
+    ["terminated", "completed"],
+    ["completed", "terminated"],
+    ["draft", "completed"],
+    ["draft", "terminated"],
+  ];
+
+  for (const [from, to] of invalidTransitions) {
+    it(`invalid transition ${from} -> ${to} is rejected with 409, not a generic 500`, async () => {
+      const projectId = await createProject();
+      const contract = await createContract(projectId);
+      if (from !== "draft") await advanceContractTo(projectId, contract.id, from);
+
+      const res = await patchContractStatus(projectId, contract.id, to);
+      expect(res.status).toBe(409);
+      expect(res.body.error).toBeTruthy();
+
+      // The rejected transition must not have partially applied.
+      const readBack = await request(app)
+        .get(`/api/projects/${projectId}/contracts/${contract.id}`)
+        .set("Authorization", `Bearer ${ownerToken}`);
+      expect(readBack.body.status).toBe(from);
+    });
+  }
+
+  it("a member cannot change contract status", async () => {
+    const projectId = await createProject();
+    const contract = await createContract(projectId);
+    const res = await patchContractStatus(projectId, contract.id, "active", memberToken);
+    expect(res.status).toBe(403);
+  });
+});
+
+describe("MIDAD Phase 3.2 remediation — contract status downstream execution gating (CTR-001)", () => {
+  it("a completed contract cannot receive a new BOQ revision", async () => {
+    const projectId = await createProject();
+    const contract = await createContract(projectId);
+    await advanceContractTo(projectId, contract.id, "completed");
+
+    const res = await request(app)
+      .post(`/api/projects/${projectId}/boq-revisions`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ contractId: contract.id });
+    expect(res.status).toBe(409);
+  });
+
+  it("a terminated contract cannot receive a new BOQ revision", async () => {
+    const projectId = await createProject();
+    const contract = await createContract(projectId);
+    await advanceContractTo(projectId, contract.id, "terminated");
+
+    const res = await request(app)
+      .post(`/api/projects/${projectId}/boq-revisions`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ contractId: contract.id });
+    expect(res.status).toBe(409);
+  });
+
+  it("a draft contract can still receive a new BOQ revision (draft is not blocked — matches every existing fixture)", async () => {
+    const projectId = await createProject();
+    const contract = await createContract(projectId);
+    const res = await request(app)
+      .post(`/api/projects/${projectId}/boq-revisions`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ contractId: contract.id });
+    expect(res.status).toBe(201);
+  });
+
+  it("publishing a BOQ revision is rejected once its contract becomes terminated after the draft was created", async () => {
+    const projectId = await createProject();
+    const contract = await createContract(projectId);
+    const revRes = await request(app)
+      .post(`/api/projects/${projectId}/boq-revisions`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ contractId: contract.id });
+    expect(revRes.status).toBe(201);
+
+    await advanceContractTo(projectId, contract.id, "terminated");
+
+    const publishRes = await request(app)
+      .post(`/api/projects/${projectId}/boq-revisions/${revRes.body.id}/publish`)
+      .set("Authorization", `Bearer ${ownerToken}`);
+    expect(publishRes.status).toBe(409);
+
+    const stillDraft = await db.query.boqRevisions.findFirst({ where: eq(boqRevisions.id, revRes.body.id) });
+    expect(stillDraft?.status).toBe("draft");
+  });
+
+  it("a terminated contract cannot receive a new IPC", async () => {
+    const projectId = await createProject();
+    const contract = await createContract(projectId);
+    await advanceContractTo(projectId, contract.id, "terminated");
+
+    const res = await request(app)
+      .post(`/api/projects/${projectId}/ipcs`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({
+        contractId: contract.id,
+        boqRevisionId: "00000000-0000-0000-0000-000000000000",
+        periodStart: "2025-01-01",
+        periodEnd: "2025-01-31",
+      });
+    expect(res.status).toBe(409);
+  });
+
+  it("a completed contract cannot receive a new Measurement", async () => {
+    const projectId = await createProject();
+    const contract = await createContract(projectId);
+    await advanceContractTo(projectId, contract.id, "completed");
+
+    const res = await request(app)
+      .post(`/api/projects/${projectId}/measurements`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({
+        contractId: contract.id,
+        boqRevisionId: "00000000-0000-0000-0000-000000000000",
+        measurementDate: "2025-01-15",
+      });
+    expect(res.status).toBe(409);
+  });
+
+  it("read access to a terminated contract and its BOQ revisions remains open (historical reporting is never blocked)", async () => {
+    const projectId = await createProject();
+    const contract = await createContract(projectId);
+    const revRes = await request(app)
+      .post(`/api/projects/${projectId}/boq-revisions`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ contractId: contract.id });
+
+    await advanceContractTo(projectId, contract.id, "terminated");
+
+    const contractRead = await request(app)
+      .get(`/api/projects/${projectId}/contracts/${contract.id}`)
+      .set("Authorization", `Bearer ${ownerToken}`);
+    expect(contractRead.status).toBe(200);
+    expect(contractRead.body.status).toBe("terminated");
+
+    const listRead = await request(app)
+      .get(`/api/projects/${projectId}/contracts`)
+      .set("Authorization", `Bearer ${ownerToken}`);
+    expect(listRead.status).toBe(200);
+
+    const revisionRead = await request(app)
+      .get(`/api/projects/${projectId}/boq-revisions/${revRes.body.id}`)
+      .set("Authorization", `Bearer ${ownerToken}`);
+    expect(revisionRead.status).toBe(200);
+  });
+});
+
+describe("MIDAD Phase 3.2 remediation — Budget Revision supersession (BUD-001)", () => {
+  it("approving a second revision supersedes the first; exactly one is current", async () => {
+    const projectId = await createProject();
+
+    const revA = await request(app)
+      .post(`/api/projects/${projectId}/budget-revisions`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({});
+    const revB = await request(app)
+      .post(`/api/projects/${projectId}/budget-revisions`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({});
+
+    const approveA = await request(app)
+      .post(`/api/projects/${projectId}/budget-revisions/${revA.body.id}/approve`)
+      .set("Authorization", `Bearer ${ownerToken}`);
+    expect(approveA.status).toBe(200);
+    expect(approveA.body.status).toBe("approved");
+
+    const approveB = await request(app)
+      .post(`/api/projects/${projectId}/budget-revisions/${revB.body.id}/approve`)
+      .set("Authorization", `Bearer ${ownerToken}`);
+    expect(approveB.status).toBe(200);
+    expect(approveB.body.status).toBe("approved");
+
+    const list = await request(app)
+      .get(`/api/projects/${projectId}/budget-revisions`)
+      .set("Authorization", `Bearer ${ownerToken}`);
+    const byId = Object.fromEntries(
+      (list.body as Array<{ id: string; status: string }>).map((r) => [r.id, r.status]),
+    );
+    expect(byId[revA.body.id]).toBe("superseded");
+    expect(byId[revB.body.id]).toBe("approved");
+    expect(Object.values(byId).filter((s) => s === "approved")).toHaveLength(1);
+  });
+
+  it("the superseded revision remains individually readable (historical access is never blocked)", async () => {
+    const projectId = await createProject();
+    const revA = await request(app)
+      .post(`/api/projects/${projectId}/budget-revisions`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({});
+    const revB = await request(app)
+      .post(`/api/projects/${projectId}/budget-revisions`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({});
+    await request(app)
+      .post(`/api/projects/${projectId}/budget-revisions/${revA.body.id}/approve`)
+      .set("Authorization", `Bearer ${ownerToken}`);
+    await request(app)
+      .post(`/api/projects/${projectId}/budget-revisions/${revB.body.id}/approve`)
+      .set("Authorization", `Bearer ${ownerToken}`);
+
+    const read = await request(app)
+      .get(`/api/projects/${projectId}/budget-revisions/${revA.body.id}`)
+      .set("Authorization", `Bearer ${ownerToken}`);
+    expect(read.status).toBe(200);
+    expect(read.body.status).toBe("superseded");
+  });
+
+  it("supersession is audited on the newly-approved revision's own event, referencing the superseded id", async () => {
+    const projectId = await createProject();
+    const revA = await request(app)
+      .post(`/api/projects/${projectId}/budget-revisions`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({});
+    const revB = await request(app)
+      .post(`/api/projects/${projectId}/budget-revisions`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({});
+    await request(app)
+      .post(`/api/projects/${projectId}/budget-revisions/${revA.body.id}/approve`)
+      .set("Authorization", `Bearer ${ownerToken}`);
+    await request(app)
+      .post(`/api/projects/${projectId}/budget-revisions/${revB.body.id}/approve`)
+      .set("Authorization", `Bearer ${ownerToken}`);
+
+    const events = await db.query.auditEvents.findMany({ where: eq(auditEvents.entityId, revB.body.id) });
+    const approvedEvent = events.find((e) => e.action === "budgetRevision.approved");
+    expect(approvedEvent).toBeTruthy();
+    expect((approvedEvent!.metadata as { supersededRevisionIds?: string[] } | null)?.supersededRevisionIds).toEqual([
+      revA.body.id,
+    ]);
+  });
+
+  it("5x: concurrent approval of two DIFFERENT draft revisions for the same project never leaves more than one approved", async () => {
+    const TRIALS = 5;
+    for (let i = 0; i < TRIALS; i++) {
+      const projectId = await createProject();
+      const revA = await request(app)
+        .post(`/api/projects/${projectId}/budget-revisions`)
+        .set("Authorization", `Bearer ${ownerToken}`)
+        .send({});
+      const revB = await request(app)
+        .post(`/api/projects/${projectId}/budget-revisions`)
+        .set("Authorization", `Bearer ${ownerToken}`)
+        .send({});
+
+      const approve = (id: string) =>
+        request(app)
+          .post(`/api/projects/${projectId}/budget-revisions/${id}/approve`)
+          .set("Authorization", `Bearer ${ownerToken}`);
+
+      // Both requests target DIFFERENT draft rows, so both are individually
+      // valid and both succeed — the "at most one current" invariant is
+      // enforced by supersession (which one ends up "approved" afterward),
+      // not by rejecting one of the two calls.
+      const [r1, r2] = await Promise.all([approve(revA.body.id), approve(revB.body.id)]);
+      expect(r1.status).toBe(200);
+      expect(r2.status).toBe(200);
+
+      const list = await request(app)
+        .get(`/api/projects/${projectId}/budget-revisions`)
+        .set("Authorization", `Bearer ${ownerToken}`);
+      const statuses = (list.body as Array<{ status: string }>).map((r) => r.status);
+      expect(statuses.filter((s) => s === "approved")).toHaveLength(1);
+      expect(statuses.filter((s) => s === "superseded")).toHaveLength(1);
+    }
+  });
+
+  it("a member cannot trigger approval/supersession", async () => {
+    const projectId = await createProject();
+    const revA = await request(app)
+      .post(`/api/projects/${projectId}/budget-revisions`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({});
+    const res = await request(app)
+      .post(`/api/projects/${projectId}/budget-revisions/${revA.body.id}/approve`)
+      .set("Authorization", `Bearer ${memberToken}`);
+    expect(res.status).toBe(403);
+  });
+});
+
+describe("MIDAD Phase 3.2 remediation — database uniqueness backstop (DB-001)", () => {
+  it("a duplicate (project_id, revision_number) pair is rejected at the database level even bypassing the application lock", async () => {
+    const projectId = await createProject();
+    const revA = await request(app)
+      .post(`/api/projects/${projectId}/budget-revisions`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({});
+    expect(revA.status).toBe(201);
+
+    // Bypasses routes/budgetRevisions.ts's own locking discipline entirely
+    // (a raw duplicate insert, not the app's INSERT...SELECT MAX+1) — this
+    // is exactly the failure mode the unique index is a backstop for: some
+    // future or out-of-band code path that forgets the lock.
+    await expect(
+      db.execute(sql`
+        INSERT INTO budget_revisions (company_id, project_id, revision_number, status, created_by)
+        SELECT company_id, project_id, revision_number, status, created_by
+        FROM budget_revisions WHERE id = ${revA.body.id}
+      `),
+    ).rejects.toThrow();
   });
 });

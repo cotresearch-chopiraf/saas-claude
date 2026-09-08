@@ -120,12 +120,40 @@ budgetRevisionsRouter.post(
     if (!existing) return res.status(404).json({ error: "نسخة الميزانية غير موجودة" });
 
     const approved = await db.transaction(async (tx) => {
+      // Phase 3.2 remediation (BUD-001) — lock the parent project row for
+      // the duration of this transaction, same discipline as boq.ts's
+      // publish route: without this, two DIFFERENT draft revisions of the
+      // SAME project approved concurrently would each pass their own
+      // independent "WHERE status = 'draft'" check below (different rows,
+      // so that guard alone can't see each other) and both end up
+      // approved at once. Locking the shared project row serializes any
+      // two approve attempts under the same project, so "at most one
+      // approved revision per project" can never race.
+      await tx.select().from(projects).where(eq(projects.id, req.params.projectId)).for("update");
+
       const [updated] = await tx
         .update(budgetRevisions)
         .set({ status: "approved", approvedBy: req.userId!, approvedAt: new Date() })
         .where(and(eq(budgetRevisions.id, existing.id), eq(budgetRevisions.status, "draft")))
         .returning();
       if (!updated) return null;
+
+      // Supersede whichever revision(s) were previously approved for this
+      // same project — a project has at most one approved budget revision
+      // "current" at a time, but every prior one stays in the table,
+      // unaltered and readable, exactly like boq_revisions' own
+      // publish-supersedes-prior pattern.
+      const supersededRows = await tx
+        .update(budgetRevisions)
+        .set({ status: "superseded" })
+        .where(
+          and(
+            eq(budgetRevisions.projectId, req.params.projectId),
+            eq(budgetRevisions.status, "approved"),
+            sql`${budgetRevisions.id} != ${existing.id}`,
+          ),
+        )
+        .returning();
 
       await recordAuditEvent(tx, {
         companyId: req.companyId!,
@@ -135,6 +163,8 @@ budgetRevisionsRouter.post(
         entityId: existing.id,
         beforeValue: { status: existing.status },
         afterValue: { status: "approved" },
+        metadata:
+          supersededRows.length > 0 ? { supersededRevisionIds: supersededRows.map((r) => r.id) } : undefined,
       });
 
       return updated;

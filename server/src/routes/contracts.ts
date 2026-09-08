@@ -12,6 +12,30 @@ type ContractParams = ProjectParams & { contractId: string };
 
 export const contractsRouter = Router({ mergeParams: true });
 
+// Phase 3.2 remediation (CTR-001) — the only transitions this product
+// model actually calls for (see the master remediation prompt): a
+// contract starts as draft, becomes active once work begins, and from
+// active is either completed (finished normally) or terminated (ended
+// early). completed/terminated are terminal — nothing reopens them, since
+// no current workflow needs that and inventing one isn't this fix's job.
+const CONTRACT_STATUS_TRANSITIONS: Record<string, string[]> = {
+  draft: ["active"],
+  active: ["completed", "terminated"],
+  completed: [],
+  terminated: [],
+};
+
+// Statuses that must reject NEW BOQ/IPC/Measurement/Commitment execution
+// activity (routes/boq.ts, ipcs.ts, measurements.ts, commitments.ts import
+// this rather than duplicating the list). Deliberately does NOT include
+// "draft": every existing BOQ/IPC/Measurement/Commitment test fixture
+// creates a contract and builds against it before ever marking it active,
+// and the audit's own CTR-001 finding and reproduction scenario were both
+// specifically about a terminated/completed contract still accepting new
+// activity — draft is the normal, currently-universal starting point for
+// setting up a contract's execution structure, not a blocked state.
+export const CONTRACT_EXECUTION_BLOCKED_STATUSES = ["completed", "terminated"];
+
 // Same tenant/ownership-scoping pattern as every other project sub-resource
 // (budget.ts, tasks.ts, changeOrders.ts, dailyLogs.ts): verify the project
 // belongs to the caller's company before any route below runs.
@@ -161,7 +185,23 @@ contractsRouter.patch(
 
     const { revisedValue, advancePercent, retentionPercent, ...rest } = parsed.data;
 
-    const updated = await db.transaction(async (tx) => {
+    const result = await db.transaction(async (tx) => {
+      // Locked re-check, same discipline as every other state-transition
+      // route in this domain (boq.ts's publish, ipcs.ts's certify, etc.):
+      // the fast-path status implied by `existing` (read before this
+      // transaction) is not authoritative — two concurrent PATCHes
+      // requesting different terminal statuses for the same "active"
+      // contract must not both succeed.
+      const [locked] = await tx.select().from(contracts).where(eq(contracts.id, existing.id)).for("update");
+      if (!locked) return { outcome: "notFound" as const };
+
+      if (rest.status && rest.status !== locked.status) {
+        const allowed = CONTRACT_STATUS_TRANSITIONS[locked.status] ?? [];
+        if (!allowed.includes(rest.status)) {
+          return { outcome: "invalidTransition" as const };
+        }
+      }
+
       const [row] = await tx
         .update(contracts)
         .set({
@@ -184,8 +224,13 @@ contractsRouter.patch(
         afterValue: row,
       });
 
-      return row;
+      return { outcome: "ok" as const, contract: row };
     });
+
+    if (result.outcome === "notFound") return res.status(404).json({ error: "العقد غير موجود" });
+    if (result.outcome === "invalidTransition") {
+      return res.status(409).json({ error: "لا يمكن الانتقال إلى حالة العقد المطلوبة من حالته الحالية" });
+    }
 
     logger.info("financial_mutation", {
       action: "contract.updated",
@@ -193,6 +238,6 @@ contractsRouter.patch(
       companyId: req.companyId,
       contractId: existing.id,
     });
-    res.json(updated);
+    res.json(result.contract);
   },
 );
