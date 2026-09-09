@@ -18,7 +18,9 @@ export async function resetDb() {
       audit_events, files, suppliers, commitments, commitment_lines,
       measurements, measurement_lines, ipcs, ipc_lines, forecast_snapshots,
       platform_operators, support_sessions,
-      zatca_egs_units, zatca_icv_counters, zatca_submissions
+      zatca_egs_units, zatca_icv_counters, zatca_submissions,
+      employees, payroll_periods, payroll_records, labor_allocations,
+      labor_cost_postings, payroll_import_batches, payroll_import_rows
     RESTART IDENTITY CASCADE
   `);
 }

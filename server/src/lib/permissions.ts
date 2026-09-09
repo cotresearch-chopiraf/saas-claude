@@ -155,6 +155,26 @@ export const PERMISSIONS = {
   // already-established pattern, not a new one.
   "task.delete": ["owner"],
   "dailyLog.delete": ["owner"],
+
+  // --- Phase A — Mudad/WPS + Project Labor Cost (Slice A1) ---
+  // Employee/payroll data combines sensitive personal data with a real
+  // financial-posting capability — the same trust class as
+  // Commitment/IPC (fully owner-gated), not the member-open
+  // Task/DailyLog/Measurement class. Deliberately only 3 actions, not the
+  // full workforce.read/payroll.read/payroll.approve/labor_cost.*
+  // surface the discovery report considered and rejected as premature:
+  // workforce.manage covers all employee CRUD; payroll.manage covers
+  // every pre-posting payroll action (create period, add/import records,
+  // submit, approve, set allocations — all still reversible); payroll.post
+  // is kept separate because it is the one irreversible, money-moving
+  // action (creates real `expenses` rows) — the same reason
+  // invoice.markPaid is its own action distinct from invoice creation.
+  // No routes exist yet that use these (Slice A1 is schema-only); they are
+  // added now so later slices only need to apply requirePermission(...),
+  // never touch this matrix again.
+  "workforce.manage": ["owner"],
+  "payroll.manage": ["owner"],
+  "payroll.post": ["owner"],
 } as const satisfies Record<string, readonly Role[]>;
 
 export type PermissionAction = keyof typeof PERMISSIONS;

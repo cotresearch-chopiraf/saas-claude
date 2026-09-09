@@ -249,6 +249,17 @@ export const expenses = pgTable(
   budgetItemId: uuid("budget_item_id").references(() => budgetItems.id, {
     onDelete: "set null",
   }),
+  // Phase A (Mudad/WPS + Project Labor Cost) — nullable, additive. Lets an
+  // expense be grouped by cost code directly (labor postings always set
+  // this; existing manual expenses stay unaffected, this column is never
+  // backfilled). Deliberately NOT required to match budgetItemId's own
+  // costCodeId when both are set — an expense may be tagged to a cost
+  // code with no corresponding budget item yet. See the Phase A section
+  // near the end of this file for the labor-cost posting flow that writes
+  // rows here (laborCostPostings -> expenses, never a second actual-cost
+  // table); collectForecastInputs/calculateForecast/calculateCashFlow are
+  // unchanged by this column — they still just SUM(expenses.amount).
+  costCodeId: uuid("cost_code_id").references((): AnyPgColumn => costCodes.id),
   description: text("description").notNull(),
   amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
   expenseDate: date("expense_date").notNull(),
@@ -721,6 +732,10 @@ export const expensesRelations = relations(expenses, ({ one }) => ({
   budgetItem: one(budgetItems, {
     fields: [expenses.budgetItemId],
     references: [budgetItems.id],
+  }),
+  costCode: one(costCodes, {
+    fields: [expenses.costCodeId],
+    references: [costCodes.id],
   }),
 }));
 
@@ -2494,3 +2509,418 @@ export const zatcaSubmissions = pgTable(
     ),
   }),
 );
+
+// =============================================================================
+// MIDAD Phase A — Mudad/WPS + Project Labor Cost (Slice A1: schema foundation)
+//
+// Per the approved architecture (Phase A discovery report): labor cost
+// must become part of MIDAD's EXISTING Actual Cost / Forecast / Cash Flow
+// pipeline, never a second, parallel accounting system. The only change
+// to the existing financial model is expenses.costCodeId (added above,
+// additive/nullable) — every table below is genuinely new, because no
+// existing entity represents an individual worker, a payroll period, a
+// WPS record, or a labor-to-project allocation (confirmed absent
+// anywhere in this schema by that discovery pass).
+//
+// Employee vs. User — load-bearing, not cosmetic: `users` is MIDAD's own
+// login/authentication identity (owner/member role). `employees` below is
+// workforce identity — a person MIDAD tracks payroll cost for, who very
+// often has no MIDAD login at all. employees.userId is nullable and
+// OPTIONAL, linking a specific worker to a login only when that worker
+// also happens to be a MIDAD user; it is never auto-populated, and a
+// MIDAD user account never implies an employee record or vice versa.
+//
+// This slice is schema-only: no routes, no UI, nothing yet writes to any
+// table below (A2+ adds that). Tables are declared before their relations
+// blocks, all together, to avoid any forward-reference ordering issue —
+// costCodes/files/projects/companies/users are already declared earlier
+// in this file, so only genuinely-later references (payrollImportBatches
+// from payrollRecords; the payrollImportRows/payrollRecords cross-link;
+// laborCostPostings' own self-reference) use the lazy AnyPgColumn pattern
+// already established elsewhere in this file (see budgetItems.costCodeId).
+// =============================================================================
+
+export const employeeStatusEnum = pgEnum("employee_status", ["active", "inactive"]);
+
+// Deliberately minimal (data-minimization, per the discovery report) — no
+// attendance/biometric/HR fields, no Nitaqat/GOSI categorization (a
+// separate, later roadmap item). nationality/bank fields are optional and
+// exist only because WPS itself requires salary paid into a compliant
+// Saudi bank account — MIDAD only ever stores a reference, it never
+// moves money or validates bank details.
+export const employees = pgTable(
+  "employees",
+  {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  // Optional: set only if this specific worker also has a MIDAD login —
+  // never assumed, never auto-created. See this section's own header
+  // comment for why this must stay a separate concept from `users`.
+  userId: uuid("user_id").references(() => users.id),
+  employeeNumber: text("employee_number").notNull(),
+  name: text("name").notNull(),
+  status: employeeStatusEnum("status").notNull().default("active"),
+  nationality: text("nationality"),
+  bankName: text("bank_name"),
+  iban: text("iban"),
+  createdBy: uuid("created_by")
+    .notNull()
+    .references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    companyIdx: index("employees_company_idx").on(table.companyId),
+    employeeNumberUnique: uniqueIndex("employees_company_number_unique").on(
+      table.companyId,
+      table.employeeNumber,
+    ),
+  }),
+);
+
+// --- Payroll Period ---
+// Modeled directly on ipcs/subcontractIpcs' own periodStart/periodEnd +
+// status-lifecycle pattern (draft/submitted/approved/certified/rejected)
+// — "certified" renamed to "posted" here since that's the point a
+// payroll period actually becomes financial truth (creates expenses rows
+// via laborCostPostings).
+export const payrollPeriodStatusEnum = pgEnum("payroll_period_status", [
+  "draft",
+  "submitted",
+  "approved",
+  "posted",
+  "rejected",
+]);
+
+export const payrollPeriods = pgTable(
+  "payroll_periods",
+  {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  periodStart: date("period_start").notNull(),
+  periodEnd: date("period_end").notNull(),
+  payrollDate: date("payroll_date"),
+  status: payrollPeriodStatusEnum("status").notNull().default("draft"),
+  notes: text("notes"),
+  createdBy: uuid("created_by")
+    .notNull()
+    .references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  submittedBy: uuid("submitted_by").references(() => users.id),
+  submittedAt: timestamp("submitted_at"),
+  approvedBy: uuid("approved_by").references(() => users.id),
+  approvedAt: timestamp("approved_at"),
+  postedBy: uuid("posted_by").references(() => users.id),
+  postedAt: timestamp("posted_at"),
+  rejectedBy: uuid("rejected_by").references(() => users.id),
+  rejectedAt: timestamp("rejected_at"),
+  rejectionReason: text("rejection_reason"),
+  },
+  (table) => ({
+    companyIdx: index("payroll_periods_company_idx").on(table.companyId),
+    // Duplicate-period DB backstop, matching the defense-in-depth
+    // precedent every other numbered/period-scoped table in this schema
+    // already carries (commitments_company_number_unique,
+    // ipcs_contract_number_unique, etc.).
+    periodUnique: uniqueIndex("payroll_periods_company_period_unique").on(
+      table.companyId,
+      table.periodStart,
+      table.periodEnd,
+    ),
+  }),
+);
+
+// --- WPS Record (Payroll Record) ---
+// One row per employee per payroll period. sourceType/provider/
+// externalReference/verificationStatus are the provenance fields the
+// approved architecture requires to distinguish INTERNAL data (manual
+// entry, CSV/Excel import — buildable now) from OFFICIAL EXTERNAL data (a
+// real Mudad/WPS provider integration — NOT VERIFIED to exist, NOT
+// implemented, reserved for a future slice). verificationStatus defaults
+// to "unverified"; nothing in this slice ever sets it "verified" — only a
+// real future provider adapter would ever have grounds to.
+export const payrollRecordSourceTypeEnum = pgEnum("payroll_record_source_type", [
+  "manual",
+  "csv_import",
+  "excel_import",
+  "external_provider",
+]);
+export const payrollVerificationStatusEnum = pgEnum("payroll_verification_status", [
+  "unverified",
+  "verified",
+]);
+
+export const payrollRecords = pgTable(
+  "payroll_records",
+  {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  payrollPeriodId: uuid("payroll_period_id")
+    .notNull()
+    .references(() => payrollPeriods.id, { onDelete: "cascade" }),
+  employeeId: uuid("employee_id")
+    .notNull()
+    .references(() => employees.id),
+  grossAmount: numeric("gross_amount", { precision: 12, scale: 2 }).notNull(),
+  deductionsAmount: numeric("deductions_amount", { precision: 12, scale: 2 }).notNull().default("0"),
+  netAmount: numeric("net_amount", { precision: 12, scale: 2 }).notNull(),
+  sourceType: payrollRecordSourceTypeEnum("source_type").notNull().default("manual"),
+  provider: text("provider"),
+  externalReference: text("external_reference"),
+  verificationStatus: payrollVerificationStatusEnum("verification_status").notNull().default("unverified"),
+  // Forward reference: payrollImportBatches is declared further down this
+  // file (it also references payrollRecords via `many()` in its own
+  // relations block) — same lazy-callback pattern budgetItems.costCodeId
+  // already uses for the same reason.
+  importBatchId: uuid("import_batch_id").references((): AnyPgColumn => payrollImportBatches.id),
+  importedAt: timestamp("imported_at"),
+  verifiedAt: timestamp("verified_at"),
+  createdBy: uuid("created_by")
+    .notNull()
+    .references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    companyIdx: index("payroll_records_company_idx").on(table.companyId),
+    periodIdx: index("payroll_records_period_idx").on(table.payrollPeriodId),
+    // One record per employee per period — DB-enforced, same discipline
+    // as payroll_periods_company_period_unique above.
+    employeePeriodUnique: uniqueIndex("payroll_records_period_employee_unique").on(
+      table.payrollPeriodId,
+      table.employeeId,
+    ),
+  }),
+);
+
+// --- Labor Allocation ---
+// Employee -> Payroll Record -> Labor Allocation -> Project [-> Cost
+// Code] -> Actual Cost. Mirrors commitmentLines' own "quantity*rate OR a
+// direct amount, resolved server-side" discipline: percentage is the
+// authoring input, amount is the frozen, resolved SAR figure a later
+// slice's posting route uses — never recomputed from percentage at read
+// time. The "never exceed 100%" invariant is enforced by a later slice's
+// route logic (lock the parent payrollRecords row FOR UPDATE, recompute
+// the full set from inside that transaction, exactly like
+// commitments.ts's amend() already does) — not by a DB CHECK constraint,
+// since Postgres cannot CHECK a cross-row aggregate.
+export const laborAllocations = pgTable(
+  "labor_allocations",
+  {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  payrollRecordId: uuid("payroll_record_id")
+    .notNull()
+    .references(() => payrollRecords.id, { onDelete: "cascade" }),
+  projectId: uuid("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  costCodeId: uuid("cost_code_id").references(() => costCodes.id),
+  percentage: numeric("percentage", { precision: 5, scale: 2 }),
+  amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
+  notes: text("notes"),
+  createdBy: uuid("created_by")
+    .notNull()
+    .references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    companyIdx: index("labor_allocations_company_idx").on(table.companyId),
+    recordIdx: index("labor_allocations_record_idx").on(table.payrollRecordId),
+    projectIdx: index("labor_allocations_project_idx").on(table.projectId),
+  }),
+);
+
+// --- Labor Cost Posting ---
+// The thin link between a Labor Allocation and the `expenses` row its
+// financial posting actually created — this is what lets labor cost enter
+// Actual Cost/Forecast/Cash Flow through the EXISTING pipeline with zero
+// changes to collectForecastInputs/calculateForecast/calculateCashFlow
+// (they only ever SUM(expenses.amount); this table is provenance, not a
+// second actual-cost source). A reversal never edits or deletes the
+// original expenses row: it inserts a NEW negative-amount expenses row
+// plus a NEW laborCostPostings row with kind="reversal" pointing back at
+// the posting it reverses — the same "amend by adding, never by
+// overwriting" discipline commitments.ts's amend() already uses for its
+// own financial history. No route in this slice writes here yet (A5).
+//
+// Known follow-up for the slice that starts writing here: expenses has an
+// existing DELETE route (routes/budget.ts) with no knowledge of this
+// table; expenseId below has no onDelete action (defaults to Postgres
+// "no action"/restrict), so attempting to delete a labor-posted expense
+// through that legacy route will correctly fail at the DB level rather
+// than silently orphaning a posting — but it will surface as a raw
+// constraint-violation error until that route is taught to recognize and
+// reject this case with a clean message. Not fixed here since no code
+// path can create such a row yet.
+export const laborCostPostingKindEnum = pgEnum("labor_cost_posting_kind", ["posting", "reversal"]);
+
+export const laborCostPostings = pgTable(
+  "labor_cost_postings",
+  {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  payrollPeriodId: uuid("payroll_period_id")
+    .notNull()
+    .references(() => payrollPeriods.id, { onDelete: "cascade" }),
+  laborAllocationId: uuid("labor_allocation_id")
+    .notNull()
+    .references(() => laborAllocations.id, { onDelete: "cascade" }),
+  expenseId: uuid("expense_id")
+    .notNull()
+    .references(() => expenses.id),
+  kind: laborCostPostingKindEnum("kind").notNull().default("posting"),
+  reversalOfPostingId: uuid("reversal_of_posting_id").references((): AnyPgColumn => laborCostPostings.id),
+  postedBy: uuid("posted_by")
+    .notNull()
+    .references(() => users.id),
+  postedAt: timestamp("posted_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    companyIdx: index("labor_cost_postings_company_idx").on(table.companyId),
+    periodIdx: index("labor_cost_postings_period_idx").on(table.payrollPeriodId),
+    allocationIdx: index("labor_cost_postings_allocation_idx").on(table.laborAllocationId),
+  }),
+);
+
+// --- Payroll Import (CSV/Excel) ---
+// UPLOADED -> PARSING -> VALIDATED -> READY -> IMPORTED (or FAILED).
+// fileId reuses the existing generic `files` table (entityType/entityId
+// pattern — no schema change needed there) for the underlying uploaded
+// bytes; files.checksum is reused for "was this exact file already
+// uploaded for this period" duplicate-batch detection, so no checksum is
+// duplicated here. payrollImportRows stages parsed rows with per-row
+// validation errors BEFORE anything becomes a real payrollRecords row —
+// committing a batch is an explicit, separate action a later slice adds
+// (never implicit on upload).
+export const payrollImportBatchStatusEnum = pgEnum("payroll_import_batch_status", [
+  "uploaded",
+  "parsing",
+  "validated",
+  "ready",
+  "imported",
+  "failed",
+]);
+export const payrollImportRowStatusEnum = pgEnum("payroll_import_row_status", [
+  "pending",
+  "valid",
+  "invalid",
+  "imported",
+]);
+
+export const payrollImportBatches = pgTable(
+  "payroll_import_batches",
+  {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  payrollPeriodId: uuid("payroll_period_id")
+    .notNull()
+    .references(() => payrollPeriods.id, { onDelete: "cascade" }),
+  fileId: uuid("file_id")
+    .notNull()
+    .references(() => files.id),
+  status: payrollImportBatchStatusEnum("status").notNull().default("uploaded"),
+  rowCount: integer("row_count"),
+  validRowCount: integer("valid_row_count"),
+  errorRowCount: integer("error_row_count"),
+  createdBy: uuid("created_by")
+    .notNull()
+    .references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  committedBy: uuid("committed_by").references(() => users.id),
+  committedAt: timestamp("committed_at"),
+  },
+  (table) => ({
+    companyIdx: index("payroll_import_batches_company_idx").on(table.companyId),
+    periodIdx: index("payroll_import_batches_period_idx").on(table.payrollPeriodId),
+  }),
+);
+
+export const payrollImportRows = pgTable(
+  "payroll_import_rows",
+  {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  importBatchId: uuid("import_batch_id")
+    .notNull()
+    .references(() => payrollImportBatches.id, { onDelete: "cascade" }),
+  rowNumber: integer("row_number").notNull(),
+  rawData: jsonb("raw_data").notNull(),
+  parsedEmployeeNumber: text("parsed_employee_number"),
+  parsedAmount: numeric("parsed_amount", { precision: 12, scale: 2 }),
+  validationErrors: jsonb("validation_errors"),
+  status: payrollImportRowStatusEnum("status").notNull().default("pending"),
+  resultingPayrollRecordId: uuid("resulting_payroll_record_id").references(() => payrollRecords.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    batchIdx: index("payroll_import_rows_batch_idx").on(table.importBatchId),
+  }),
+);
+
+// --- Phase A relations (all together, after every table above is
+// declared, to avoid any forward-reference ordering issue) ---
+
+export const employeesRelations = relations(employees, ({ one, many }) => ({
+  company: one(companies, { fields: [employees.companyId], references: [companies.id] }),
+  user: one(users, { fields: [employees.userId], references: [users.id] }),
+  payrollRecords: many(payrollRecords),
+}));
+
+export const payrollPeriodsRelations = relations(payrollPeriods, ({ one, many }) => ({
+  company: one(companies, { fields: [payrollPeriods.companyId], references: [companies.id] }),
+  records: many(payrollRecords),
+  importBatches: many(payrollImportBatches),
+}));
+
+export const payrollRecordsRelations = relations(payrollRecords, ({ one, many }) => ({
+  company: one(companies, { fields: [payrollRecords.companyId], references: [companies.id] }),
+  payrollPeriod: one(payrollPeriods, { fields: [payrollRecords.payrollPeriodId], references: [payrollPeriods.id] }),
+  employee: one(employees, { fields: [payrollRecords.employeeId], references: [employees.id] }),
+  importBatch: one(payrollImportBatches, { fields: [payrollRecords.importBatchId], references: [payrollImportBatches.id] }),
+  allocations: many(laborAllocations),
+}));
+
+export const laborAllocationsRelations = relations(laborAllocations, ({ one, many }) => ({
+  company: one(companies, { fields: [laborAllocations.companyId], references: [companies.id] }),
+  payrollRecord: one(payrollRecords, { fields: [laborAllocations.payrollRecordId], references: [payrollRecords.id] }),
+  project: one(projects, { fields: [laborAllocations.projectId], references: [projects.id] }),
+  costCode: one(costCodes, { fields: [laborAllocations.costCodeId], references: [costCodes.id] }),
+  postings: many(laborCostPostings),
+}));
+
+export const laborCostPostingsRelations = relations(laborCostPostings, ({ one }) => ({
+  company: one(companies, { fields: [laborCostPostings.companyId], references: [companies.id] }),
+  payrollPeriod: one(payrollPeriods, { fields: [laborCostPostings.payrollPeriodId], references: [payrollPeriods.id] }),
+  laborAllocation: one(laborAllocations, { fields: [laborCostPostings.laborAllocationId], references: [laborAllocations.id] }),
+  expense: one(expenses, { fields: [laborCostPostings.expenseId], references: [expenses.id] }),
+  reversalOfPosting: one(laborCostPostings, { fields: [laborCostPostings.reversalOfPostingId], references: [laborCostPostings.id] }),
+}));
+
+export const payrollImportBatchesRelations = relations(payrollImportBatches, ({ one, many }) => ({
+  company: one(companies, { fields: [payrollImportBatches.companyId], references: [companies.id] }),
+  payrollPeriod: one(payrollPeriods, { fields: [payrollImportBatches.payrollPeriodId], references: [payrollPeriods.id] }),
+  file: one(files, { fields: [payrollImportBatches.fileId], references: [files.id] }),
+  rows: many(payrollImportRows),
+  records: many(payrollRecords),
+}));
+
+export const payrollImportRowsRelations = relations(payrollImportRows, ({ one }) => ({
+  importBatch: one(payrollImportBatches, { fields: [payrollImportRows.importBatchId], references: [payrollImportBatches.id] }),
+  resultingPayrollRecord: one(payrollRecords, { fields: [payrollImportRows.resultingPayrollRecordId], references: [payrollRecords.id] }),
+}));
