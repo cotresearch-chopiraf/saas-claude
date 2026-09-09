@@ -358,6 +358,15 @@ invoicesRouter.patch("/:id/send", requirePermission("invoice.send"), async (req:
   if (invoice.status !== "draft") return res.status(409).json({ error: "تم إرسال الفاتورة مسبقاً" });
 
   const [updated] = await db.update(invoices).set({ status: "sent" }).where(eq(invoices.id, invoice.id)).returning();
+  await recordAuditEvent(db, {
+    companyId: req.companyId!,
+    actorUserId: req.userId!,
+    action: "invoice.sent",
+    entityType: "invoice",
+    entityId: invoice.id,
+    beforeValue: { status: invoice.status },
+    afterValue: { status: updated.status },
+  });
   logger.info("financial_mutation", { action: "invoice.send", userId: req.userId, companyId: req.companyId, invoiceId: invoice.id });
   res.json(updated);
 });
@@ -388,6 +397,15 @@ invoicesRouter.patch("/:id/mark-paid", requirePermission("invoice.markPaid"), as
     .where(and(eq(invoices.id, invoice.id), eq(invoices.status, "sent")))
     .returning();
   if (!updated) return res.status(409).json({ error: "الفاتورة مُسدَّدة مسبقاً" });
+  await recordAuditEvent(db, {
+    companyId: req.companyId!,
+    actorUserId: req.userId!,
+    action: "invoice.markedPaid",
+    entityType: "invoice",
+    entityId: invoice.id,
+    beforeValue: { status: "sent" },
+    afterValue: { status: updated.status, paidAt: updated.paidAt },
+  });
   logger.info("financial_mutation", { action: "invoice.markPaid", userId: req.userId, companyId: req.companyId, invoiceId: invoice.id });
   res.json(updated);
 });

@@ -4,6 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { budgetRevisions, commitments, customers, ipcs, projects } from "../db/schema.js";
 import { requirePermission } from "../lib/permissions.js";
+import { recordAuditEvent } from "../lib/audit.js";
 import { logger } from "../lib/logger.js";
 
 export const projectsRouter = Router();
@@ -187,6 +188,16 @@ projectsRouter.delete("/:id", requirePermission("project.delete"), async (req, r
     }
 
     await tx.delete(projects).where(eq(projects.id, locked.id));
+
+    await recordAuditEvent(tx, {
+      companyId: req.companyId!,
+      actorUserId: req.userId!,
+      action: "project.deleted",
+      entityType: "project",
+      entityId: locked.id,
+      beforeValue: locked,
+    });
+
     return { outcome: "ok" as const };
   });
 

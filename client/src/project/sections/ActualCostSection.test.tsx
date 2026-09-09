@@ -79,7 +79,7 @@ describe("<ActualCostSection/>", () => {
     await waitFor(() => expect(screen.getByText("لا توجد مصروفات فعلية بعد")).toBeInTheDocument());
   });
 
-  it("an owner sees the ungated create-expense form", async () => {
+  it("an owner sees the create-expense form", async () => {
     mockApi("owner", fixtureSummary);
     renderSection();
     await waitFor(() => expect(screen.getByText("شراء إسمنت")).toBeInTheDocument());
@@ -87,19 +87,22 @@ describe("<ActualCostSection/>", () => {
     expect(screen.getByText("+ تسجيل مصروف")).toBeInTheDocument();
   });
 
-  it("a member ALSO sees the create-expense form (backend has no RBAC gate on expenses)", async () => {
+  // Final Pre-Launch Audit — POST/DELETE /budget/expenses are now
+  // owner-gated server-side (budget.manage), so a member must no longer
+  // see the controls the backend would now reject.
+  it("a member does NOT see the create-expense form, matching the new backend RBAC gate", async () => {
     mockApi("member", fixtureSummary);
     renderSection();
     await waitFor(() => expect(screen.getByText("شراء إسمنت")).toBeInTheDocument());
-    expect(screen.getByPlaceholderText("وصف المصروف")).toBeInTheDocument();
-    expect(screen.getByText("+ تسجيل مصروف")).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("وصف المصروف")).not.toBeInTheDocument();
+    expect(screen.queryByText("+ تسجيل مصروف")).not.toBeInTheDocument();
   });
 
-  it("a member ALSO sees the delete control on each expense row", async () => {
+  it("a member does NOT see the delete control on an expense row", async () => {
     mockApi("member", fixtureSummary);
     renderSection();
     await waitFor(() => expect(screen.getByText("شراء إسمنت")).toBeInTheDocument());
-    expect(screen.getByText("حذف")).toBeInTheDocument();
+    expect(screen.queryByText("حذف")).not.toBeInTheDocument();
   });
 
   it("shows an honest error state on API failure, not a fabricated empty list", async () => {

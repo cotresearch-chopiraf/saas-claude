@@ -42,12 +42,23 @@ commitmentsRouter.get("/", async (req: Request<ProjectParams>, res: Response) =>
   res.json(rows);
 });
 
+// P1 remediation (Final Pre-Launch Audit) — commitments.retentionPercent
+// had no write path anywhere in this file: subcontractIpcs.ts's
+// certify() route correctly reads it (the subcontract-payable retention
+// direction, distinct from contracts.retentionPercent's owner-receivable
+// direction), null-safe, but the field could never actually be set —
+// meaning every subcontractor IPC's retentionAmount silently computed to 0
+// in practice. Reused by both createSchema below and termsSchema further
+// down.
+const retentionPercentSchema = z.coerce.number().finite().min(0).max(100).optional();
+
 const createSchema = z.object({
   supplierId: z.string().uuid(),
   type: z.enum(["purchase_order", "subcontract"]),
   contractId: z.string().uuid().optional(),
   description: z.string().optional(),
   currency: z.string().min(1).optional(),
+  retentionPercent: retentionPercentSchema,
 });
 
 // commitmentNumber is claimed via an INSERT ... SELECT MAX+1 subquery,
@@ -97,7 +108,7 @@ commitmentsRouter.post(
         status: string;
         created_at: string;
       }>(sql`
-        INSERT INTO commitments (company_id, project_id, contract_id, supplier_id, type, status, commitment_number, description, currency, created_by)
+        INSERT INTO commitments (company_id, project_id, contract_id, supplier_id, type, status, commitment_number, description, currency, retention_percent, created_by)
         VALUES (
           ${req.companyId},
           ${req.params.projectId},
@@ -108,6 +119,7 @@ commitmentsRouter.post(
           (SELECT COALESCE(MAX(commitment_number), 0) + 1 FROM commitments WHERE company_id = ${req.companyId}),
           ${parsed.data.description ?? null},
           ${parsed.data.currency ?? "SAR"},
+          ${parsed.data.retentionPercent ?? null},
           ${req.userId}
         )
         RETURNING id, commitment_number, status, created_at
@@ -149,6 +161,62 @@ commitmentsRouter.get("/:commitmentId", async (req: Request<CommitmentParams>, r
   });
   res.json({ ...commitment, lines });
 });
+
+const termsSchema = z.object({
+  retentionPercent: retentionPercentSchema.nullable(),
+});
+
+// Draft-only, same lock discipline as every other commitment mutation
+// below: the early status check is only a fast-path, the actual guarantee
+// against racing a concurrent submit() is the `SELECT ... FOR UPDATE`
+// inside the transaction. Once submitted, a commitment's terms (like its
+// line-derived amounts) are meant to be fixed — retention is agreed as
+// part of placing the order, not renegotiated after the fact.
+commitmentsRouter.patch(
+  "/:commitmentId/terms",
+  requirePermission("commitment.manage"),
+  async (req: Request<CommitmentParams>, res: Response) => {
+    const commitment = await findOwnedCommitment(req.companyId!, req.params.projectId, req.params.commitmentId);
+    if (!commitment) return res.status(404).json({ error: "الالتزام غير موجود" });
+    if (commitment.status !== "draft") {
+      return res.status(409).json({ error: "لا يمكن تعديل شروط التزام ليس في حالة مسودة" });
+    }
+
+    const parsed = termsSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
+
+    const result = await db.transaction(async (tx) => {
+      const [locked] = await tx.select().from(commitments).where(eq(commitments.id, commitment.id)).for("update");
+      if (!locked || locked.status !== "draft") return { outcome: "conflict" as const };
+
+      const [row] = await tx
+        .update(commitments)
+        .set({
+          retentionPercent: parsed.data.retentionPercent === null ? null : String(parsed.data.retentionPercent),
+          updatedAt: new Date(),
+        })
+        .where(eq(commitments.id, commitment.id))
+        .returning();
+
+      await recordAuditEvent(tx, {
+        companyId: req.companyId!,
+        actorUserId: req.userId!,
+        action: "commitment.termsUpdated",
+        entityType: "commitment",
+        entityId: commitment.id,
+        beforeValue: { retentionPercent: locked.retentionPercent },
+        afterValue: { retentionPercent: row.retentionPercent },
+      });
+
+      return { outcome: "ok" as const, commitment: row };
+    });
+
+    if (result.outcome === "conflict") {
+      return res.status(409).json({ error: "لا يمكن تعديل شروط التزام ليس في حالة مسودة" });
+    }
+    res.json(result.commitment);
+  },
+);
 
 const lineSchema = z.object({
   costCodeId: z.string().uuid().optional(),

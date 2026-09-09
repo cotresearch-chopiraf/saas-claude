@@ -53,6 +53,10 @@ export const OWNER_ONLY_ACTIONS = [
   // ".delete"-shaped action).
   "task.delete",
   "dailyLog.delete",
+  // Final Pre-Launch Audit — mirrors server/src/lib/permissions.ts's new
+  // "budget.manage" (see that file's comment for why the legacy budget
+  // item/expense CRUD needed a gate at all).
+  "budget.manage",
 ] as const;
 
 export type PermissionAction = (typeof OWNER_ONLY_ACTIONS)[number];

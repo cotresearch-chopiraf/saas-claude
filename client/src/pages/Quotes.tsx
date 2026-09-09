@@ -4,13 +4,14 @@ import { Layout } from "../components/Layout";
 import { LanguageSelect } from "../components/LanguageSelect";
 import { apiFetch, ApiError, getToken } from "../api/client";
 import { listQuotes } from "../api/quotes";
+import { formatMoney } from "../lib/format";
 import type { DocumentLanguage, Quote } from "../api/types";
 import { Skeleton } from "../ui/Skeleton";
 import { ErrorState } from "../ui/ErrorState";
 
 const PAGE_SIZE = 20;
 
-const money = (n: number) => n.toLocaleString("ar", { maximumFractionDigits: 2 }) + " $";
+const money = (n: number) => formatMoney(n);
 
 async function downloadQuotePdf(id: string, quoteNumber: string | null) {
   const res = await fetch(`/api/quotes/${id}/pdf`, { headers: { Authorization: `Bearer ${getToken()}` } });

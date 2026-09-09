@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { Layout } from "../components/Layout";
 import { apiFetch } from "../api/client";
 import { listCustomers } from "../api/customers";
+import { formatMoney } from "../lib/format";
 import type { Customer, Project } from "../api/types";
 
 const statusLabel: Record<Project["status"], string> = {
@@ -71,7 +72,7 @@ export function Dashboard() {
               </div>
               {p.clientName && <p className="text-sm text-stone-500">العميل: {p.clientName}</p>}
               <p className="mt-2 text-sm font-medium text-stone-700">
-                الميزانية: {Number(p.budgetTotal).toLocaleString("ar")} $
+                الميزانية: {formatMoney(p.budgetTotal)}
               </p>
             </Link>
           ))}

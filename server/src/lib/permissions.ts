@@ -43,6 +43,18 @@ export const PERMISSIONS = {
   "boq.manage": ["owner"],
   "costCode.manage": ["owner"],
   "budgetRevision.manage": ["owner"],
+  // P0 remediation (Final Pre-Launch Audit) — the legacy budget-item/expense
+  // CRUD below (routes/budget.ts) had no permission gate at all, unlike
+  // every sibling financial-mutation domain in this matrix
+  // (costCode.manage/budgetRevision.manage/contract.manage/commitment.manage
+  // etc.). Budget items are also what an approved Budget Revision is
+  // supposed to freeze (see budgetRevisions.ts's own file comment) and what
+  // Forecast's BAC is summed from — any member being able to silently
+  // create/edit/delete them, including ones already locked into an approved
+  // revision, defeats both that immutability guarantee and this matrix's
+  // own posture. Same owner-only posture as every other financial-record
+  // mutation here.
+  "budget.manage": ["owner"],
 
   // TC-02 fix: an explicit taxRatePercent in the invoice-creation body
   // bypasses the compliance engine entirely (no ruleVersionId/override

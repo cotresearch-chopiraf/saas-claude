@@ -1,9 +1,9 @@
 import { FormEvent, useEffect, useState } from "react";
-import { apiFetch } from "../api/client";
+import { apiFetch, ApiError } from "../api/client";
+import { formatMoney } from "../lib/format";
 import type { ChangeOrder } from "../api/types";
 
-const money = (n: number) =>
-  (n >= 0 ? "+" : "") + n.toLocaleString("ar", { maximumFractionDigits: 0 }) + " $";
+const money = (n: number) => (n >= 0 ? "+" : "") + formatMoney(n);
 
 const statusLabel: Record<ChangeOrder["status"], string> = {
   pending: "بانتظار القرار",
@@ -22,6 +22,7 @@ export function ChangeOrdersPanel({ projectId }: { projectId: string }) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [amountDelta, setAmountDelta] = useState("");
+  const [error, setError] = useState<string | null>(null);
 
   function load() {
     apiFetch<ChangeOrder[]>(`/projects/${projectId}/change-orders`).then(setOrders);
@@ -31,22 +32,32 @@ export function ChangeOrdersPanel({ projectId }: { projectId: string }) {
 
   async function addOrder(e: FormEvent) {
     e.preventDefault();
-    await apiFetch(`/projects/${projectId}/change-orders`, {
-      method: "POST",
-      body: JSON.stringify({ title, description: description || undefined, amountDelta }),
-    });
-    setTitle("");
-    setDescription("");
-    setAmountDelta("");
-    load();
+    setError(null);
+    try {
+      await apiFetch(`/projects/${projectId}/change-orders`, {
+        method: "POST",
+        body: JSON.stringify({ title, description: description || undefined, amountDelta }),
+      });
+      setTitle("");
+      setDescription("");
+      setAmountDelta("");
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "تعذّرت إضافة أمر التغيير");
+    }
   }
 
   async function decide(order: ChangeOrder, status: "approved" | "rejected") {
-    await apiFetch(`/projects/${projectId}/change-orders/${order.id}`, {
-      method: "PATCH",
-      body: JSON.stringify({ status }),
-    });
-    load();
+    setError(null);
+    try {
+      await apiFetch(`/projects/${projectId}/change-orders/${order.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status }),
+      });
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "تعذّر تنفيذ القرار");
+    }
   }
 
   return (
@@ -54,6 +65,7 @@ export function ChangeOrdersPanel({ projectId }: { projectId: string }) {
       <p className="mb-3 text-sm text-stone-500">
         عند اعتماد أمر تغيير، يُضاف مبلغه تلقائياً إلى ميزانية المشروع الإجمالية.
       </p>
+      {error && <div className="mb-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
       <ul className="divide-y divide-stone-100 rounded-lg border border-stone-200 bg-white">
         {orders.map((order) => (
           <li key={order.id} className="flex items-center justify-between gap-3 p-3">
@@ -108,7 +120,7 @@ export function ChangeOrdersPanel({ projectId }: { projectId: string }) {
         <input
           required
           type="number"
-          placeholder="أثر المبلغ ($, سالب للخصم)"
+          placeholder="أثر المبلغ (ر.س، سالب للخصم)"
           value={amountDelta}
           onChange={(e) => setAmountDelta(e.target.value)}
           className="w-56 rounded-md border border-stone-300 px-3 py-2 text-sm"

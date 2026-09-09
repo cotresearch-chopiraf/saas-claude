@@ -140,10 +140,13 @@ function PlanTab({ projectId }: { projectId: string }) {
 
       {error && <ErrorState message={error} onRetry={load} />}
 
-      {/* Budget item CRUD mirrors actual backend authorization: POST/PATCH/DELETE
-          /budget/items carry no RBAC gate server-side, so no <Can/> wrapper here — a
-          member must see exactly the same controls an owner does. */}
-      <BudgetItemForm projectId={projectId} onSaved={load} />
+      {/* Final Pre-Launch Audit — POST/PATCH/DELETE /budget/items are now
+          owner-gated server-side (budget.manage), matching every sibling
+          financial domain; mirrored here so a member sees the same controls
+          the backend would actually allow. */}
+      <Can permission="budget.manage">
+        <BudgetItemForm projectId={projectId} onSaved={load} />
+      </Can>
 
       <FinancialTable
         columns={columns}
@@ -273,14 +276,16 @@ function BudgetItemRowActions({ projectId, item, onChanged }: { projectId: strin
   }
 
   return (
-    <div className="flex justify-end gap-3">
-      <button type="button" onClick={() => setEditing(true)} className="text-sm text-primary hover:underline">
-        تعديل
-      </button>
-      <button type="button" onClick={onDelete} disabled={busy} className="text-sm text-danger-600 hover:underline">
-        حذف
-      </button>
-    </div>
+    <Can permission="budget.manage">
+      <div className="flex justify-end gap-3">
+        <button type="button" onClick={() => setEditing(true)} className="text-sm text-primary hover:underline">
+          تعديل
+        </button>
+        <button type="button" onClick={onDelete} disabled={busy} className="text-sm text-danger-600 hover:underline">
+          حذف
+        </button>
+      </div>
+    </Can>
   );
 }
 

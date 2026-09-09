@@ -3,6 +3,7 @@ import { Layout } from "../components/Layout";
 import { LanguageSelect } from "../components/LanguageSelect";
 import { apiFetch, ApiError, getToken } from "../api/client";
 import { listInvoices } from "../api/invoices";
+import { formatMoney } from "../lib/format";
 import type { DocumentLanguage, Invoice } from "../api/types";
 import { Skeleton } from "../ui/Skeleton";
 import { ErrorState } from "../ui/ErrorState";
@@ -23,7 +24,7 @@ const statusColor: Record<Invoice["status"], string> = {
   sent: "bg-amber-100 text-amber-700",
   paid: "bg-emerald-100 text-emerald-700",
 };
-const money = (n: number) => n.toLocaleString("ar", { maximumFractionDigits: 2 }) + " $";
+const money = (n: number) => formatMoney(n);
 
 interface DraftItem {
   description: string;

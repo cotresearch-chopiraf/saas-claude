@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { apiFetch } from "../api/client";
+import { formatMoney, formatDate } from "../lib/format";
 
 interface PublicInvoiceData {
   invoiceNumber: string;
@@ -14,7 +15,7 @@ interface PublicInvoiceData {
   total: number;
 }
 
-const money = (n: number) => n.toLocaleString("ar", { maximumFractionDigits: 2 }) + " $";
+const money = (n: number) => formatMoney(n);
 
 export function PublicInvoice() {
   const { token } = useParams<{ token: string }>();
@@ -45,7 +46,7 @@ export function PublicInvoice() {
         <p className="text-sm text-stone-500">فاتورة من {invoice.companyName}</p>
         <h1 className="mb-1 text-xl font-bold text-primary">{invoice.invoiceNumber}</h1>
         <p className="mb-6 text-sm text-stone-500">
-          إلى: {invoice.clientName} · تاريخ الإصدار: {invoice.issueDate}
+          إلى: {invoice.clientName} · تاريخ الإصدار: {formatDate(invoice.issueDate)}
         </p>
 
         <ul className="mb-4 divide-y divide-stone-100 rounded-lg border border-stone-200">

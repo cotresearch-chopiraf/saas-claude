@@ -88,8 +88,24 @@ describe("<CostPlanSection/>", () => {
     expect(screen.queryByText(/600\.00/)).not.toBeInTheDocument();
   });
 
-  it("budget item CRUD controls are shown to a member, mirroring the backend's lack of an RBAC gate", async () => {
+  // Final Pre-Launch Audit — POST/PATCH/DELETE /budget/items are now
+  // owner-gated server-side (budget.manage), so a member must no longer
+  // see the controls the backend would now reject.
+  it("budget item CRUD controls are hidden from a member, matching the new backend RBAC gate", async () => {
     mockApi("member");
+    render(
+      <AuthProvider>
+        <CostPlanSection />
+      </AuthProvider>,
+    );
+    await waitFor(() => expect(screen.getByText("مواد البناء")).toBeInTheDocument());
+    expect(screen.queryByText("+ إضافة بند")).not.toBeInTheDocument();
+    expect(screen.queryByText("تعديل")).not.toBeInTheDocument();
+    expect(screen.queryByText("حذف")).not.toBeInTheDocument();
+  });
+
+  it("budget item CRUD controls are shown to an owner", async () => {
+    mockApi("owner");
     render(
       <AuthProvider>
         <CostPlanSection />

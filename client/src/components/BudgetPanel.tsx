@@ -1,5 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
-import { apiFetch, getToken } from "../api/client";
+import { apiFetch, getToken, ApiError } from "../api/client";
+import { Can } from "../auth/Can";
+import { formatMoney } from "../lib/format";
 import type { BudgetSummary } from "../api/types";
 
 // A plain <a href> can't carry the Bearer token, so the CSV export fetches
@@ -19,7 +21,7 @@ async function downloadBudgetCsv(projectId: string) {
   URL.revokeObjectURL(url);
 }
 
-const money = (n: number) => n.toLocaleString("ar", { maximumFractionDigits: 0 }) + " $";
+const money = (n: number) => formatMoney(n);
 
 export function BudgetPanel({ projectId }: { projectId: string }) {
   const [summary, setSummary] = useState<BudgetSummary | null>(null);
@@ -28,6 +30,7 @@ export function BudgetPanel({ projectId }: { projectId: string }) {
   const [expenseDescription, setExpenseDescription] = useState("");
   const [expenseAmount, setExpenseAmount] = useState("");
   const [expenseItemId, setExpenseItemId] = useState("");
+  const [error, setError] = useState<string | null>(null);
 
   function load() {
     apiFetch<BudgetSummary>(`/projects/${projectId}/budget`).then(setSummary);
@@ -42,33 +45,44 @@ export function BudgetPanel({ projectId }: { projectId: string }) {
 
   async function addItem(e: FormEvent) {
     e.preventDefault();
-    await apiFetch(`/projects/${projectId}/budget/items`, {
-      method: "POST",
-      body: JSON.stringify({ category, plannedAmount }),
-    });
-    setCategory("");
-    setPlannedAmount("");
-    load();
+    setError(null);
+    try {
+      await apiFetch(`/projects/${projectId}/budget/items`, {
+        method: "POST",
+        body: JSON.stringify({ category, plannedAmount }),
+      });
+      setCategory("");
+      setPlannedAmount("");
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "تعذّرت إضافة البند");
+    }
   }
 
   async function addExpense(e: FormEvent) {
     e.preventDefault();
-    await apiFetch(`/projects/${projectId}/budget/expenses`, {
-      method: "POST",
-      body: JSON.stringify({
-        description: expenseDescription,
-        amount: expenseAmount,
-        expenseDate: new Date().toISOString().slice(0, 10),
-        budgetItemId: expenseItemId || undefined,
-      }),
-    });
-    setExpenseDescription("");
-    setExpenseAmount("");
-    load();
+    setError(null);
+    try {
+      await apiFetch(`/projects/${projectId}/budget/expenses`, {
+        method: "POST",
+        body: JSON.stringify({
+          description: expenseDescription,
+          amount: expenseAmount,
+          expenseDate: new Date().toISOString().slice(0, 10),
+          budgetItemId: expenseItemId || undefined,
+        }),
+      });
+      setExpenseDescription("");
+      setExpenseAmount("");
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "تعذّر تسجيل المصروف");
+    }
   }
 
   return (
     <div className="space-y-6">
+      {error && <div className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
       <div className="grid gap-4 sm:grid-cols-3">
         <StatCard label="المخطَّط" value={money(totals.planned)} />
         <StatCard label="المُنفَق" value={money(totals.spent)} />
@@ -118,25 +132,27 @@ export function BudgetPanel({ projectId }: { projectId: string }) {
             </tbody>
           </table>
         </div>
-        <form onSubmit={addItem} className="mt-3 flex gap-2">
-          <input
-            required
-            placeholder="اسم البند (مثال: مواد البناء)"
-            value={category}
-            onChange={(e) => setCategory(e.target.value)}
-            className="flex-1 rounded-md border border-stone-300 px-3 py-2 text-sm"
-          />
-          <input
-            required
-            type="number"
-            min="0"
-            placeholder="المبلغ المخطَّط"
-            value={plannedAmount}
-            onChange={(e) => setPlannedAmount(e.target.value)}
-            className="w-40 rounded-md border border-stone-300 px-3 py-2 text-sm"
-          />
-          <button className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white">إضافة بند</button>
-        </form>
+        <Can permission="budget.manage">
+          <form onSubmit={addItem} className="mt-3 flex gap-2">
+            <input
+              required
+              placeholder="اسم البند (مثال: مواد البناء)"
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              className="flex-1 rounded-md border border-stone-300 px-3 py-2 text-sm"
+            />
+            <input
+              required
+              type="number"
+              min="0"
+              placeholder="المبلغ المخطَّط"
+              value={plannedAmount}
+              onChange={(e) => setPlannedAmount(e.target.value)}
+              className="w-40 rounded-md border border-stone-300 px-3 py-2 text-sm"
+            />
+            <button className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white">إضافة بند</button>
+          </form>
+        </Can>
       </div>
 
       <div>
@@ -168,37 +184,39 @@ export function BudgetPanel({ projectId }: { projectId: string }) {
             </tbody>
           </table>
         </div>
-        <form onSubmit={addExpense} className="mt-3 flex flex-wrap gap-2">
-          <input
-            required
-            placeholder="وصف المصروف"
-            value={expenseDescription}
-            onChange={(e) => setExpenseDescription(e.target.value)}
-            className="flex-1 rounded-md border border-stone-300 px-3 py-2 text-sm"
-          />
-          <input
-            required
-            type="number"
-            min="0"
-            placeholder="المبلغ"
-            value={expenseAmount}
-            onChange={(e) => setExpenseAmount(e.target.value)}
-            className="w-32 rounded-md border border-stone-300 px-3 py-2 text-sm"
-          />
-          <select
-            value={expenseItemId}
-            onChange={(e) => setExpenseItemId(e.target.value)}
-            className="rounded-md border border-stone-300 px-3 py-2 text-sm"
-          >
-            <option value="">بدون بند محدد</option>
-            {summary.items.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.category}
-              </option>
-            ))}
-          </select>
-          <button className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white">تسجيل مصروف</button>
-        </form>
+        <Can permission="budget.manage">
+          <form onSubmit={addExpense} className="mt-3 flex flex-wrap gap-2">
+            <input
+              required
+              placeholder="وصف المصروف"
+              value={expenseDescription}
+              onChange={(e) => setExpenseDescription(e.target.value)}
+              className="flex-1 rounded-md border border-stone-300 px-3 py-2 text-sm"
+            />
+            <input
+              required
+              type="number"
+              min="0"
+              placeholder="المبلغ"
+              value={expenseAmount}
+              onChange={(e) => setExpenseAmount(e.target.value)}
+              className="w-32 rounded-md border border-stone-300 px-3 py-2 text-sm"
+            />
+            <select
+              value={expenseItemId}
+              onChange={(e) => setExpenseItemId(e.target.value)}
+              className="rounded-md border border-stone-300 px-3 py-2 text-sm"
+            >
+              <option value="">بدون بند محدد</option>
+              {summary.items.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.category}
+                </option>
+              ))}
+            </select>
+            <button className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white">تسجيل مصروف</button>
+          </form>
+        </Can>
       </div>
     </div>
   );

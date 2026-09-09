@@ -9,6 +9,8 @@ import { ErrorState } from "../../ui/ErrorState";
 import { ConfirmDialog } from "../../ui/ConfirmDialog";
 import { Skeleton } from "../../ui/Skeleton";
 import { Can } from "../../auth/Can";
+import { useAuth } from "../../auth/AuthContext";
+import { hasPermission } from "../../auth/permissions";
 import { formatMoney, formatQuantity, formatDateTime } from "../../lib/format";
 import { listSuppliers } from "../../api/suppliers";
 import { listContracts } from "../../api/contracts";
@@ -24,6 +26,7 @@ import {
   approveCommitment,
   cancelCommitment,
   amendCommitment,
+  updateCommitmentTerms,
 } from "../../api/commitments";
 import { ApiError } from "../../api/client";
 import type {
@@ -193,6 +196,7 @@ function CommitmentCreateForm({
   const [type, setType] = useState<CommitmentType>("purchase_order");
   const [contractId, setContractId] = useState("");
   const [description, setDescription] = useState("");
+  const [retentionPercent, setRetentionPercent] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -206,6 +210,7 @@ function CommitmentCreateForm({
         type,
         contractId: contractId || undefined,
         description: description || undefined,
+        ...(type === "subcontract" && retentionPercent ? { retentionPercent: Number(retentionPercent) } : {}),
       });
       onCreated(commitment);
     } catch (err) {
@@ -261,6 +266,18 @@ function CommitmentCreateForm({
           onChange={(e) => setDescription(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm sm:col-span-2"
         />
+        {type === "subcontract" && (
+          <input
+            type="number"
+            min={0}
+            max={100}
+            step="0.01"
+            placeholder="نسبة الاحتجاز % (اختياري)"
+            value={retentionPercent}
+            onChange={(e) => setRetentionPercent(e.target.value)}
+            className="rounded-md border border-stone-300 px-3 py-2 text-sm"
+          />
+        )}
         <Button type="submit" disabled={submitting || !supplierId}>
           {submitting ? "جارٍ الحفظ..." : "إنشاء الالتزام"}
         </Button>
@@ -307,21 +324,43 @@ function CommitmentDetail({
   boqItems: BoqItem[];
   onChanged: () => void;
 }) {
+  const { user } = useAuth();
+  const canManage = hasPermission(user?.role, "commitment.manage");
   const [commitment, setCommitment] = useState<CommitmentWithLines | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showAddLine, setShowAddLine] = useState(false);
   const [showAmend, setShowAmend] = useState(false);
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const [actingBusy, setActingBusy] = useState(false);
+  const [retentionInput, setRetentionInput] = useState("");
+  const [retentionSaving, setRetentionSaving] = useState(false);
 
   function load() {
     setError(null);
     setCommitment(null);
     getCommitment(projectId, commitmentId)
-      .then(setCommitment)
-      .catch((err) => setError(err instanceof Error ? err.message : "تعذّر تحميل تفاصيل الالتزام"));
+      .then((row) => {
+        setCommitment(row);
+        setRetentionInput(row.retentionPercent ?? "");
+      })
+      .catch((err) => setError(err instanceof ApiError ? err.message : "تعذّر تحميل تفاصيل الالتزام"));
   }
   useEffect(load, [projectId, commitmentId]);
+
+  async function onSaveRetention() {
+    setRetentionSaving(true);
+    setError(null);
+    try {
+      await updateCommitmentTerms(projectId, commitmentId, {
+        retentionPercent: retentionInput === "" ? null : Number(retentionInput),
+      });
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "تعذّر حفظ نسبة الاحتجاز");
+    } finally {
+      setRetentionSaving(false);
+    }
+  }
 
   async function onConfirmAction() {
     if (!pendingAction) return;
@@ -448,6 +487,28 @@ function CommitmentDetail({
         <Field label="تاريخ الإرسال للاعتماد" value={formatDateTime(commitment.submittedAt)} />
         <Field label="تاريخ الاعتماد" value={formatDateTime(commitment.approvedAt)} />
         {commitment.cancelledAt && <Field label="تاريخ الإلغاء" value={formatDateTime(commitment.cancelledAt)} />}
+        {commitment.type === "subcontract" &&
+          (isDraft && canManage ? (
+            <div className="flex items-center justify-between gap-2 border-b border-stone-100 pb-2">
+              <dt className="text-stone-500">نسبة الاحتجاز %</dt>
+              <dd className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step="0.01"
+                  value={retentionInput}
+                  onChange={(e) => setRetentionInput(e.target.value)}
+                  className="w-20 rounded-md border border-stone-300 px-2 py-1 text-xs"
+                />
+                <Button size="sm" onClick={onSaveRetention} disabled={retentionSaving}>
+                  {retentionSaving ? "جارٍ الحفظ..." : "حفظ"}
+                </Button>
+              </dd>
+            </div>
+          ) : (
+            <Field label="نسبة الاحتجاز" value={commitment.retentionPercent !== null ? `${commitment.retentionPercent}%` : "—"} />
+          ))}
       </dl>
 
       {showAddLine && isDraft && (

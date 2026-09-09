@@ -2,15 +2,32 @@ import { Router, type Request, type Response, type NextFunction } from "express"
 import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { budgetItems, expenses, projects } from "../db/schema.js";
+import { budgetItems, budgetRevisions, expenses, projects } from "../db/schema.js";
 import { sumMoney, roundMoney } from "../lib/money.js";
 import { recordAuditEvent } from "../lib/audit.js";
+import { requirePermission } from "../lib/permissions.js";
 
 type ProjectParams = { projectId: string };
 type ItemParams = ProjectParams & { itemId: string };
 type ExpenseParams = ProjectParams & { expenseId: string };
 
 export const budgetRouter = Router({ mergeParams: true });
+
+// P0 remediation (Final Pre-Launch Audit) — mirrors budgetRevisions.ts's own
+// "revision.status !== 'draft'" fast-path check: once a budget revision is
+// approved, its item set is meant to be an immutable historical record (see
+// that file's comment). This is only the fast-path; the actual guarantee
+// against racing a concurrent approve is the `SELECT ... FOR UPDATE` inside
+// each mutating route's own transaction below, same discipline as
+// budgetRevisions.ts's item-assignment route.
+async function assertItemMutable(budgetRevisionId: string | null): Promise<string | null> {
+  if (!budgetRevisionId) return null;
+  const revision = await db.query.budgetRevisions.findFirst({ where: eq(budgetRevisions.id, budgetRevisionId) });
+  if (revision && revision.status !== "draft") {
+    return "لا يمكن تعديل بند ميزانية تابع لنسخة معتمدة أو مستبدلة — أنشئ نسخة جديدة بدلاً من ذلك";
+  }
+  return null;
+}
 
 // Every route below hangs off /api/projects/:projectId/budget — verify the
 // project exists and belongs to the caller's company before touching anything.
@@ -113,7 +130,7 @@ const itemSchema = z.object({
 // transaction discipline already used everywhere else recordAuditEvent is
 // called: a failed audit write rolls back the mutation too, matching
 // established policy.
-budgetRouter.post("/items", async (req: Request<ProjectParams>, res: Response) => {
+budgetRouter.post("/items", requirePermission("budget.manage"), async (req: Request<ProjectParams>, res: Response) => {
   const parsed = itemSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
 
@@ -143,7 +160,7 @@ budgetRouter.post("/items", async (req: Request<ProjectParams>, res: Response) =
   res.status(201).json(item);
 });
 
-budgetRouter.patch("/items/:itemId", async (req: Request<ItemParams>, res: Response) => {
+budgetRouter.patch("/items/:itemId", requirePermission("budget.manage"), async (req: Request<ItemParams>, res: Response) => {
   const parsed = itemSchema.partial().safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
 
@@ -152,8 +169,22 @@ budgetRouter.patch("/items/:itemId", async (req: Request<ItemParams>, res: Respo
   });
   if (!existing) return res.status(404).json({ error: "بند الميزانية غير موجود" });
 
+  const immutableError = await assertItemMutable(existing.budgetRevisionId);
+  if (immutableError) return res.status(409).json({ error: immutableError });
+
   const { plannedAmount, ...rest } = parsed.data;
-  const updated = await db.transaction(async (tx) => {
+  const result = await db.transaction(async (tx) => {
+    if (existing.budgetRevisionId) {
+      const [lockedRevision] = await tx
+        .select()
+        .from(budgetRevisions)
+        .where(eq(budgetRevisions.id, existing.budgetRevisionId))
+        .for("update");
+      if (lockedRevision && lockedRevision.status !== "draft") {
+        return { outcome: "immutable" as const };
+      }
+    }
+
     const [row] = await tx
       .update(budgetItems)
       .set({
@@ -174,19 +205,36 @@ budgetRouter.patch("/items/:itemId", async (req: Request<ItemParams>, res: Respo
       metadata: { projectId: req.params.projectId },
     });
 
-    return row;
+    return { outcome: "ok" as const, item: row };
   });
 
-  res.json(updated);
+  if (result.outcome === "immutable") {
+    return res.status(409).json({ error: "لا يمكن تعديل بند ميزانية تابع لنسخة معتمدة أو مستبدلة — أنشئ نسخة جديدة بدلاً من ذلك" });
+  }
+  res.json(result.item);
 });
 
-budgetRouter.delete("/items/:itemId", async (req: Request<ItemParams>, res: Response) => {
+budgetRouter.delete("/items/:itemId", requirePermission("budget.manage"), async (req: Request<ItemParams>, res: Response) => {
   const existing = await db.query.budgetItems.findFirst({
     where: and(eq(budgetItems.id, req.params.itemId), eq(budgetItems.projectId, req.params.projectId)),
   });
   if (!existing) return res.status(404).json({ error: "بند الميزانية غير موجود" });
 
-  await db.transaction(async (tx) => {
+  const immutableError = await assertItemMutable(existing.budgetRevisionId);
+  if (immutableError) return res.status(409).json({ error: immutableError });
+
+  const result = await db.transaction(async (tx) => {
+    if (existing.budgetRevisionId) {
+      const [lockedRevision] = await tx
+        .select()
+        .from(budgetRevisions)
+        .where(eq(budgetRevisions.id, existing.budgetRevisionId))
+        .for("update");
+      if (lockedRevision && lockedRevision.status !== "draft") {
+        return { outcome: "immutable" as const };
+      }
+    }
+
     await tx.delete(budgetItems).where(eq(budgetItems.id, req.params.itemId));
 
     await recordAuditEvent(tx, {
@@ -198,8 +246,13 @@ budgetRouter.delete("/items/:itemId", async (req: Request<ItemParams>, res: Resp
       beforeValue: existing,
       metadata: { projectId: req.params.projectId },
     });
+
+    return { outcome: "ok" as const };
   });
 
+  if (result.outcome === "immutable") {
+    return res.status(409).json({ error: "لا يمكن تعديل بند ميزانية تابع لنسخة معتمدة أو مستبدلة — أنشئ نسخة جديدة بدلاً من ذلك" });
+  }
   res.status(204).end();
 });
 
@@ -210,7 +263,7 @@ const expenseSchema = z.object({
   budgetItemId: z.string().uuid().optional(),
 });
 
-budgetRouter.post("/expenses", async (req: Request<ProjectParams>, res: Response) => {
+budgetRouter.post("/expenses", requirePermission("budget.manage"), async (req: Request<ProjectParams>, res: Response) => {
   const parsed = expenseSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
 
@@ -259,7 +312,7 @@ budgetRouter.post("/expenses", async (req: Request<ProjectParams>, res: Response
 // No PATCH /expenses/:expenseId route exists in this codebase — an
 // expense is create-or-delete only, so "updated" is not part of the
 // actual mutation surface and has no audit event to add here.
-budgetRouter.delete("/expenses/:expenseId", async (req: Request<ExpenseParams>, res: Response) => {
+budgetRouter.delete("/expenses/:expenseId", requirePermission("budget.manage"), async (req: Request<ExpenseParams>, res: Response) => {
   const existing = await db.query.expenses.findFirst({
     where: and(eq(expenses.id, req.params.expenseId), eq(expenses.projectId, req.params.projectId)),
   });

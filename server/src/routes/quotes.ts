@@ -10,6 +10,7 @@ import { renderHtmlToPdf } from "../lib/pdf.js";
 import { logoFileToDataUri } from "../lib/uploads.js";
 import { computeTotals } from "../lib/money.js";
 import { requirePermission } from "../lib/permissions.js";
+import { recordAuditEvent } from "../lib/audit.js";
 import { logger } from "../lib/logger.js";
 import { calculateTax } from "../lib/compliance/engine.js";
 import { withIdempotency, IdempotencyConflictError } from "../lib/idempotency.js";
@@ -187,6 +188,15 @@ quotesRouter.patch("/:id/send", requirePermission("quote.send"), async (req: Req
   if (quote.status !== "draft") return res.status(409).json({ error: "تم إرسال عرض السعر مسبقاً" });
 
   const [updated] = await db.update(quotes).set({ status: "sent" }).where(eq(quotes.id, quote.id)).returning();
+  await recordAuditEvent(db, {
+    companyId: req.companyId!,
+    actorUserId: req.userId!,
+    action: "quote.sent",
+    entityType: "quote",
+    entityId: quote.id,
+    beforeValue: { status: quote.status },
+    afterValue: { status: updated.status },
+  });
   logger.info("financial_mutation", { action: "quote.send", userId: req.userId, companyId: req.companyId, quoteId: quote.id });
   res.json(updated);
 });

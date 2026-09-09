@@ -20,11 +20,27 @@ export interface CreateCommitmentInput {
   contractId?: string;
   description?: string;
   currency?: string;
+  retentionPercent?: number;
 }
 
 export function createCommitment(projectId: string, input: CreateCommitmentInput): Promise<Commitment> {
   return apiFetch<Commitment>(`/projects/${projectId}/commitments`, {
     method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+// Final Pre-Launch Audit — commitments.retentionPercent previously had no
+// write path anywhere (see server/src/routes/commitments.ts's own comment
+// on the new PATCH /terms route this wraps); without it, every subcontract
+// IPC's retention silently computed to 0.
+export function updateCommitmentTerms(
+  projectId: string,
+  commitmentId: string,
+  input: { retentionPercent: number | null },
+): Promise<Commitment> {
+  return apiFetch<Commitment>(`/projects/${projectId}/commitments/${commitmentId}/terms`, {
+    method: "PATCH",
     body: JSON.stringify(input),
   });
 }

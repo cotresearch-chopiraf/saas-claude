@@ -6,6 +6,7 @@ import { MetricCard } from "../../ui/MetricCard";
 import { FinancialTable, type FinancialColumn } from "../../ui/FinancialTable";
 import { ErrorState } from "../../ui/ErrorState";
 import { Skeleton } from "../../ui/Skeleton";
+import { Can } from "../../auth/Can";
 import { formatMoney, formatDate } from "../../lib/format";
 import { getBudget, createExpense, deleteExpense } from "../../api/costPlan";
 import { ApiError } from "../../api/client";
@@ -69,11 +70,13 @@ export function ActualCostSection() {
         <MetricCard label="إجمالي المُنفَق فعلياً" value={formatMoney(summary.totals.spent)} />
       </div>
 
-      {/* Deliberately ungated (no <Can/>): POST/DELETE /budget/expenses carry
-          no requirePermission gate server-side — mirrors the identical
-          posture already established for Cost Plan's budget-item CRUD in
-          UI-01. A member must see exactly the same controls an owner does. */}
-      <ExpenseForm projectId={projectId} budgetItems={summary.items} onSaved={load} />
+      {/* Final Pre-Launch Audit — POST/DELETE /budget/expenses are now
+          owner-gated server-side (budget.manage), same as Cost Plan's
+          budget-item CRUD. Mirrored here so a member sees the same controls
+          the backend would actually allow. */}
+      <Can permission="budget.manage">
+        <ExpenseForm projectId={projectId} budgetItems={summary.items} onSaved={load} />
+      </Can>
 
       <FinancialTable
         columns={columns}
@@ -202,11 +205,13 @@ function ExpenseRowActions({
   }
 
   return (
-    <div className="flex justify-end gap-2">
-      {error && <span className="text-xs text-danger-600">{error}</span>}
-      <button type="button" onClick={onDelete} disabled={busy} className="text-sm text-danger-600 hover:underline">
-        حذف
-      </button>
-    </div>
+    <Can permission="budget.manage">
+      <div className="flex justify-end gap-2">
+        {error && <span className="text-xs text-danger-600">{error}</span>}
+        <button type="button" onClick={onDelete} disabled={busy} className="text-sm text-danger-600 hover:underline">
+          حذف
+        </button>
+      </div>
+    </Can>
   );
 }

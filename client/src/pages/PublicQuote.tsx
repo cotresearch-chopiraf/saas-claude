@@ -1,9 +1,10 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { apiFetch, ApiError } from "../api/client";
+import { formatMoney } from "../lib/format";
 import type { PublicQuote as PublicQuoteData } from "../api/types";
 
-const money = (n: number) => n.toLocaleString("ar", { maximumFractionDigits: 0 }) + " $";
+const money = (n: number) => formatMoney(n);
 
 export function PublicQuote() {
   const { token } = useParams<{ token: string }>();
