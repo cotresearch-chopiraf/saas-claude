@@ -133,6 +133,58 @@ describe("<Team/>", () => {
     await waitFor(() => expect(captured).toEqual({ path: "/company/members/u2", body: { role: "owner" } }));
   });
 
+  // Recovered — the invite success message previously ignored the
+  // backend's emailDelivered field and always showed a dev-facing "check
+  // server logs" message, even when a real mail provider delivered the
+  // invite. It must never claim delivery the backend didn't confirm.
+  it("shows a real success message when the backend confirms emailDelivered: true", async () => {
+    mockApi("owner", [ownerMember]);
+    renderTeam();
+    await waitFor(() => expect(screen.getByText("المالك")).toBeInTheDocument());
+
+    vi.mocked(apiFetch).mockImplementation((path: unknown, opts?: RequestInit) => {
+      const p = String(path);
+      const method = opts?.method;
+      if (p === "/auth/me") return Promise.resolve({ user: { id: "u1", name: "Test", email: "t@test.com", role: "owner" }, company: { id: "c1", name: "Test Co" } });
+      if (p === "/company/members" && !method) return Promise.resolve([ownerMember]);
+      if (p === "/company/invites" && !method) return Promise.resolve([]);
+      if (p === "/company/invites" && method === "POST") return Promise.resolve({ id: "inv1", email: "new@test.com", emailDelivered: true });
+      return Promise.reject(new Error(`unexpected: ${p} ${method}`));
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("البريد الإلكتروني"), { target: { value: "new@test.com" } });
+    fireEvent.click(screen.getByText("إرسال دعوة"));
+
+    await waitFor(() => expect(screen.getByText("أُرسلت الدعوة عبر البريد الإلكتروني.")).toBeInTheDocument());
+    expect(screen.queryByText(/سجل الخادم/)).not.toBeInTheDocument();
+  });
+
+  it("shows an honest fallback message when emailDelivered: false, never claiming delivery", async () => {
+    mockApi("owner", [ownerMember]);
+    renderTeam();
+    await waitFor(() => expect(screen.getByText("المالك")).toBeInTheDocument());
+
+    vi.mocked(apiFetch).mockImplementation((path: unknown, opts?: RequestInit) => {
+      const p = String(path);
+      const method = opts?.method;
+      if (p === "/auth/me") return Promise.resolve({ user: { id: "u1", name: "Test", email: "t@test.com", role: "owner" }, company: { id: "c1", name: "Test Co" } });
+      if (p === "/company/members" && !method) return Promise.resolve([ownerMember]);
+      if (p === "/company/invites" && !method) return Promise.resolve([]);
+      if (p === "/company/invites" && method === "POST") return Promise.resolve({ id: "inv1", email: "new@test.com", emailDelivered: false });
+      return Promise.reject(new Error(`unexpected: ${p} ${method}`));
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("البريد الإلكتروني"), { target: { value: "new@test.com" } });
+    fireEvent.click(screen.getByText("إرسال دعوة"));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("تعذّر إرسال البريد الإلكتروني — لم يتم إعداد مزوّد بريد حقيقي بعد. شارِكي رابط الدعوة يدوياً من سجلات الخادم."),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.queryByText("أُرسلت الدعوة عبر البريد الإلكتروني.")).not.toBeInTheDocument();
+  });
+
   it("a rejected mutation (e.g. last-active-owner guard) shows the backend's error message inline", async () => {
     mockApi("owner", [ownerMember]);
     renderTeam();

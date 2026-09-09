@@ -25,9 +25,22 @@ export function Team() {
     setError(null);
     setNotice(null);
     try {
-      await apiFetch("/company/invites", { method: "POST", body: JSON.stringify({ email, role: "member" }) });
+      // Recovered — the backend already reports whether the invite email
+      // actually sent (emailDelivered, server/src/routes/company.ts) via
+      // MAIL_PROVIDER; this page previously ignored it and always showed a
+      // dev-facing "look in the server log" message, even in a real
+      // deployment where the email was genuinely delivered. Never claims
+      // delivery when the backend didn't confirm it.
+      const result = await apiFetch<{ emailDelivered: boolean }>("/company/invites", {
+        method: "POST",
+        body: JSON.stringify({ email, role: "member" }),
+      });
       setEmail("");
-      setNotice("أُرسلت الدعوة (رابطها مطبوع في سجل الخادم إلى أن يُربط مزوّد بريد حقيقي)");
+      setNotice(
+        result.emailDelivered
+          ? "أُرسلت الدعوة عبر البريد الإلكتروني."
+          : "تعذّر إرسال البريد الإلكتروني — لم يتم إعداد مزوّد بريد حقيقي بعد. شارِكي رابط الدعوة يدوياً من سجلات الخادم.",
+      );
       load();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "تعذّر إرسال الدعوة");

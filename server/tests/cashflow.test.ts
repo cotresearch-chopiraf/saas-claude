@@ -262,6 +262,26 @@ async function createSentInvoice(projectId: string, amount: number) {
   return createRes.body.id as string;
 }
 
+// Multi-item, explicit-tax-rate variant — used to prove the batched
+// (single-innerJoin) sumInvoiceTotals groups items back to the correct
+// invoice and never lets one invoice's tax rate leak onto another's items.
+async function createPaidInvoiceMultiItem(projectId: string, amounts: number[], taxRatePercent: number) {
+  const createRes = await request(app)
+    .post("/api/invoices")
+    .set("Authorization", `Bearer ${ownerToken}`)
+    .send({
+      clientName: "Client",
+      projectId,
+      items: amounts.map((amount, i) => ({ description: `Item ${i}`, amount })),
+      taxRatePercent,
+    });
+  expect(createRes.status).toBe(201);
+  await request(app).patch(`/api/invoices/${createRes.body.id}/send`).set("Authorization", `Bearer ${ownerToken}`);
+  const paidRes = await request(app).patch(`/api/invoices/${createRes.body.id}/mark-paid`).set("Authorization", `Bearer ${ownerToken}`);
+  expect(paidRes.status).toBe(200);
+  return createRes.body.id as string;
+}
+
 function getCashFlow(projectId: string, query: Record<string, string> = {}, token = ownerToken) {
   const qs = new URLSearchParams(query).toString();
   return request(app)
@@ -309,6 +329,22 @@ describe("Calculation", () => {
     await createPaidInvoice(projectId, 0.2);
     const res = await getCashFlow(projectId);
     expect(res.body.historical.cashReceived).toBe(0.3);
+  });
+
+  // Recovered — sumInvoiceTotals was rewritten from a per-invoice
+  // sequential query into one batched innerJoin + JS grouping (closing a
+  // real N+1). The one thing that batching could get wrong is grouping
+  // items back to the wrong invoice, or mixing up which invoice's tax rate
+  // applies to which items — this proves it doesn't, across multiple
+  // multi-item invoices with different tax rates and item counts.
+  it("multiple multi-item invoices with different tax rates are summed correctly (proves batched grouping is correct)", async () => {
+    const projectId = await createProject();
+    // Invoice A: 1000 + 500 = 1500 subtotal, 15% tax = 225 -> total 1725
+    await createPaidInvoiceMultiItem(projectId, [1000, 500], 15);
+    // Invoice B: 200 + 300 + 100 = 600 subtotal, 5% tax = 30 -> total 630
+    await createPaidInvoiceMultiItem(projectId, [200, 300, 100], 5);
+    const res = await getCashFlow(projectId);
+    expect(res.body.historical.cashReceived).toBe(1725 + 630);
   });
 
   it("historical/projected/undated are kept in separate buckets", async () => {

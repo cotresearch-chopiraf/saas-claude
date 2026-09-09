@@ -44,17 +44,39 @@ authRouter.post("/register", async (req, res) => {
     return res.status(409).json({ error: "هذا البريد الإلكتروني مسجّل مسبقاً" });
   }
 
-  const [company] = await db.insert(companies).values({ name: companyName }).returning();
-  const [user] = await db
-    .insert(users)
-    .values({
-      companyId: company.id,
-      email,
-      name,
-      passwordHash: await hashPassword(password),
-      role: "owner",
-    })
-    .returning();
+  // The existing-email check above is only a fast-path (same TOCTOU shape
+  // as accept-invite's own check-then-act race below): two near-
+  // simultaneous registrations with the same email can both pass it.
+  // Company and user creation are wrapped in one transaction so a losing
+  // request's user insert (which fails on the users.email unique
+  // constraint) rolls its company insert back too, instead of leaving an
+  // orphaned, ownerless company row behind. The catch mirrors accept-
+  // invite's own defense-in-depth 23505 handling for the identical
+  // constraint, so a raw database error is never exposed to the client.
+  const passwordHash = await hashPassword(password);
+  let company: typeof companies.$inferSelect;
+  let user: typeof users.$inferSelect;
+  try {
+    [company, user] = await db.transaction(async (tx) => {
+      const [createdCompany] = await tx.insert(companies).values({ name: companyName }).returning();
+      const [createdUser] = await tx
+        .insert(users)
+        .values({
+          companyId: createdCompany.id,
+          email,
+          name,
+          passwordHash,
+          role: "owner",
+        })
+        .returning();
+      return [createdCompany, createdUser] as const;
+    });
+  } catch (err) {
+    if (pgErrorInfo(err).code === "23505") {
+      return res.status(409).json({ error: "هذا البريد الإلكتروني مسجّل مسبقاً" });
+    }
+    throw err;
+  }
 
   const token = await issueSessionToken(user.id, company.id);
   res.status(201).json({

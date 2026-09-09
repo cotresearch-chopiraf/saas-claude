@@ -38,22 +38,42 @@ async function sumInvoiceTotals(
       ? and(sql`${invoices.paidAt} IS NOT NULL`, lte(invoices.paidAt, cutoff as Date))
       : lte(invoices.issueDate, cutoff as string);
 
-  const rows = await db.query.invoices.findMany({
-    where: and(
-      eq(invoices.projectId, projectId),
-      eq(invoices.companyId, companyId),
-      eq(invoices.status, status),
-      dateCondition,
-    ),
-  });
+  // Recovered — was a real N+1 (one invoiceItems query per invoice,
+  // sequential, on every Cash Flow request). Same single-innerJoin
+  // batching technique forecast.ts's collectForecastInputs already uses
+  // for commitment lines: one query for every matching invoice's items,
+  // grouped by invoiceId in JS, instead of one query per invoice.
+  // taxRatePercent is still read per-invoice (frozen on the invoice
+  // itself, never re-derived) so each invoice's own computeTotals call is
+  // unchanged — only the item fetch is batched. Result is mathematically
+  // identical: same computeTotals call per invoice, same final rounding.
+  const rows = await db
+    .select({
+      invoiceId: invoiceItems.invoiceId,
+      amount: invoiceItems.amount,
+      taxRatePercent: invoices.taxRatePercent,
+    })
+    .from(invoiceItems)
+    .innerJoin(invoices, eq(invoiceItems.invoiceId, invoices.id))
+    .where(
+      and(
+        eq(invoices.projectId, projectId),
+        eq(invoices.companyId, companyId),
+        eq(invoices.status, status),
+        dateCondition,
+      ),
+    );
+
+  const amountsByInvoice = new Map<string, { amounts: number[]; taxRatePercent: number }>();
+  for (const row of rows) {
+    const entry = amountsByInvoice.get(row.invoiceId) ?? { amounts: [], taxRatePercent: Number(row.taxRatePercent) };
+    entry.amounts.push(Number(row.amount));
+    amountsByInvoice.set(row.invoiceId, entry);
+  }
 
   let total = 0;
-  for (const invoice of rows) {
-    const items = await db.query.invoiceItems.findMany({ where: eq(invoiceItems.invoiceId, invoice.id) });
-    const totals = computeTotals(
-      items.map((i) => Number(i.amount)),
-      Number(invoice.taxRatePercent),
-    );
+  for (const { amounts, taxRatePercent } of amountsByInvoice.values()) {
+    const totals = computeTotals(amounts, taxRatePercent);
     total += totals.total;
   }
   return Math.round(total * 100) / 100;
