@@ -219,6 +219,31 @@ export interface CustomerWithProjects extends Customer {
   projects: Array<{ id: string; name: string; status: ProjectStatus }>;
 }
 
+// --- MIDAD Phase A2: Employee ---
+// Mirrors server/src/db/schema.ts's `employees` table and
+// server/src/routes/employees.ts's response shape exactly. Same shape
+// class as Supplier/Customer above (company-wide master data, no delete
+// endpoint — "removal" is only ever a status change to "inactive").
+// nationality/bankName/iban exist on the backend row (added in A1, for a
+// future Mudad/WPS-facing slice) but are deliberately NOT modeled here —
+// this slice's UI never reads or writes them.
+export type EmployeeStatus = "active" | "inactive";
+
+export interface Employee {
+  id: string;
+  companyId: string;
+  employeeNumber: string;
+  name: string;
+  jobTitle: string | null;
+  hireDate: string | null;
+  status: EmployeeStatus;
+  email: string | null;
+  phone: string | null;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 // --- MIDAD UI-03A: Commitment (Purchase Order / Subcontract) ---
 // Mirrors server/src/db/schema.ts's `commitments`/`commitment_lines` tables
 // and server/src/routes/commitments.ts's response shapes exactly (verified

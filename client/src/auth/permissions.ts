@@ -57,6 +57,10 @@ export const OWNER_ONLY_ACTIONS = [
   // "budget.manage" (see that file's comment for why the legacy budget
   // item/expense CRUD needed a gate at all).
   "budget.manage",
+  // Phase A2 — mirrors server/src/lib/permissions.ts's new
+  // "workforce.manage" (Employees CRUD create/update/status-toggle; reads
+  // stay member-open, same split every other domain in this list uses).
+  "workforce.manage",
 ] as const;
 
 export type PermissionAction = (typeof OWNER_ONLY_ACTIONS)[number];

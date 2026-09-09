@@ -13,6 +13,7 @@ import { PublicInvoice } from "./pages/PublicInvoice";
 import { Suppliers } from "./pages/Suppliers";
 import { Customers } from "./pages/Customers";
 import { CustomerDetail } from "./pages/CustomerDetail";
+import { Employees } from "./pages/Employees";
 import { Team } from "./pages/Team";
 import { Settings } from "./pages/Settings";
 import { Compliance } from "./pages/Compliance";
@@ -144,6 +145,14 @@ export default function App() {
         element={
           <ProtectedRoute>
             <CustomerDetail />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/employees"
+        element={
+          <ProtectedRoute>
+            <Employees />
           </ProtectedRoute>
         }
       />

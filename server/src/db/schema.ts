@@ -2547,7 +2547,10 @@ export const employeeStatusEnum = pgEnum("employee_status", ["active", "inactive
 // separate, later roadmap item). nationality/bank fields are optional and
 // exist only because WPS itself requires salary paid into a compliant
 // Saudi bank account — MIDAD only ever stores a reference, it never
-// moves money or validates bank details.
+// moves money or validates bank details. jobTitle/hireDate/phone/email
+// (added in Slice A2) are the CRUD/UI's own master-data fields — the A2
+// employees.ts route never reads or writes nationality/bankName/iban;
+// those stay reserved for a future Mudad/WPS-facing slice.
 export const employees = pgTable(
   "employees",
   {
@@ -2562,6 +2565,14 @@ export const employees = pgTable(
   employeeNumber: text("employee_number").notNull(),
   name: text("name").notNull(),
   status: employeeStatusEnum("status").notNull().default("active"),
+  // Slice A2 — additive, nullable master-data fields the Employees CRUD/UI
+  // needs (job title shown on the list, hire date, basic contact info).
+  // Deliberately ordinary text/date columns, same class as suppliers/
+  // customers' own email/phone — no new validation machinery.
+  jobTitle: text("job_title"),
+  hireDate: date("hire_date"),
+  phone: text("phone"),
+  email: text("email"),
   nationality: text("nationality"),
   bankName: text("bank_name"),
   iban: text("iban"),

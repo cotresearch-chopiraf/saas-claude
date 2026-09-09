@@ -24,6 +24,7 @@ import { boqRouter } from "./routes/boq.js";
 import { budgetRevisionsRouter } from "./routes/budgetRevisions.js";
 import { suppliersRouter } from "./routes/suppliers.js";
 import { customersRouter } from "./routes/customers.js";
+import { employeesRouter } from "./routes/employees.js";
 import { commitmentsRouter } from "./routes/commitments.js";
 import { measurementsRouter } from "./routes/measurements.js";
 import { ipcsRouter } from "./routes/ipcs.js";
@@ -101,6 +102,9 @@ export function buildApp() {
   app.use("/api/cost-codes", requireAuth, costCodesRouter);
   app.use("/api/suppliers", requireAuth, suppliersRouter);
   app.use("/api/customers", requireAuth, customersRouter);
+  // MIDAD Phase A2 — Employees (workforce master data). Company-wide, not
+  // project-scoped, same mount pattern as suppliers/customers above.
+  app.use("/api/employees", requireAuth, employeesRouter);
   app.use("/api/company", requireAuth, companyRouter);
   app.use("/api/quotes", requireAuth, quotesRouter);
   app.use("/api/public/quotes", publicQuotesRouter);
