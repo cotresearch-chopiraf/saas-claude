@@ -7,7 +7,7 @@ import { requirePermission } from "../lib/permissions.js";
 import { recordAuditEvent } from "../lib/audit.js";
 import { logger } from "../lib/logger.js";
 import { pgErrorInfo } from "../lib/pgError.js";
-import { zatcaSubmitRateLimit } from "../middleware/rateLimit.js";
+import { zatcaSubmitRateLimit, zatcaOnboardingRateLimit } from "../middleware/rateLimit.js";
 import {
   createEgsUnit,
   getEgsUnit,
@@ -34,6 +34,10 @@ import {
   submitComplianceInvoiceForEgsUnit,
   requestProductionCsidOnboardingForEgsUnit,
   renewProductionCsidForEgsUnit,
+  findCurrentCsrInstance,
+  getComplianceLifecycleForCsrInstance,
+  listComplianceAttemptsForLifecycle,
+  listProviderOperationsForEgsUnit,
 } from "../lib/zatca/domain/index.js";
 import { lockAndReadPihPointer, updatePihPointer } from "../lib/zatca/domain/pih.js";
 import { getZatcaSecretStore } from "../lib/zatca/secretStore/index.js";
@@ -333,6 +337,32 @@ zatcaRouter.post("/egs-units/:id/csr", requireSubmit, async (req: Request<{ id: 
   }
 });
 
+// GET /api/zatca/egs-units/:id/csr (ZATCA Customer Onboarding & Compliance
+// Center) — read-only view of this EGS unit's current (not-yet-superseded)
+// CSR Instance, reusing findCurrentCsrInstance (already used internally by
+// generateCsrForEgsUnit/requestComplianceCsidForEgsUnit) rather than any
+// new domain logic. Exists so the onboarding UI can render "a CSR already
+// exists for this unit" after a page reload — before this route, that fact
+// was only ever visible in the one-time POST /csr response. Never returns
+// secretRef; the private key/public key material stays exactly where it
+// already lived (ZatcaSecretStore), unreachable from this or any route.
+zatcaRouter.get("/egs-units/:id/csr", async (req: Request<{ id: string }>, res: Response) => {
+  const unit = await getEgsUnit(req.companyId!, req.params.id);
+  if (!unit) return res.status(404).json({ error: "وحدة الفوترة الإلكترونية غير موجودة" });
+
+  const csrInstance = await findCurrentCsrInstance(req.companyId!, unit.id);
+  if (!csrInstance) return res.json({ csrInstance: null });
+
+  res.json({
+    csrInstance: {
+      id: csrInstance.id,
+      invoiceType: csrInstance.invoiceType,
+      status: csrInstance.status,
+      generatedAt: csrInstance.generatedAt,
+    },
+  });
+});
+
 const confirmCsidSchema = z.object({
   binarySecurityToken: z.string().min(1),
   secret: z.string().min(1),
@@ -395,7 +425,7 @@ const requestComplianceCsidSchema = z.object({
 // unit's csidStatus or active credential — see that module's own file
 // comment for why that boundary is a deliberate, narrow choice for this
 // slice, not an oversight.
-zatcaRouter.post("/egs-units/:id/compliance-csid", requireSubmit, async (req: Request<{ id: string }>, res: Response) => {
+zatcaRouter.post("/egs-units/:id/compliance-csid", requireSubmit, zatcaOnboardingRateLimit, async (req: Request<{ id: string }>, res: Response) => {
   const parsed = requestComplianceCsidSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
 
@@ -433,6 +463,38 @@ zatcaRouter.post("/egs-units/:id/compliance-csid", requireSubmit, async (req: Re
   }
 });
 
+// GET /api/zatca/egs-units/:id/compliance-csid (ZATCA Customer Onboarding &
+// Compliance Center) — read-only view of the Compliance Lifecycle for this
+// EGS unit's current CSR Instance, reusing findCurrentCsrInstance +
+// getComplianceLifecycleForCsrInstance (the exact lookups
+// requestComplianceCsidForEgsUnit already performs internally). Lets the
+// onboarding UI show "a Compliance CSID was already requested for this CSR"
+// after a reload, without ever exposing the stored secretRef — the real
+// binarySecurityToken/secret ZATCA returned for this request is never
+// retrievable through any route (see domain/complianceCsid.ts's own file
+// comment on why that credential is deliberately not wired into the EGS
+// unit's active-credential slot by this call alone).
+zatcaRouter.get("/egs-units/:id/compliance-csid", async (req: Request<{ id: string }>, res: Response) => {
+  const unit = await getEgsUnit(req.companyId!, req.params.id);
+  if (!unit) return res.status(404).json({ error: "وحدة الفوترة الإلكترونية غير موجودة" });
+
+  const csrInstance = await findCurrentCsrInstance(req.companyId!, unit.id);
+  if (!csrInstance) return res.json({ complianceLifecycle: null });
+
+  const lifecycle = await getComplianceLifecycleForCsrInstance(req.companyId!, csrInstance.id);
+  if (!lifecycle) return res.json({ complianceLifecycle: null });
+
+  res.json({
+    complianceLifecycle: {
+      id: lifecycle.id,
+      requestId: lifecycle.requestId,
+      dispositionMessage: lifecycle.dispositionMessage,
+      status: lifecycle.status,
+      startedAt: lifecycle.startedAt,
+    },
+  });
+});
+
 const submitComplianceInvoiceSchema = z.object({
   documentType: z.enum(["388", "381", "383"]),
   // Which ZATCA compliance-test family this attempt targets — required,
@@ -460,6 +522,7 @@ const submitComplianceInvoiceSchema = z.object({
 zatcaRouter.post(
   "/egs-units/:id/compliance-invoices",
   requireSubmit,
+  zatcaOnboardingRateLimit,
   async (req: Request<{ id: string }>, res: Response) => {
     const parsed = submitComplianceInvoiceSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
@@ -518,6 +581,39 @@ zatcaRouter.post(
   },
 );
 
+// GET /api/zatca/egs-units/:id/compliance-invoices (ZATCA Customer
+// Onboarding & Compliance Center) — read-only history of Compliance
+// Invoice attempts for this EGS unit's current Compliance Lifecycle,
+// reusing listComplianceAttemptsForLifecycle (already used nowhere in a
+// route before this — only server/tests exercised it directly). Never
+// returns secretRef (compliance attempts don't carry one) or any document
+// XML/hash — only the same safe, ZATCA-returned outcome fields the POST
+// route's own response already exposes for a single attempt.
+zatcaRouter.get("/egs-units/:id/compliance-invoices", async (req: Request<{ id: string }>, res: Response) => {
+  const unit = await getEgsUnit(req.companyId!, req.params.id);
+  if (!unit) return res.status(404).json({ error: "وحدة الفوترة الإلكترونية غير موجودة" });
+
+  const csrInstance = await findCurrentCsrInstance(req.companyId!, unit.id);
+  if (!csrInstance) return res.json({ attempts: [] });
+
+  const lifecycle = await getComplianceLifecycleForCsrInstance(req.companyId!, csrInstance.id);
+  if (!lifecycle) return res.json({ attempts: [] });
+
+  const attempts = await listComplianceAttemptsForLifecycle(req.companyId!, lifecycle.id);
+  res.json({
+    attempts: attempts.map((a) => ({
+      id: a.id,
+      documentType: a.documentType,
+      invoiceFamily: a.invoiceFamily,
+      correlationId: a.correlationId,
+      rawStatus: a.rawStatus,
+      normalizedOutcome: a.normalizedOutcome,
+      attemptedAt: a.attemptedAt,
+      errorCategory: a.errorCategory,
+    })),
+  });
+});
+
 // POST /api/zatca/egs-units/:id/production-csid (Slice W) — requests a
 // real Production CSID from ZATCA for this EGS unit's current CSR
 // Instance's Compliance CSID (see domain/productionCsid.ts) and persists
@@ -526,7 +622,7 @@ zatcaRouter.post(
 // EGS unit's csidStatus and does NOT imply "onboarding complete." No
 // request body: every input this operation needs is already resolved
 // server-side from the EGS unit's own current CSR/Compliance chain.
-zatcaRouter.post("/egs-units/:id/production-csid", requireSubmit, async (req: Request<{ id: string }>, res: Response) => {
+zatcaRouter.post("/egs-units/:id/production-csid", requireSubmit, zatcaOnboardingRateLimit, async (req: Request<{ id: string }>, res: Response) => {
   try {
     const { operation, result } = await requestProductionCsidOnboardingForEgsUnit({
       companyId: req.companyId!,
@@ -575,6 +671,7 @@ const renewProductionCsidSchema = z.object({
 zatcaRouter.post(
   "/egs-units/:id/production-csid/renew",
   requireSubmit,
+  zatcaOnboardingRateLimit,
   async (req: Request<{ id: string }>, res: Response) => {
     const parsed = renewProductionCsidSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
@@ -612,6 +709,33 @@ zatcaRouter.post(
   },
 );
 
+// GET /api/zatca/egs-units/:id/production-csid (ZATCA Customer Onboarding &
+// Compliance Center) — read-only history of Production CSID operations
+// (both onboarding and renewal attempts) for this EGS unit, reusing
+// listProviderOperationsForEgsUnit (already used nowhere in a route before
+// this). Never returns secretRef — only the same safe, ZATCA-returned
+// fields the POST onboarding/renewal routes' own responses already expose
+// for a single operation.
+zatcaRouter.get("/egs-units/:id/production-csid", async (req: Request<{ id: string }>, res: Response) => {
+  const unit = await getEgsUnit(req.companyId!, req.params.id);
+  if (!unit) return res.status(404).json({ error: "وحدة الفوترة الإلكترونية غير موجودة" });
+
+  const operations = await listProviderOperationsForEgsUnit(req.companyId!, unit.id);
+  res.json({
+    operations: operations.map((o) => ({
+      id: o.id,
+      operationType: o.operationType,
+      internalStatus: o.internalStatus,
+      providerRequestId: o.providerRequestId,
+      dispositionMessage: o.dispositionMessage,
+      providerOutcome: o.providerOutcome,
+      errorCategory: o.errorCategory,
+      startedAt: o.startedAt,
+      finishedAt: o.finishedAt,
+    })),
+  });
+});
+
 // POST /api/zatca/egs-units/:id/verify-connection — the one route in this
 // slice that actually contacts ZATCA (gated by zatca.submit, not
 // zatca.configure). Never fabricates a result: no credential -> a real
@@ -620,7 +744,7 @@ zatcaRouter.post(
 // received. See lib/zatca/provider/fatooraProvider.ts's checkConnection
 // doc comment for precisely what a "connected" result does and does not
 // prove.
-zatcaRouter.post("/egs-units/:id/verify-connection", requireSubmit, async (req: Request<{ id: string }>, res: Response) => {
+zatcaRouter.post("/egs-units/:id/verify-connection", requireSubmit, zatcaOnboardingRateLimit, async (req: Request<{ id: string }>, res: Response) => {
   const unit = await getEgsUnit(req.companyId!, req.params.id);
   if (!unit) return res.status(404).json({ error: "وحدة الفوترة الإلكترونية غير موجودة" });
 

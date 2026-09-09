@@ -10,6 +10,7 @@ import { Skeleton } from "../ui/Skeleton";
 import { Modal } from "../ui/Modal";
 import { Can } from "../auth/Can";
 import { formatDateTime } from "../lib/format";
+import { ZatcaOnboardingPanel } from "./zatca/ZatcaOnboardingPanel";
 import {
   getZatcaConfig,
   updateZatcaIdentity,
@@ -178,7 +179,7 @@ export function ZatcaSettings() {
       <div className="space-y-5">
         <OnboardingStatusBanner summary={onboarding} />
         <IdentityCard identity={config.identity} onSaved={load} />
-        <EgsUnitsCard units={config.egsUnits} onChanged={load} />
+        <EgsUnitsCard units={config.egsUnits} identity={config.identity} onChanged={load} />
         <SimulationCard simulationUnits={simulationUnits} onChanged={load} />
         <HistoryCard key={historyRefreshKey} />
       </div>
@@ -506,7 +507,7 @@ function IdentityCard({ identity, onSaved }: { identity: ZatcaConfig["identity"]
 
 // --- Step 2+: EGS units ---------------------------------------------------
 
-function EgsUnitsCard({ units, onChanged }: { units: ZatcaEgsUnit[]; onChanged: () => void }) {
+function EgsUnitsCard({ units, identity, onChanged }: { units: ZatcaEgsUnit[]; identity: ZatcaConfig["identity"]; onChanged: () => void }) {
   const [showCreate, setShowCreate] = useState(false);
 
   return (
@@ -514,7 +515,10 @@ function EgsUnitsCard({ units, onChanged }: { units: ZatcaEgsUnit[]; onChanged: 
       <div className="mb-4 flex items-center justify-between">
         <div>
           <h2 className="font-semibold text-stone-800">٢. وحدات الفوترة الإلكترونية (EGS)</h2>
-          <p className="mt-1 text-sm text-stone-500">اختاري بيئة المحاكاة أولاً، ثم أكملي الإعداد الخارجي مع ZATCA وأدخلي بيانات الاعتماد الناتجة.</p>
+          <p className="mt-1 text-sm text-stone-500">
+            أنشئي وحدة، ثم أكملي إعداد ZATCA الحقيقي (CSR → شهادة الامتثال → شهادة الإنتاج) من داخل كل وحدة، أو أدخلي
+            بيانات اعتماد حصلتِ عليها من قناة أخرى مباشرةً.
+          </p>
         </div>
         <Can permission="zatca.configure">
           <Button size="sm" onClick={() => setShowCreate((v) => !v)}>
@@ -539,7 +543,7 @@ function EgsUnitsCard({ units, onChanged }: { units: ZatcaEgsUnit[]; onChanged: 
       ) : (
         <div className="space-y-3">
           {units.map((unit) => (
-            <EgsUnitRow key={unit.id} unit={unit} onChanged={onChanged} />
+            <EgsUnitRow key={unit.id} unit={unit} identity={identity} onChanged={onChanged} />
           ))}
         </div>
       )}
@@ -597,8 +601,9 @@ function CreateEgsUnitForm({ onDone }: { onDone: () => void }) {
   );
 }
 
-function EgsUnitRow({ unit, onChanged }: { unit: ZatcaEgsUnit; onChanged: () => void }) {
+function EgsUnitRow({ unit, identity, onChanged }: { unit: ZatcaEgsUnit; identity: ZatcaConfig["identity"]; onChanged: () => void }) {
   const [showCredential, setShowCredential] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [verifyResult, setVerifyResult] = useState<ZatcaVerifyConnectionResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -690,6 +695,9 @@ function EgsUnitRow({ unit, onChanged }: { unit: ZatcaEgsUnit; onChanged: () => 
             <Button size="sm" disabled={verifying} onClick={onVerify}>
               {verifying ? "جارٍ التحقق..." : "التحقق من الاتصال"}
             </Button>
+            <Button size="sm" variant="secondary" onClick={() => setShowOnboarding((v) => !v)}>
+              {showOnboarding ? "إخفاء إعداد ZATCA الحقيقي" : "إعداد ZATCA الحقيقي (CSR ← شهادة الامتثال ← الإنتاج)"}
+            </Button>
           </Can>
           {unit.status !== "deactivated" && (
             <Button size="sm" variant="secondary" onClick={onDeactivate}>
@@ -698,6 +706,12 @@ function EgsUnitRow({ unit, onChanged }: { unit: ZatcaEgsUnit; onChanged: () => 
           )}
         </div>
       </Can>
+
+      {showOnboarding && (
+        <div className="mt-3 border-t border-stone-100 pt-3">
+          <ZatcaOnboardingPanel unit={unit} identity={identity} onChanged={onChanged} />
+        </div>
+      )}
 
       <CredentialModal
         open={showCredential}

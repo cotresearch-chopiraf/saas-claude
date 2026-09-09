@@ -12,11 +12,21 @@ export function setToken(token: string | null): void {
 // Carries the HTTP status alongside the message so a caller can tell a
 // genuine auth failure (401) apart from a transient one (429/500/...) —
 // see auth/AuthContext.tsx's session-error classification.
+//
+// `category` is optional and undefined for every non-ZATCA route (none of
+// them send one) — populated only when the JSON error body carries a
+// `category` string, as ZATCA's routes do (see server/src/lib/zatca/errors.ts's
+// ZatcaErrorCategory). Never invented client-side; passed through exactly
+// as the backend sent it, same convention as every other field in this
+// codebase's API responses. See lib/zatcaErrors.ts for how the ZATCA
+// Onboarding & Compliance Center maps this into customer-facing guidance.
 export class ApiError extends Error {
   status: number;
-  constructor(message: string, status: number) {
+  category?: string;
+  constructor(message: string, status: number, category?: string) {
     super(message);
     this.status = status;
+    this.category = category;
   }
 }
 
@@ -34,7 +44,7 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
 
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new ApiError(body.error ?? "حدث خطأ غير متوقع", res.status);
+    throw new ApiError(body.error ?? "حدث خطأ غير متوقع", res.status, typeof body.category === "string" ? body.category : undefined);
   }
   return body as T;
 }

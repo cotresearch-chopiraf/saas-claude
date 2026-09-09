@@ -1058,3 +1058,120 @@ export interface ZatcaSubmitResult {
   error?: string;
   category?: string;
 }
+
+// ZATCA Customer Onboarding & Compliance Center — wraps
+// server/src/routes/zatca.ts's CSR/CSID/Compliance CSID/Compliance
+// Invoice/Production CSID/Renewal routes. Same rule as every other type in
+// this file: every field is exactly what the backend returns, nothing
+// derived or invented client-side. Private key material, binarySecurityToken,
+// secret, and OTP are NEVER part of any of these types — the backend never
+// returns them (see routes/zatca.ts's own comments on each route).
+
+export interface ZatcaCsrFields {
+  commonName: string;
+  egsSerialNumber: string;
+  organizationIdentifier: string;
+  organizationUnitName: string;
+  organizationName: string;
+  countryCode: string;
+  // TSXY structure — see server/src/lib/zatca/csr/csrBuilder.ts.
+  invoiceType: string;
+  location: string;
+  industry: string;
+}
+
+// ZATCA-custom CSR attribute OIDs — see csrBuilder.ts's file comment: these
+// are NOT public PKIX standard attributes and their OIDs are not invented
+// anywhere in this codebase. Left empty by a tenant who doesn't have them;
+// the backend then honestly refuses (400/configuration) rather than
+// guessing, and this page must show that refusal, never route around it.
+export interface ZatcaCsrCustomAttributeOids {
+  egsSerialNumber?: string;
+  invoiceType?: string;
+  location?: string;
+  industry?: string;
+}
+
+export interface ZatcaCsrGenerationResult {
+  csrPem: string;
+  csrDerBase64: string;
+}
+
+export type ZatcaCsrInstanceStatus = "generated" | "superseded";
+
+export interface ZatcaCsrInstance {
+  id: string;
+  invoiceType: string;
+  status: ZatcaCsrInstanceStatus;
+  generatedAt: string;
+}
+
+export type ZatcaCsidConfirmResult = ZatcaEgsUnit;
+
+export interface ZatcaComplianceCsidRequestResult {
+  requestId: string;
+  dispositionMessage: string;
+}
+
+export type ZatcaComplianceLifecycleStatus = "issued";
+
+export interface ZatcaComplianceLifecycle {
+  id: string;
+  requestId: string;
+  dispositionMessage: string;
+  status: ZatcaComplianceLifecycleStatus;
+  startedAt: string;
+}
+
+export type ZatcaInvoiceFamily = "standard" | "simplified";
+export type ZatcaComplianceDocumentType = "388" | "381" | "383";
+
+export interface ZatcaComplianceInvoiceResult {
+  status: string;
+  correlationId: string;
+  rawStatus: string | null;
+  warnings: unknown;
+  clearanceStatus: string | null;
+  qrSellertStatus: string | null;
+  qrBuyertStatus: string | null;
+  respondedAt: string;
+}
+
+export interface ZatcaComplianceAttempt {
+  id: string;
+  documentType: ZatcaComplianceDocumentType;
+  invoiceFamily: string;
+  correlationId: string | null;
+  rawStatus: string | null;
+  normalizedOutcome: string | null;
+  attemptedAt: string;
+  errorCategory: string | null;
+}
+
+export interface ZatcaProductionCsidRequestResult {
+  requestId: string;
+  dispositionMessage: string;
+}
+
+export type ZatcaProductionCsidRenewalOutcome = "issued" | "not_compliant";
+
+export interface ZatcaProductionCsidRenewalResult {
+  requestId: string;
+  dispositionMessage: string;
+  outcome: ZatcaProductionCsidRenewalOutcome;
+}
+
+export type ZatcaProviderOperationType = "production_csid_onboarding" | "production_csid_renewal";
+export type ZatcaProviderOperationInternalStatus = "response_received" | "failed";
+
+export interface ZatcaProviderOperation {
+  id: string;
+  operationType: ZatcaProviderOperationType;
+  internalStatus: ZatcaProviderOperationInternalStatus;
+  providerRequestId: string | null;
+  dispositionMessage: string | null;
+  providerOutcome: string | null;
+  errorCategory: string | null;
+  startedAt: string;
+  finishedAt: string;
+}

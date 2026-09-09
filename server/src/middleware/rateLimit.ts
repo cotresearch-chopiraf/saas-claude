@@ -59,6 +59,32 @@ export const zatcaSubmitRateLimit = rateLimit({
   message: { error: "عدد كبير جداً من محاولات إرسال ZATCA، الرجاء المحاولة لاحقاً" },
 });
 
+// ZATCA Customer Onboarding & Compliance Center — the onboarding routes
+// (CSR generation, Compliance CSID request, Compliance Invoice test
+// submission, Production CSID onboarding/renewal, connection check) all
+// make a real outbound call to ZATCA/FATOORA and, for the OTP-bearing
+// ones, carry the same "wrong OTP" guessing exposure zatcaSubmitRateLimit
+// was built to bound for /submit — before this, none of them had any
+// limiter at all (a customer-onboarding gap confirmed by the ZATCA Live
+// Sandbox Verification audit). Same keying/window/shape as
+// zatcaSubmitRateLimit (per-company, not per-IP — the resource being
+// protected is the company's own ZATCA quota/standing) but a separate,
+// slightly higher ceiling: unlike /submit (a per-invoice, potentially
+// high-volume operation), onboarding is a handful of one-time-per-EGS-unit
+// steps, so a lower number would risk blocking a legitimate multi-EGS-unit
+// or multi-attempt real onboarding session; kept well below an abuse-scale
+// volume regardless.
+export const ZATCA_ONBOARDING_RATE_LIMIT_MAX = limitFor(20, 200);
+
+export const zatcaOnboardingRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: ZATCA_ONBOARDING_RATE_LIMIT_MAX,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req: Request) => req.companyId ?? req.ip ?? "unknown",
+  message: { error: "عدد كبير جداً من محاولات إعداد ZATCA، الرجاء المحاولة لاحقاً" },
+});
+
 // Public, unauthenticated document links (a client viewing/downloading a
 // quote or invoice via its publicToken, no login) — currently the only
 // customer-facing routes with no rate limit of any kind. The token itself
