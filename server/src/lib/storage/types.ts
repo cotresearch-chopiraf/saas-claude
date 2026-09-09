@@ -52,3 +52,27 @@ export const PUBLIC_STORAGE_NAMESPACES = new Set<string>(["logos"]);
 export function namespaceOfStorageKey(storageKey: string): string {
   return storageKey.split("/")[0] ?? "";
 }
+
+// Final Launch Gate Audit, Phase 2A — a client-supplied original filename
+// is untrusted input. Both storage providers previously derived the
+// on-disk/on-key extension directly from it (`path.extname(fileName)` /
+// `fileName.slice(fileName.lastIndexOf("."))`) with only the upload's MIME
+// TYPE validated, never the filename's extension characters themselves.
+// That extension becomes part of the persisted storageKey — and, for the
+// "logos" namespace, company.logoPath (routes/company.ts) and from there
+// lib/uploads.ts's logoFileToDataUri() derives a MIME string directly from
+// it, which lib/documentHtml.ts interpolates unescaped into an <img
+// src="..."> attribute during server-side PDF rendering (lib/pdf.ts).
+// A filename like `evil.png" onerror="alert(1)` survives untouched through
+// every one of those steps and reliably breaks out of that HTML attribute
+// — confirmed by tracing the exact transformation each step performs, not
+// merely by type-level reasoning. Restricting every storage key's
+// extension to a short alphanumeric string (never `"`, `<`, `>`, `'`, `/`,
+// whitespace, or any other attribute/path-breaking character) closes this
+// at its one shared source for every current and future namespace, rather
+// than patching each downstream consumer separately.
+const SAFE_EXTENSION_PATTERN = /^\.[a-zA-Z0-9]{1,10}$/;
+
+export function sanitizeExtension(rawExtension: string): string {
+  return SAFE_EXTENSION_PATTERN.test(rawExtension) ? rawExtension : "";
+}

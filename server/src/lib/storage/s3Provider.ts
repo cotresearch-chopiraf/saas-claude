@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { createHash } from "node:crypto";
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import type { SaveFileInput, StorageProvider, StoredFile } from "./types.js";
-import { PUBLIC_STORAGE_NAMESPACES, namespaceOfStorageKey } from "./types.js";
+import { PUBLIC_STORAGE_NAMESPACES, namespaceOfStorageKey, sanitizeExtension } from "./types.js";
 
 // Slice AA — the durable production storage provider this codebase's own
 // storage/types.ts header comment already anticipated: "an S3-compatible
@@ -55,7 +55,8 @@ export class S3StorageProvider implements StorageProvider {
   }
 
   async save(input: SaveFileInput): Promise<StoredFile> {
-    const ext = input.fileName.includes(".") ? input.fileName.slice(input.fileName.lastIndexOf(".")) : "";
+    const rawExt = input.fileName.includes(".") ? input.fileName.slice(input.fileName.lastIndexOf(".")) : "";
+    const ext = sanitizeExtension(rawExt);
     const storageKey = `${input.namespace}/${randomUUID()}${ext}`;
     const checksum = createHash("sha256").update(input.buffer).digest("hex");
 

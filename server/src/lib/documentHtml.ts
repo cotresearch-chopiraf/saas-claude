@@ -172,7 +172,7 @@ export function buildDocumentHtml(data: DocumentData): string {
         ${data.company.taxId ? `<div>${t.taxIdLabel}: ${escapeHtml(data.company.taxId)}</div>` : ""}
       </div>
     </div>
-    ${data.company.logoDataUri ? `<img class="logo" src="${data.company.logoDataUri}" />` : ""}
+    ${data.company.logoDataUri ? `<img class="logo" src="${escapeHtml(data.company.logoDataUri)}" />` : ""}
   </div>
 
   <div class="doc-title">

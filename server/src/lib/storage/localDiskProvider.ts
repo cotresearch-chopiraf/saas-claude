@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import type { StorageProvider, SaveFileInput, StoredFile } from "./types.js";
-import { PUBLIC_STORAGE_NAMESPACES, namespaceOfStorageKey } from "./types.js";
+import { PUBLIC_STORAGE_NAMESPACES, namespaceOfStorageKey, sanitizeExtension } from "./types.js";
 
 // Local disk — the same stopgap the original logo-upload feature already
 // used (fine for a single persistent server, lost on redeploy to an
@@ -46,7 +46,7 @@ export class LocalDiskStorageProvider implements StorageProvider {
     const dir = path.join(root, input.namespace);
     fs.mkdirSync(dir, { recursive: true });
 
-    const ext = path.extname(input.fileName) || "";
+    const ext = sanitizeExtension(path.extname(input.fileName) || "");
     const storageKey = `${input.namespace}/${randomUUID()}${ext}`;
     const absolute = path.join(root, storageKey);
     fs.writeFileSync(absolute, input.buffer);
