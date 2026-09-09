@@ -61,6 +61,12 @@ export const OWNER_ONLY_ACTIONS = [
   // "workforce.manage" (Employees CRUD create/update/status-toggle; reads
   // stay member-open, same split every other domain in this list uses).
   "workforce.manage",
+  // Phase A3 — mirrors server/src/lib/permissions.ts's pre-existing
+  // "payroll.manage" (added in A1, first consumed here): payroll period
+  // create/update/submit/approve/reject and payroll record create/update.
+  // "payroll.post" is deliberately NOT mirrored — no A3 route uses it (see
+  // payrollPeriods.ts's own header comment on why "posted" is out of scope).
+  "payroll.manage",
 ] as const;
 
 export type PermissionAction = (typeof OWNER_ONLY_ACTIONS)[number];

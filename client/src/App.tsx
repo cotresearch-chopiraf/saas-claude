@@ -14,6 +14,8 @@ import { Suppliers } from "./pages/Suppliers";
 import { Customers } from "./pages/Customers";
 import { CustomerDetail } from "./pages/CustomerDetail";
 import { Employees } from "./pages/Employees";
+import { Payroll } from "./pages/Payroll";
+import { PayrollPeriodDetail } from "./pages/PayrollPeriodDetail";
 import { Team } from "./pages/Team";
 import { Settings } from "./pages/Settings";
 import { Compliance } from "./pages/Compliance";
@@ -153,6 +155,22 @@ export default function App() {
         element={
           <ProtectedRoute>
             <Employees />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/payroll"
+        element={
+          <ProtectedRoute>
+            <Payroll />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/payroll/:id"
+        element={
+          <ProtectedRoute>
+            <PayrollPeriodDetail />
           </ProtectedRoute>
         }
       />

@@ -244,6 +244,83 @@ export interface Employee {
   updatedAt: string;
 }
 
+// --- MIDAD Phase A3: Payroll Period + Payroll Record ---
+// Mirrors server/src/db/schema.ts's `payroll_periods`/`payroll_records`
+// tables (added in A1) and server/src/routes/payrollPeriods.ts /
+// payrollRecords.ts's response shapes exactly. "posted" is a real status
+// value in the backend enum but no route in A3 ever produces it — that
+// transition is reserved for a future financial-posting slice; the UI
+// never shows an action that reaches it.
+export type PayrollPeriodStatus = "draft" | "submitted" | "approved" | "posted" | "rejected";
+
+export interface PayrollSummary {
+  employeeCount: number;
+  totalGross: number;
+  totalDeductions: number;
+  totalNet: number;
+}
+
+export interface PayrollPeriod {
+  id: string;
+  companyId: string;
+  periodStart: string;
+  periodEnd: string;
+  payrollDate: string | null;
+  status: PayrollPeriodStatus;
+  notes: string | null;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  submittedBy: string | null;
+  submittedAt: string | null;
+  approvedBy: string | null;
+  approvedAt: string | null;
+  postedBy: string | null;
+  postedAt: string | null;
+  rejectedBy: string | null;
+  rejectedAt: string | null;
+  rejectionReason: string | null;
+  summary: PayrollSummary;
+}
+
+// GET /payroll-periods/:id's response — the period plus its records
+// (read-only embed, same "embed related read-only data" precedent as
+// CustomerWithProjects above).
+export interface PayrollPeriodWithRecords extends PayrollPeriod {
+  records: PayrollRecord[];
+}
+
+export type PayrollRecordSourceType = "manual" | "csv_import" | "excel_import" | "external_provider";
+export type PayrollVerificationStatus = "unverified" | "verified";
+
+export interface PayrollRecordEmployee {
+  id: string;
+  name: string;
+  employeeNumber: string;
+  status: EmployeeStatus;
+}
+
+export interface PayrollRecord {
+  id: string;
+  companyId: string;
+  payrollPeriodId: string;
+  employeeId: string;
+  grossAmount: string;
+  deductionsAmount: string;
+  netAmount: string;
+  sourceType: PayrollRecordSourceType;
+  provider: string | null;
+  externalReference: string | null;
+  verificationStatus: PayrollVerificationStatus;
+  importBatchId: string | null;
+  importedAt: string | null;
+  verifiedAt: string | null;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  employee: PayrollRecordEmployee;
+}
+
 // --- MIDAD UI-03A: Commitment (Purchase Order / Subcontract) ---
 // Mirrors server/src/db/schema.ts's `commitments`/`commitment_lines` tables
 // and server/src/routes/commitments.ts's response shapes exactly (verified
