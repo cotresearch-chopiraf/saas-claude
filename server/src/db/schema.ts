@@ -3240,3 +3240,79 @@ export const projectTaskDependenciesRelations = relations(projectTaskDependencie
     relationName: "successorTask",
   }),
 }));
+
+// =============================================================================
+// MIDAD Phase C2 — Punch Lists / Site Deficiencies.
+//
+// Discovery found no existing issue/deficiency/NCR concept anywhere in this
+// schema. Two adjacent-but-distinct domains were explicitly NOT reused:
+// the flat Slice AA `tasks` checklist (no companyId column at all, a
+// free-text — not FK — assignee, and only a 3-state status with no
+// resolution/verification/closure concept) and C1's `projectTasks`
+// (schedule data — dates toward a plan — not a deficiency-tracking
+// instrument; forcing a punch item into it would blur the exact "a
+// scheduled task and a site deficiency are different domain concepts"
+// boundary this phase's own master prompt draws). `projectPunchItems`
+// below is therefore its own dedicated table.
+// =============================================================================
+
+export const punchItemPriorityEnum = pgEnum("punch_item_priority", ["low", "medium", "high", "critical"]);
+// The canonical six-state lifecycle this phase's own master prompt
+// specifies. ASSIGNED is reachable directly from a create call (when an
+// assignee is supplied) as well as from OPEN — see routes/punchItems.ts's
+// own transition table for the exact allowed-edges enforcement.
+export const punchItemStatusEnum = pgEnum("punch_item_status", ["open", "assigned", "in_progress", "resolved", "verified", "closed"]);
+
+export const projectPunchItems = pgTable(
+  "project_punch_items",
+  {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  projectId: uuid("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  description: text("description"),
+  location: text("location"),
+  priority: punchItemPriorityEnum("priority").notNull().default("medium"),
+  status: punchItemStatusEnum("status").notNull().default("open"),
+  assignedToUserId: uuid("assigned_to_user_id").references(() => users.id),
+  dueDate: date("due_date"),
+  // Resolution/verification/closure — all six columns below are
+  // server-owned: no route ever accepts them directly from a request body
+  // (see routes/punchItems.ts's own updateSchema, which has no field named
+  // any of these) — only the dedicated POST .../status transition handler
+  // ever writes them, always from req.userId!/new Date(), never from
+  // req.body.
+  resolutionDescription: text("resolution_description"),
+  resolvedAt: timestamp("resolved_at"),
+  resolvedByUserId: uuid("resolved_by_user_id").references(() => users.id),
+  verifiedAt: timestamp("verified_at"),
+  verifiedByUserId: uuid("verified_by_user_id").references(() => users.id),
+  closedAt: timestamp("closed_at"),
+  closedByUserId: uuid("closed_by_user_id").references(() => users.id),
+  createdBy: uuid("created_by")
+    .notNull()
+    .references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    // Same single leading-filter index convention documents.ts/tasks.ts/
+    // projectTasks above already use — every read path in
+    // routes/punchItems.ts filters by projectId first.
+    projectIdx: index("project_punch_items_project_idx").on(table.projectId),
+  }),
+);
+
+export const projectPunchItemsRelations = relations(projectPunchItems, ({ one }) => ({
+  company: one(companies, { fields: [projectPunchItems.companyId], references: [companies.id] }),
+  project: one(projects, { fields: [projectPunchItems.projectId], references: [projects.id] }),
+  assignedToUser: one(users, { fields: [projectPunchItems.assignedToUserId], references: [users.id], relationName: "punchItemAssignee" }),
+  creator: one(users, { fields: [projectPunchItems.createdBy], references: [users.id], relationName: "punchItemCreator" }),
+  resolvedByUser: one(users, { fields: [projectPunchItems.resolvedByUserId], references: [users.id], relationName: "punchItemResolver" }),
+  verifiedByUser: one(users, { fields: [projectPunchItems.verifiedByUserId], references: [users.id], relationName: "punchItemVerifier" }),
+  closedByUser: one(users, { fields: [projectPunchItems.closedByUserId], references: [users.id], relationName: "punchItemCloser" }),
+}));

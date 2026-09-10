@@ -39,6 +39,7 @@ import { forecastRouter } from "./routes/forecast.js";
 import { cashflowRouter } from "./routes/cashflow.js";
 import { documentsRouter } from "./routes/documents.js";
 import { projectScheduleRouter } from "./routes/projectSchedule.js";
+import { punchItemsRouter } from "./routes/punchItems.js";
 import { auditEventsRouter } from "./routes/auditEvents.js";
 import { notificationsRouter } from "./routes/notifications.js";
 import { zatcaRouter } from "./routes/zatca.js";
@@ -115,6 +116,10 @@ export function buildApp() {
   // path segment ("schedule"), not "tasks" — /api/projects/:projectId/tasks
   // already belongs to Slice AA's unrelated flat to-do-checklist table.
   app.use("/api/projects/:projectId/schedule", requireAuth, projectScheduleRouter);
+  // MIDAD Phase C2 — Punch Lists / Site Deficiencies. INTERNAL ONLY — no
+  // route in this router is ever mounted under /api/portal/*, and it never
+  // will be without a separate, explicitly scoped future phase.
+  app.use("/api/projects/:projectId/punch-items", requireAuth, punchItemsRouter);
   app.use("/api/cost-codes", requireAuth, costCodesRouter);
   app.use("/api/suppliers", requireAuth, suppliersRouter);
   app.use("/api/customers", requireAuth, customersRouter);

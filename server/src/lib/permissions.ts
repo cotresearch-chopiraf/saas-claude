@@ -204,6 +204,16 @@ export const PERMISSIONS = {
   // unrelated tables' delete gates impossible to tell apart in this
   // matrix's own audit trail of "why does this action exist".
   "projectTask.delete": ["owner"],
+
+  // --- MIDAD Phase C2 — Punch Lists / Site Deficiencies ---
+  // Same posture as projectTask.delete immediately above: creating,
+  // updating, and transitioning a punch item's status stay member-open
+  // (a site observation is operational, field-level entry, not a
+  // financial instrument — the same class every task.delete/
+  // dailyLog.delete/projectTask.delete comment in this matrix already
+  // documents). Deletion is the one irreversible action, so it gets its
+  // own owner-only permission, mirroring those three exactly.
+  "punchItem.delete": ["owner"],
 } as const satisfies Record<string, readonly Role[]>;
 
 export type PermissionAction = keyof typeof PERMISSIONS;

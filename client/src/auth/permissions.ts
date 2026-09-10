@@ -77,6 +77,11 @@ export const OWNER_ONLY_ACTIONS = [
   // dependency edge (create/update stay member-open, same task.delete/
   // dailyLog.delete precedent above).
   "projectTask.delete",
+  // Phase C2 — mirrors server/src/lib/permissions.ts's new
+  // "punchItem.delete": deleting a punch list item (create/update/status
+  // transitions stay member-open, same task.delete/dailyLog.delete/
+  // projectTask.delete precedent above).
+  "punchItem.delete",
 ] as const;
 
 export type PermissionAction = (typeof OWNER_ONLY_ACTIONS)[number];

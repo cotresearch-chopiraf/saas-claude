@@ -854,6 +854,39 @@ export interface ProjectSchedule {
   dependencies: ProjectTaskDependency[];
 }
 
+// MIDAD Phase C2 — Punch Lists / Site Deficiencies. A dedicated domain,
+// deliberately separate from ProjectTask above (schedule data toward a
+// plan) and from Task (Slice AA's flat to-do checklist) — see
+// server/src/db/schema.ts's own file comment on projectPunchItems for the
+// full discovery rationale. Mirrors
+// server/src/routes/punchItems.ts's toPunchItemResponse exactly. No
+// companyId, no joined user objects — only bare ids the UI resolves
+// against the existing GET /api/company/members.
+export type PunchItemPriority = "low" | "medium" | "high" | "critical";
+export type PunchItemStatus = "open" | "assigned" | "in_progress" | "resolved" | "verified" | "closed";
+
+export interface PunchItem {
+  id: string;
+  projectId: string;
+  title: string;
+  description: string | null;
+  location: string | null;
+  priority: PunchItemPriority;
+  status: PunchItemStatus;
+  assignedToUserId: string | null;
+  dueDate: string | null;
+  resolutionDescription: string | null;
+  resolvedAt: string | null;
+  resolvedByUserId: string | null;
+  verifiedAt: string | null;
+  verifiedByUserId: string | null;
+  closedAt: string | null;
+  closedByUserId: string | null;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type ChangeOrderStatus = "pending" | "approved" | "rejected";
 
 export interface ChangeOrder {

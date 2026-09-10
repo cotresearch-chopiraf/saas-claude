@@ -49,6 +49,7 @@ import { SubcontractIpcSection } from "./project/sections/SubcontractIpcSection"
 import { InvoicesSection } from "./project/sections/InvoicesSection";
 import { DocumentsSection } from "./project/sections/DocumentsSection";
 import { OperationsSection } from "./project/sections/OperationsSection";
+import { PunchListSection } from "./project/sections/PunchListSection";
 import { LegacyBudgetSection } from "./project/sections/LegacyBudgetSection";
 import { legacySection } from "./project/sections";
 
@@ -121,6 +122,7 @@ export default function App() {
         <Route path="cash-flow" element={<CashFlowSection />} />
         <Route path="invoices" element={<InvoicesSection />} />
         <Route path="operations" element={<OperationsSection />} />
+        <Route path="punch-list" element={<PunchListSection />} />
         <Route path="documents" element={<DocumentsSection />} />
         {/* Contextual, not part of projectSections/the sidebar nav —
             entered only from an eligible active subcontract commitment in

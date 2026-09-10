@@ -43,6 +43,11 @@ export const projectSections: ProjectSection[] = [
   { key: "cash-flow", path: "cash-flow", label: "التدفق النقدي", group: "التوقعات والتدفقات" },
   { key: "invoices", path: "invoices", label: "الفواتير", group: "الإيرادات" },
   { key: "operations", path: "operations", label: "المهام والسجل اليومي", group: "التشغيل" },
+  // MIDAD Phase C2 — Punch Lists / Site Deficiencies. Alongside "operations"
+  // in the same field-level group — a punch item is site observation/
+  // deficiency tracking, the same operational class as Tasks/Daily Log,
+  // not scheduling (C1) or financial progress (التقدم).
+  { key: "punch-list", path: "punch-list", label: "قائمة الملاحظات", group: "التشغيل" },
   { key: "documents", path: "documents", label: "المستندات", group: "المستندات" },
 ];
 
