@@ -223,15 +223,18 @@ export function PayrollPeriodDetail() {
             rows={period.records}
             rowKey={(r) => r.id}
             emptyMessage="لا توجد سجلات رواتب في هذه الفترة بعد"
-            rowActions={
-              editable
-                ? (r) => (
-                    <Can permission="payroll.manage">
-                      <RecordRowActions record={r} onChanged={load} />
-                    </Can>
-                  )
-                : undefined
-            }
+            rowActions={(r) => (
+              <div className="flex justify-end gap-3">
+                <Link to={`/payroll/${period.id}/records/${r.id}/allocate`} className="text-sm text-primary hover:underline">
+                  توزيع
+                </Link>
+                {editable && (
+                  <Can permission="payroll.manage">
+                    <RecordRowActions record={r} onChanged={load} />
+                  </Can>
+                )}
+              </div>
+            )}
           />
         </>
       )}

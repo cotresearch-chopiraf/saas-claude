@@ -3,7 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { AuthProvider } from "../../auth/AuthContext";
 import { OverviewSection } from "./OverviewSection";
-import type { BoqRevision, BudgetSummary, CashFlowResult, Contract, ForecastResult, Project } from "../../api/types";
+import type { BoqRevision, BudgetSummary, CashFlowResult, Contract, ForecastResult, Project, ProjectLaborCost } from "../../api/types";
 
 vi.mock("../context", () => ({
   useProjectContext: () => ({
@@ -182,6 +182,12 @@ const fixtureRevisionDraft: BoqRevision = {
 // number can appear regardless.
 const fixtureRevisionPublished: BoqRevision = { ...fixtureRevisionDraft, revisionNumber: 2, status: "published", publishedAt: "2026-01-05T00:00:00.000Z" };
 
+// MIDAD Phase A4 — deliberately distinct from every other fixture number
+// in this file, and deliberately NOT derivable from Budget/Forecast/Cash
+// Flow figures, so a test asserting on it proves the card renders its own
+// source data, not a recomputation of something else on the page.
+const fixtureLaborCost: ProjectLaborCost = { projectId: "p1", allocatedTotal: 88.88, allocationCount: 3, posted: false };
+
 function mockApi(
   role: "owner" | "member",
   opts: {
@@ -190,6 +196,7 @@ function mockApi(
     forecast?: ForecastResult;
     cashFlow?: CashFlowResult;
     revisions?: BoqRevision[];
+    laborCost?: ProjectLaborCost;
     failPath?: string;
   } = {},
 ) {
@@ -198,6 +205,7 @@ function mockApi(
   const forecast = opts.forecast ?? fixtureForecast;
   const cashFlow = opts.cashFlow ?? fixtureCashFlow;
   const revisions = opts.revisions ?? [fixtureRevisionDraft, fixtureRevisionPublished];
+  const laborCost = opts.laborCost ?? fixtureLaborCost;
 
   vi.mocked(apiFetch).mockImplementation((path: unknown) => {
     const p = String(path);
@@ -215,6 +223,7 @@ function mockApi(
     if (p === "/projects/p1/forecast") return Promise.resolve(forecast);
     if (p === "/projects/p1/cash-flow") return Promise.resolve(cashFlow);
     if (p === "/projects/p1/boq-revisions") return Promise.resolve(revisions);
+    if (p === "/projects/p1/labor-cost") return Promise.resolve(laborCost);
     return Promise.reject(new Error(`unexpected apiFetch call in test: ${p}`));
   });
 }
@@ -349,6 +358,19 @@ describe("<OverviewSection/> (Executive Dashboard)", () => {
     const bodyText = document.body.textContent ?? "";
     expect(bodyText).toContain(new Date(fixtureForecast.asOfDate).getFullYear().toString());
     expect(screen.getAllByText(/بتاريخ/).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("MIDAD Phase A4: Labor Cost card renders its own backend-provided total, clearly labeled as not-yet-posted, never merged into Cost Plan's totals", async () => {
+    mockApi("owner");
+    renderSection();
+    await waitFor(() => expect(screen.getByText("تكلفة العمالة الموزَّعة")).toBeInTheDocument());
+    expect(screen.getByText(/88\.88/)).toBeInTheDocument();
+    expect(screen.getByText("3")).toBeInTheDocument();
+    expect(screen.getByText("بيانات داخلية — غير مرحّلة إلى التكلفة الفعلية")).toBeInTheDocument();
+    // 88.88 must never appear inside Cost Plan's own planned/spent/remaining figures.
+    expect(fixtureBudget.totals.planned).not.toBe(88.88);
+    expect(fixtureBudget.totals.spent).not.toBe(88.88);
+    expect(fixtureBudget.totals.remaining).not.toBe(88.88);
   });
 
   it("Member read access: a member can render the full dashboard, with no mutation controls anywhere", async () => {

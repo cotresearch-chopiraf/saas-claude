@@ -321,6 +321,52 @@ export interface PayrollRecord {
   employee: PayrollRecordEmployee;
 }
 
+// --- MIDAD Phase A4: Labor Allocation ---
+// Mirrors server/src/db/schema.ts's `labor_allocations` table (added in
+// A1) and server/src/routes/laborAllocations.ts's response shape exactly.
+// amount is server-computed and frozen (netAmount * percentage / 100 at
+// save time) — never recomputed client-side. No status field exists (like
+// PayrollRecord, its editability is governed entirely by the parent
+// payroll period's status).
+export interface LaborAllocationProject {
+  id: string;
+  name: string;
+}
+
+export interface LaborAllocationCostCode {
+  id: string;
+  code: string;
+  name: string;
+}
+
+export interface LaborAllocation {
+  id: string;
+  companyId: string;
+  payrollRecordId: string;
+  projectId: string;
+  costCodeId: string | null;
+  percentage: string;
+  amount: string;
+  notes: string | null;
+  createdBy: string;
+  createdAt: string;
+  project: LaborAllocationProject;
+  costCode: LaborAllocationCostCode | null;
+}
+
+// GET /projects/:id/labor-cost's response — read-only, pre-posting
+// visibility only. `posted` is always false in A4: financial posting
+// (the point this would become part of Actual Cost) is a future,
+// separately authorized slice — see laborAllocations.ts's own file
+// comment. Never render this next to Budget/Actual/Forecast without that
+// distinction staying visible.
+export interface ProjectLaborCost {
+  projectId: string;
+  allocatedTotal: number;
+  allocationCount: number;
+  posted: false;
+}
+
 // --- MIDAD UI-03A: Commitment (Purchase Order / Subcontract) ---
 // Mirrors server/src/db/schema.ts's `commitments`/`commitment_lines` tables
 // and server/src/routes/commitments.ts's response shapes exactly (verified

@@ -27,6 +27,8 @@ import { customersRouter } from "./routes/customers.js";
 import { employeesRouter } from "./routes/employees.js";
 import { payrollPeriodsRouter } from "./routes/payrollPeriods.js";
 import { payrollRecordsRouter } from "./routes/payrollRecords.js";
+import { laborAllocationsRouter } from "./routes/laborAllocations.js";
+import { laborCostRouter } from "./routes/laborCost.js";
 import { commitmentsRouter } from "./routes/commitments.js";
 import { measurementsRouter } from "./routes/measurements.js";
 import { ipcsRouter } from "./routes/ipcs.js";
@@ -111,6 +113,11 @@ export function buildApp() {
   // project-scoped, same mount pattern as employees above.
   app.use("/api/payroll-periods", requireAuth, payrollPeriodsRouter);
   app.use("/api/payroll-records", requireAuth, payrollRecordsRouter);
+  // MIDAD Phase A4 — Labor Allocation (company-wide) + read-only project
+  // labor-cost visibility (project-scoped, same mount pattern as
+  // forecast/cash-flow above).
+  app.use("/api/labor-allocations", requireAuth, laborAllocationsRouter);
+  app.use("/api/projects/:projectId/labor-cost", requireAuth, laborCostRouter);
   app.use("/api/company", requireAuth, companyRouter);
   app.use("/api/quotes", requireAuth, quotesRouter);
   app.use("/api/public/quotes", publicQuotesRouter);

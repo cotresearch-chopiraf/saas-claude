@@ -12,6 +12,7 @@ import { getBudget } from "../../api/costPlan";
 import { getForecast } from "../../api/forecast";
 import { getCashFlow } from "../../api/cashflow";
 import { listRevisions } from "../../api/boq";
+import { getProjectLaborCost } from "../../api/laborCost";
 import { useProjectContext } from "../context";
 import type {
   BoqRevision,
@@ -22,6 +23,7 @@ import type {
   ForecastMethod,
   ForecastResult,
   Project,
+  ProjectLaborCost,
 } from "../../api/types";
 
 const statusLabel: Record<Project["status"], string> = {
@@ -56,6 +58,7 @@ interface DashboardData {
   forecast: ForecastResult;
   cashFlow: CashFlowResult;
   revisions: BoqRevision[];
+  laborCost: ProjectLaborCost;
 }
 
 // Executive Dashboard (UI-08) — a read-only rollup of the project's
@@ -76,8 +79,17 @@ export function OverviewSection() {
   function load() {
     setError(null);
     setData(null);
-    Promise.all([listContracts(projectId), getBudget(projectId), getForecast(projectId), getCashFlow(projectId), listRevisions(projectId)])
-      .then(([contracts, budget, forecast, cashFlow, revisions]) => setData({ contracts, budget, forecast, cashFlow, revisions }))
+    Promise.all([
+      listContracts(projectId),
+      getBudget(projectId),
+      getForecast(projectId),
+      getCashFlow(projectId),
+      listRevisions(projectId),
+      getProjectLaborCost(projectId),
+    ])
+      .then(([contracts, budget, forecast, cashFlow, revisions, laborCost]) =>
+        setData({ contracts, budget, forecast, cashFlow, revisions, laborCost }),
+      )
       .catch((err) => setError(err instanceof Error ? err.message : "تعذّر تحميل نظرة عامة المشروع"));
   }
   useEffect(load, [projectId]);
@@ -141,6 +153,8 @@ export function OverviewSection() {
       <ForecastCard forecast={data.forecast} />
 
       <CashFlowCard cashFlow={data.cashFlow} />
+
+      <LaborCostCard laborCost={data.laborCost} />
 
       <BoqStatusCard revision={latestRevision} />
     </div>
@@ -243,6 +257,33 @@ function CashFlowCard({ cashFlow }: { cashFlow: CashFlowResult }) {
             <Field label="الدفعة المقدَّمة" value={cashFlow.undated.advance.supported ? "—" : "غير مدعومة"} />
           </dl>
         </div>
+      </div>
+    </Card>
+  );
+}
+
+// MIDAD Phase A4 — read-only Labor Allocation visibility. Deliberately a
+// SEPARATE card from Cost Plan/Forecast/Cash Flow above, never merged
+// into their totals: routes/laborAllocations.ts never posts to
+// `expenses`, so this figure is pre-posting internal data, not yet part
+// of Actual Cost. The explicit "غير مرحّلة" (not yet posted) label and
+// the drill-down link are what keep that distinction visible to the user
+// rather than only living in a code comment.
+function LaborCostCard({ laborCost }: { laborCost: ProjectLaborCost }) {
+  return (
+    <Card className="p-5">
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="font-semibold text-stone-800">تكلفة العمالة الموزَّعة</h2>
+        <span className="text-xs text-stone-400">بيانات داخلية — غير مرحّلة إلى التكلفة الفعلية</span>
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <MetricCard label="إجمالي الموزَّع" value={formatMoney(laborCost.allocatedTotal)} />
+        <MetricCard label="عدد التوزيعات" value={String(laborCost.allocationCount)} />
+      </div>
+      <div className="mt-3 text-end">
+        <Link to="/payroll" className="text-sm text-primary hover:underline">
+          عرض تفاصيل توزيع الرواتب
+        </Link>
       </div>
     </Card>
   );

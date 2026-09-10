@@ -16,6 +16,7 @@ import { CustomerDetail } from "./pages/CustomerDetail";
 import { Employees } from "./pages/Employees";
 import { Payroll } from "./pages/Payroll";
 import { PayrollPeriodDetail } from "./pages/PayrollPeriodDetail";
+import { LaborAllocation } from "./pages/LaborAllocation";
 import { Team } from "./pages/Team";
 import { Settings } from "./pages/Settings";
 import { Compliance } from "./pages/Compliance";
@@ -171,6 +172,14 @@ export default function App() {
         element={
           <ProtectedRoute>
             <PayrollPeriodDetail />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/payroll/:periodId/records/:recordId/allocate"
+        element={
+          <ProtectedRoute>
+            <LaborAllocation />
           </ProtectedRoute>
         }
       />
