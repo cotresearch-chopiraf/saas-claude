@@ -64,9 +64,14 @@ export const OWNER_ONLY_ACTIONS = [
   // Phase A3 — mirrors server/src/lib/permissions.ts's pre-existing
   // "payroll.manage" (added in A1, first consumed here): payroll period
   // create/update/submit/approve/reject and payroll record create/update.
-  // "payroll.post" is deliberately NOT mirrored — no A3 route uses it (see
-  // payrollPeriods.ts's own header comment on why "posted" is out of scope).
   "payroll.manage",
+  // Phase A5 — mirrors server/src/lib/permissions.ts's pre-existing
+  // "payroll.post" (added in A1, first consumed here): the one
+  // irreversible, money-moving action (POST /payroll-periods/:id/post and
+  // POST /labor-cost-postings/:id/reverse) — deliberately separate from
+  // "payroll.manage" above, same reason "invoice.markPaid" is separate
+  // from invoice creation.
+  "payroll.post",
 ] as const;
 
 export type PermissionAction = (typeof OWNER_ONLY_ACTIONS)[number];

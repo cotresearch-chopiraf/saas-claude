@@ -20,12 +20,12 @@ import { EDITABLE_PERIOD_STATUSES } from "./payrollPeriods.js";
 // for the precedent this mirrors.
 //
 // ABSOLUTE BOUNDARY: this file NEVER writes to `expenses` or
-// `labor_cost_postings`. A1's own comment on laborCostPostings says
-// plainly: "No route in this slice writes here yet (A5)" — financial
-// posting (the point payroll becomes Actual Cost) is explicitly reserved
-// for a future, separately authorized slice. Every allocation created
-// here is pre-posting, internal data — see routes/laborCost.ts for the
-// read-only, clearly-labeled "not yet posted" visibility this enables.
+// `labor_cost_postings` — financial posting (the point payroll becomes
+// Actual Cost) lives entirely in routes/payrollPeriods.ts's post() and
+// routes/laborCostPostings.ts's reverse() (Phase A5). Every allocation
+// created here is pre-posting, internal data until one of those routes
+// posts it — see routes/laborCost.ts for the read-only, clearly-labeled
+// "not yet posted" visibility this enables.
 //
 // Locking: an allocation determines WHICH project/cost-code bears a
 // payroll cost — reassigning that after a period is submitted/approved
@@ -309,11 +309,15 @@ laborAllocationsRouter.patch(
   },
 );
 
-// Hard delete is safe here specifically because A4 never posts to
-// `expenses` — an allocation carries no financial consequence yet (see
-// this file's own header comment). Still locked-period-protected: a
-// correction on an already-reviewed payroll must go through reject/
-// resubmit, not a silent deletion.
+// Hard delete is safe here specifically because this file never posts to
+// `expenses` (see this file's own header comment) — an allocation still
+// carries no financial consequence at the moment it can still be deleted.
+// The lock below already means this route can never be reached for a
+// posted allocation anyway: EDITABLE_PERIOD_STATUSES excludes both
+// "approved" and "posted", so an allocation becomes immutable the moment
+// its period is approved, well before A5's post() can ever run against it.
+// A correction on an already-posted allocation goes through the dedicated
+// reversal operation in routes/laborCostPostings.ts instead, never here.
 laborAllocationsRouter.delete(
   "/:id",
   requirePermission("payroll.manage"),

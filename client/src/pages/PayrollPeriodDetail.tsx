@@ -9,6 +9,8 @@ import { MetricCard } from "../ui/MetricCard";
 import { FinancialTable, type FinancialColumn } from "../ui/FinancialTable";
 import { ErrorState } from "../ui/ErrorState";
 import { Skeleton } from "../ui/Skeleton";
+import { Modal } from "../ui/Modal";
+import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { Can } from "../auth/Can";
 import { formatDate, formatMoney } from "../lib/format";
 import {
@@ -16,11 +18,21 @@ import {
   submitPayrollPeriod,
   approvePayrollPeriod,
   rejectPayrollPeriod,
+  postPayrollPeriod,
 } from "../api/payrollPeriods";
 import { createPayrollRecord, updatePayrollRecord } from "../api/payrollRecords";
+import { listLaborAllocations } from "../api/laborAllocations";
+import { listLaborCostPostings, reverseLaborCostPosting } from "../api/laborCostPostings";
 import { listEmployees } from "../api/employees";
 import { ApiError } from "../api/client";
-import type { Employee, PayrollPeriodStatus, PayrollPeriodWithRecords, PayrollRecord } from "../api/types";
+import type {
+  Employee,
+  LaborAllocation,
+  LaborCostPosting,
+  PayrollPeriodStatus,
+  PayrollPeriodWithRecords,
+  PayrollRecord,
+} from "../api/types";
 
 const statusLabel: Record<PayrollPeriodStatus, string> = {
   draft: "مسودة",
@@ -58,6 +70,7 @@ export function PayrollPeriodDetail() {
   const [showAdd, setShowAdd] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
+  const [postings, setPostings] = useState<LaborCostPosting[] | null>(null);
 
   function load() {
     if (!id) return;
@@ -73,6 +86,16 @@ export function PayrollPeriodDetail() {
       .then(setEmployees)
       .catch(() => setEmployees([]));
   }, []);
+
+  function loadPostings() {
+    if (!id) return;
+    listLaborCostPostings({ payrollPeriodId: id })
+      .then(setPostings)
+      .catch(() => setPostings([]));
+  }
+  useEffect(() => {
+    if (period?.status === "posted") loadPostings();
+  }, [id, period?.status]);
 
   if (!id) return null;
 
@@ -122,6 +145,21 @@ export function PayrollPeriodDetail() {
     }
   }
 
+  async function onPostPeriod() {
+    if (!period) return;
+    setActionBusy(true);
+    setActionError(null);
+    try {
+      await postPayrollPeriod(period.id);
+      load();
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : "تعذّر ترحيل تكلفة العمالة");
+      throw err;
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
   const columns: FinancialColumn<PayrollRecord>[] = [
     { key: "employee", header: "الموظف", render: (r) => r.employee.name },
     { key: "employeeNumber", header: "الرقم", render: (r) => r.employee.employeeNumber },
@@ -166,6 +204,11 @@ export function PayrollPeriodDetail() {
                     </>
                   ) : null}
                 </Can>
+                {period.status === "approved" && (
+                  <Can permission="payroll.post">
+                    <PostAction period={period} busy={actionBusy} onPost={onPostPeriod} />
+                  </Can>
+                )}
               </div>
             }
           />
@@ -194,6 +237,12 @@ export function PayrollPeriodDetail() {
             <MetricCard label="إجمالي الخصومات" value={formatMoney(period.summary.totalDeductions)} />
             <MetricCard label="صافي الرواتب" value={formatMoney(period.summary.totalNet)} tone="success" />
           </div>
+
+          {period.status === "posted" && (
+            <div className="mb-6">
+              <PostedSummary period={period} postings={postings} onReversed={loadPostings} />
+            </div>
+          )}
 
           {editable && (
             <Can permission="payroll.manage">
@@ -411,5 +460,195 @@ function RecordRowActions({ record, onChanged }: { record: PayrollRecord; onChan
         تعديل
       </button>
     </div>
+  );
+}
+
+// MIDAD Phase A5 — the "ترحيل تكلفة العمالة" action. Only ever shown for
+// an "approved" period to a "payroll.post" holder (both re-checked
+// server-side regardless). The pre-confirmation preview is fetched fresh
+// when the modal opens and sums the SAME `laborAllocations.amount` the
+// server will post — client-side arithmetic for display only, exactly
+// LaborAllocation.tsx's own established preview precedent, never the
+// number actually recorded (that always comes back from the POST
+// response after load() re-fetches the period).
+function PostAction({
+  period,
+  busy,
+  onPost,
+}: {
+  period: PayrollPeriodWithRecords;
+  busy: boolean;
+  onPost: () => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [allocations, setAllocations] = useState<LaborAllocation[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [confirmError, setConfirmError] = useState<string | null>(null);
+
+  function openPreview() {
+    setOpen(true);
+    setLoadError(null);
+    setAllocations(null);
+    listLaborAllocations({ payrollPeriodId: period.id })
+      .then(setAllocations)
+      .catch((err) => setLoadError(err instanceof ApiError ? err.message : "تعذّر تحميل بيانات التوزيع"));
+  }
+
+  const totalToPost = allocations ? allocations.reduce((sum, a) => sum + Number(a.amount), 0) : 0;
+  const unallocated = allocations ? Math.max(period.summary.totalNet - totalToPost, 0) : 0;
+  const projectNames = allocations ? Array.from(new Set(allocations.map((a) => a.project.name))) : [];
+
+  async function onConfirm() {
+    setConfirmError(null);
+    try {
+      await onPost();
+      setOpen(false);
+    } catch (err) {
+      setConfirmError(err instanceof ApiError ? err.message : "تعذّر ترحيل تكلفة العمالة");
+    }
+  }
+
+  return (
+    <>
+      <Button size="sm" onClick={openPreview} disabled={busy}>
+        ترحيل تكلفة العمالة
+      </Button>
+      <Modal open={open} onClose={() => setOpen(false)} title="تأكيد ترحيل تكلفة العمالة" className="mx-4 w-full max-w-lg">
+        {loadError && <ErrorState message={loadError} />}
+        {!loadError && !allocations && <Skeleton rows={3} />}
+        {allocations && (
+          <div className="space-y-4">
+            <p className="text-sm text-stone-600">
+              سيؤدي هذا إلى إنشاء مصروفات فعلية على المشاريع المتأثرة، وستدخل ضمن التكلفة الفعلية لهذه المشاريع فوراً. لا يمكن
+              التراجع عن هذا الإجراء إلا عبر عملية عكس منفصلة لكل توزيع على حدة.
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <MetricCard label="عدد التوزيعات" value={String(allocations.length)} />
+              <MetricCard label="إجمالي المبلغ المرحَّل" value={formatMoney(totalToPost)} tone="success" />
+              <MetricCard label="المبلغ غير الموزَّع" value={formatMoney(unallocated)} />
+              <MetricCard label="عدد المشاريع المتأثرة" value={String(projectNames.length)} />
+            </div>
+            {projectNames.length > 0 && (
+              <div className="text-sm text-stone-600">
+                <span className="font-medium text-stone-700">المشاريع: </span>
+                {projectNames.join("، ")}
+              </div>
+            )}
+            {allocations.length === 0 && (
+              <p className="text-sm text-danger-600">لا يوجد أي توزيع تكلفة عمالة لترحيله في هذه الفترة.</p>
+            )}
+            {confirmError && <ErrorState message={confirmError} />}
+            <div className="flex justify-end gap-2">
+              <Button variant="secondary" size="sm" onClick={() => setOpen(false)} disabled={busy}>
+                إلغاء
+              </Button>
+              <Button size="sm" onClick={onConfirm} disabled={busy || allocations.length === 0}>
+                {busy ? "جارٍ الترحيل..." : "تأكيد الترحيل"}
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
+    </>
+  );
+}
+
+// MIDAD Phase A5 — read-only post-posting summary + drill-down, shown once
+// a period reaches "posted". `totalPosted` is the NET figure (posting rows
+// minus reversal rows, both taken from each row's own linked Expense
+// amount — a reversal's Expense is already stored negative), never
+// recomputed from labor allocations, since a reversed allocation must not
+// silently drop back out of view.
+function PostedSummary({
+  period,
+  postings,
+  onReversed,
+}: {
+  period: PayrollPeriodWithRecords;
+  postings: LaborCostPosting[] | null;
+  onReversed: () => void;
+}) {
+  const [reverseTarget, setReverseTarget] = useState<LaborCostPosting | null>(null);
+  const [reverseBusy, setReverseBusy] = useState(false);
+  const [reverseError, setReverseError] = useState<string | null>(null);
+
+  const reversedPostingIds = new Set((postings ?? []).filter((p) => p.kind === "reversal").map((p) => p.reversalOfPostingId));
+  const totalPosted = (postings ?? []).reduce((sum, p) => sum + Number(p.expense?.amount ?? 0), 0);
+
+  async function onConfirmReverse() {
+    if (!reverseTarget) return;
+    setReverseBusy(true);
+    setReverseError(null);
+    try {
+      await reverseLaborCostPosting(reverseTarget.id);
+      setReverseTarget(null);
+      onReversed();
+    } catch (err) {
+      setReverseError(err instanceof ApiError ? err.message : "تعذّر عكس الترحيل");
+    } finally {
+      setReverseBusy(false);
+    }
+  }
+
+  const columns: FinancialColumn<LaborCostPosting>[] = [
+    { key: "project", header: "المشروع", render: (p) => p.laborAllocation?.project.name ?? "—" },
+    { key: "costCode", header: "بند التكلفة", render: (p) => p.laborAllocation?.costCode?.code ?? "—" },
+    {
+      key: "amount",
+      header: "المبلغ",
+      render: (p) => formatMoney(p.expense?.amount ?? "0"),
+    },
+    { key: "kind", header: "النوع", render: (p) => (p.kind === "posting" ? "ترحيل" : "عكس") },
+    { key: "date", header: "التاريخ", render: (p) => formatDate(p.postedAt) },
+  ];
+
+  return (
+    <Card className="p-5">
+      <h2 className="mb-3 font-semibold text-stone-800">ترحيل تكلفة العمالة</h2>
+      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <MetricCard label="الحالة" value="مرحّلة" tone="success" />
+        <MetricCard label="تاريخ الترحيل" value={period.postedAt ? formatDate(period.postedAt) : "—"} />
+        <MetricCard label="إجمالي المبلغ المرحّل" value={formatMoney(totalPosted)} tone="success" />
+      </div>
+
+      {reverseError && (
+        <div className="mb-3">
+          <ErrorState message={reverseError} />
+        </div>
+      )}
+
+      {!postings && <Skeleton rows={3} />}
+      {postings && (
+        <FinancialTable
+          columns={columns}
+          rows={postings}
+          rowKey={(p) => p.id}
+          emptyMessage="لا يوجد سجل ترحيل لعرضه"
+          rowActions={(p) =>
+            p.kind === "posting" && !reversedPostingIds.has(p.id) ? (
+              <Can permission="payroll.post">
+                <button
+                  type="button"
+                  onClick={() => setReverseTarget(p)}
+                  className="text-sm text-danger-600 hover:underline"
+                >
+                  عكس
+                </button>
+              </Can>
+            ) : null
+          }
+        />
+      )}
+
+      <ConfirmDialog
+        open={reverseTarget !== null}
+        title="تأكيد عكس الترحيل"
+        message="سيؤدي هذا إلى إنشاء قيد مصروف مقابل بمبلغ سالب يلغي الأثر المالي لهذا الترحيل. لن يتم حذف أو تعديل السجل الأصلي — يبقى محفوظاً في السجل المالي بالكامل."
+        confirmLabel={reverseBusy ? "جارٍ العكس..." : "تأكيد العكس"}
+        destructive
+        onConfirm={onConfirmReverse}
+        onCancel={() => setReverseTarget(null)}
+      />
+    </Card>
   );
 }

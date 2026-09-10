@@ -1,0 +1,2 @@
+CREATE UNIQUE INDEX "labor_cost_postings_one_posting_per_allocation" ON "labor_cost_postings" USING btree ("labor_allocation_id") WHERE "labor_cost_postings"."kind" = 'posting';--> statement-breakpoint
+CREATE UNIQUE INDEX "labor_cost_postings_one_reversal_per_posting" ON "labor_cost_postings" USING btree ("reversal_of_posting_id") WHERE "labor_cost_postings"."kind" = 'reversal';

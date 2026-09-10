@@ -247,10 +247,9 @@ export interface Employee {
 // --- MIDAD Phase A3: Payroll Period + Payroll Record ---
 // Mirrors server/src/db/schema.ts's `payroll_periods`/`payroll_records`
 // tables (added in A1) and server/src/routes/payrollPeriods.ts /
-// payrollRecords.ts's response shapes exactly. "posted" is a real status
-// value in the backend enum but no route in A3 ever produces it — that
-// transition is reserved for a future financial-posting slice; the UI
-// never shows an action that reaches it.
+// payrollRecords.ts's response shapes exactly. "posted" is reached only
+// through POST /payroll-periods/:id/post (Phase A5, requires
+// `payroll.post`) — the one point a period becomes financial truth.
 export type PayrollPeriodStatus = "draft" | "submitted" | "approved" | "posted" | "rejected";
 
 export interface PayrollSummary {
@@ -355,16 +354,55 @@ export interface LaborAllocation {
 }
 
 // GET /projects/:id/labor-cost's response — read-only, pre-posting
-// visibility only. `posted` is always false in A4: financial posting
-// (the point this would become part of Actual Cost) is a future,
-// separately authorized slice — see laborAllocations.ts's own file
-// comment. Never render this next to Budget/Actual/Forecast without that
-// distinction staying visible.
+// visibility only. `posted` is always false: this total is the RAW
+// allocated sum regardless of whether any of it has since been posted —
+// see routes/laborCost.ts's own comment. Once an allocation is posted,
+// its real financial contribution lives in the project's own Actual
+// Cost/Expenses (driven by the Expense A5 created), not here — this card
+// is known to still label already-posted amounts as "غير مرحّلة" (not yet
+// posted); see the A5 implementation report's Known Limitations.
 export interface ProjectLaborCost {
   projectId: string;
   allocatedTotal: number;
   allocationCount: number;
   posted: false;
+}
+
+// --- MIDAD Phase A5: Labor Cost Posting ---
+// Mirrors server/src/db/schema.ts's `labor_cost_postings` table and
+// server/src/routes/laborCostPostings.ts's response shape exactly.
+// `kind: "posting"` rows are the actual financial mutation (one per
+// posted Labor Allocation, each linked to the real `expenses` row it
+// created); `kind: "reversal"` rows are the only way that gets undone —
+// always additive, never a delete/edit of the original.
+export type LaborCostPostingKind = "posting" | "reversal";
+
+export interface LaborCostPostingExpense {
+  id: string;
+  amount: string;
+  expenseDate: string;
+  description: string;
+}
+
+export interface LaborCostPosting {
+  id: string;
+  companyId: string;
+  payrollPeriodId: string;
+  laborAllocationId: string;
+  expenseId: string;
+  kind: LaborCostPostingKind;
+  reversalOfPostingId: string | null;
+  postedBy: string;
+  postedAt: string;
+  expense?: LaborCostPostingExpense;
+  laborAllocation?: LaborAllocation;
+}
+
+// POST /payroll-periods/:id/post's response.
+export interface PayrollPeriodPostResult {
+  period: PayrollPeriod;
+  postings: LaborCostPosting[];
+  totalPosted: number;
 }
 
 // --- MIDAD UI-03A: Commitment (Purchase Order / Subcontract) ---

@@ -2762,17 +2762,17 @@ export const laborAllocations = pgTable(
 // plus a NEW laborCostPostings row with kind="reversal" pointing back at
 // the posting it reverses — the same "amend by adding, never by
 // overwriting" discipline commitments.ts's amend() already uses for its
-// own financial history. No route in this slice writes here yet (A5).
+// own financial history. Written by POST /api/payroll-periods/:id/post and
+// POST /api/labor-cost-postings/:id/reverse (A5).
 //
-// Known follow-up for the slice that starts writing here: expenses has an
-// existing DELETE route (routes/budget.ts) with no knowledge of this
-// table; expenseId below has no onDelete action (defaults to Postgres
-// "no action"/restrict), so attempting to delete a labor-posted expense
-// through that legacy route will correctly fail at the DB level rather
-// than silently orphaning a posting — but it will surface as a raw
-// constraint-violation error until that route is taught to recognize and
-// reject this case with a clean message. Not fixed here since no code
-// path can create such a row yet.
+// Double-posting/double-reversal are also blocked at the DB level (not
+// just in the route's own transaction check) via the two partial unique
+// indexes below — one posting-kind row per allocation, one reversal-kind
+// row per posting reversed.
+//
+// The `expenses` DELETE route (routes/budget.ts) is taught to recognize a
+// labor-posted expense and reject deletion with a clean application error
+// before the FK below can raise a raw constraint-violation error.
 export const laborCostPostingKindEnum = pgEnum("labor_cost_posting_kind", ["posting", "reversal"]);
 
 export const laborCostPostings = pgTable(
@@ -2802,6 +2802,15 @@ export const laborCostPostings = pgTable(
     companyIdx: index("labor_cost_postings_company_idx").on(table.companyId),
     periodIdx: index("labor_cost_postings_period_idx").on(table.payrollPeriodId),
     allocationIdx: index("labor_cost_postings_allocation_idx").on(table.laborAllocationId),
+    // Mirrors company_tax_overrides_one_open_active's partial-unique-index
+    // pattern: DB-level defense-in-depth alongside the transaction lock in
+    // the posting/reversal routes, not a substitute for it.
+    onePostingPerAllocation: uniqueIndex("labor_cost_postings_one_posting_per_allocation")
+      .on(table.laborAllocationId)
+      .where(sql`${table.kind} = 'posting'`),
+    oneReversalPerPosting: uniqueIndex("labor_cost_postings_one_reversal_per_posting")
+      .on(table.reversalOfPostingId)
+      .where(sql`${table.kind} = 'reversal'`),
   }),
 );
 

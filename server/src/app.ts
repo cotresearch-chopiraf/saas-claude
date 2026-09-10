@@ -28,6 +28,7 @@ import { employeesRouter } from "./routes/employees.js";
 import { payrollPeriodsRouter } from "./routes/payrollPeriods.js";
 import { payrollRecordsRouter } from "./routes/payrollRecords.js";
 import { laborAllocationsRouter } from "./routes/laborAllocations.js";
+import { laborCostPostingsRouter } from "./routes/laborCostPostings.js";
 import { laborCostRouter } from "./routes/laborCost.js";
 import { commitmentsRouter } from "./routes/commitments.js";
 import { measurementsRouter } from "./routes/measurements.js";
@@ -117,6 +118,9 @@ export function buildApp() {
   // labor-cost visibility (project-scoped, same mount pattern as
   // forecast/cash-flow above).
   app.use("/api/labor-allocations", requireAuth, laborAllocationsRouter);
+  // MIDAD Phase A5 — Financial posting of labor allocations + reversal.
+  // Company-wide, same mount pattern as labor-allocations above.
+  app.use("/api/labor-cost-postings", requireAuth, laborCostPostingsRouter);
   app.use("/api/projects/:projectId/labor-cost", requireAuth, laborCostRouter);
   app.use("/api/company", requireAuth, companyRouter);
   app.use("/api/quotes", requireAuth, quotesRouter);

@@ -1,10 +1,10 @@
 import { apiFetch } from "./client";
-import type { PayrollPeriod, PayrollPeriodWithRecords } from "./types";
+import type { PayrollPeriod, PayrollPeriodPostResult, PayrollPeriodWithRecords } from "./types";
 
 // Thin typed wrappers over the existing, verified Payroll Period API
 // (server/src/routes/payrollPeriods.ts) — no calculation, no
 // authorization logic. Company-wide (not project-scoped). No delete
-// endpoint exists; lifecycle is submit/approve/reject only.
+// endpoint exists; lifecycle is submit/approve/post/reject only.
 
 export function listPayrollPeriods(): Promise<PayrollPeriod[]> {
   return apiFetch<PayrollPeriod[]>("/payroll-periods");
@@ -55,4 +55,13 @@ export function rejectPayrollPeriod(id: string, reason: string): Promise<Payroll
     method: "POST",
     body: JSON.stringify({ reason }),
   });
+}
+
+// MIDAD Phase A5 — financial posting. Requires `payroll.post`, not
+// `payroll.manage` (see auth/permissions.ts's OWNER_ONLY_ACTIONS). Creates
+// real `expenses` rows server-side; this call has no undo — see
+// reverseLaborCostPosting in api/laborCostPostings.ts for the only
+// controlled correction path.
+export function postPayrollPeriod(id: string): Promise<PayrollPeriodPostResult> {
+  return apiFetch<PayrollPeriodPostResult>(`/payroll-periods/${id}/post`, { method: "POST" });
 }

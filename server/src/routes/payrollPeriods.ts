@@ -1,24 +1,28 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, inArray, ne } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { payrollPeriods, payrollRecords } from "../db/schema.js";
+import { expenses, laborAllocations, laborCostPostings, payrollPeriods, payrollRecords } from "../db/schema.js";
 import { requirePermission } from "../lib/permissions.js";
 import { recordAuditEvent } from "../lib/audit.js";
 import { pgErrorInfo } from "../lib/pgError.js";
-import { sumMoney } from "../lib/money.js";
+import { roundMoney, sumMoney } from "../lib/money.js";
 
 // MIDAD Phase A3 — Payroll Periods. Company-wide (not project-scoped —
 // project labor allocation is a later slice), reusing the A1
 // `payroll_periods` table exactly as designed (no schema change needed).
 //
 // Status lifecycle reuses A1's real enum verbatim: draft -> submitted ->
-// approved | rejected. This file NEVER writes "posted" — per A1's own
-// schema comment, that is the point a payroll period "actually becomes
-// financial truth (creates expenses rows via laborCostPostings)", which
-// is explicitly out of scope for A3 (see docs on the financial-truth
-// boundary: expenses.costCodeId remains the ONLY integration point, and
-// this slice never touches expenses at all).
+// approved -> posted | rejected. Everything through approve()/reject()
+// below is pure editorial review — no financial claim happens until
+// post() (Phase A5), the one point a payroll period "actually becomes
+// financial truth" by creating real `expenses` rows via
+// `laborCostPostings` (see that table's own schema comment). Once
+// "posted", a period never returns to "approved" and is never re-editable
+// through this file's own PATCH — EDITABLE_PERIOD_STATUSES deliberately
+// stays ["draft", "rejected"] (it already excluded "approved", so no
+// change was needed to also exclude "posted"); corrections happen only
+// through the dedicated reversal operation in routes/laborCostPostings.ts.
 export const payrollPeriodsRouter = Router();
 
 // Editable only in draft/rejected — same pattern and reasoning as
@@ -381,5 +385,167 @@ payrollPeriodsRouter.post(
 
     if (!rejected) return res.status(409).json({ error: "لا يمكن رفض فترة ليست بانتظار الاعتماد" });
     res.json(rejected);
+  },
+);
+
+// approved -> posted. The one irreversible, money-moving action in this
+// domain — gated by "payroll.post", not "payroll.manage" (see
+// lib/permissions.ts's Phase A comment). Creates one real `expenses` row
+// per not-yet-posted labor allocation under this period and links each
+// through a `labor_cost_postings` row with kind="posting" — this is the
+// ENTIRE financial mutation; Actual Cost/Forecast/Cash Flow pick it up
+// automatically through their existing SUM(expenses.amount) pipeline,
+// unchanged.
+//
+// Posting amount is `laborAllocations.amount` taken verbatim — the frozen
+// value A4 computed once at allocation-time — never recomputed from
+// percentage here.
+//
+// Partial allocation is valid and expected: only allocated percentage
+// becomes an Expense; whatever percentage of a payroll record was never
+// allocated to a project simply stays unposted (never auto-allocated,
+// never silently dropped — the API response's `totalPosted` vs. the
+// period's own totalNet lets the UI show the gap honestly).
+//
+// Expense date: uses the period's own `payrollDate` when the company set
+// one (the authoritative pay-date), falling back to `periodEnd` — both
+// already-existing fields, never today's browser/server date, which would
+// be an arbitrary and non-reproducible choice for a financial record.
+//
+// Concurrency/double-posting: the SELECT ... FOR UPDATE below on the
+// period row serializes concurrent POSTs of the same period exactly like
+// submit()/approve() above; the atomic `status = 'approved'` WHERE guard
+// on the final UPDATE is the same belt-and-suspenders pattern approve()
+// itself uses. The two partial unique indexes on labor_cost_postings
+// (schema.ts) are the DB-level backstop under that lock, not a substitute
+// for it.
+payrollPeriodsRouter.post(
+  "/:id/post",
+  requirePermission("payroll.post"),
+  async (req: Request<{ id: string }>, res: Response) => {
+    const existing = await findOwnedPeriod(req.companyId!, req.params.id);
+    if (!existing) return res.status(404).json({ error: "فترة الرواتب غير موجودة" });
+
+    const result = await db.transaction(async (tx) => {
+      const [locked] = await tx.select().from(payrollPeriods).where(eq(payrollPeriods.id, existing.id)).for("update");
+      if (!locked || locked.status !== "approved") return { outcome: "conflict" as const };
+
+      const records = await tx
+        .select({ id: payrollRecords.id })
+        .from(payrollRecords)
+        .where(eq(payrollRecords.payrollPeriodId, locked.id));
+      const recordIds = records.map((r) => r.id);
+
+      const allocations = recordIds.length
+        ? await tx.select().from(laborAllocations).where(inArray(laborAllocations.payrollRecordId, recordIds))
+        : [];
+      if (allocations.length === 0) return { outcome: "noAllocations" as const };
+
+      // Defensive dedup against anything already carrying a posting-kind
+      // row for this allocation. In today's lifecycle this set is always
+      // empty (a period is locked to further allocation edits the moment
+      // it is approved, and post() only ever runs once per period since
+      // status immediately leaves "approved"), but this is the explicit
+      // "identify allocations not already posted" step the posting
+      // algorithm calls for, kept as real defense-in-depth alongside the
+      // DB-level partial unique index rather than relying on the period
+      // lock alone.
+      const already = await tx
+        .select({ laborAllocationId: laborCostPostings.laborAllocationId })
+        .from(laborCostPostings)
+        .where(
+          and(
+            inArray(
+              laborCostPostings.laborAllocationId,
+              allocations.map((a) => a.id),
+            ),
+            eq(laborCostPostings.kind, "posting"),
+          ),
+        );
+      const alreadyPostedIds = new Set(already.map((p) => p.laborAllocationId));
+      const toPost = allocations.filter((a) => !alreadyPostedIds.has(a.id));
+      if (toPost.length === 0) return { outcome: "noAllocations" as const };
+
+      const expenseDate = locked.payrollDate ?? locked.periodEnd;
+      const description = `ترحيل تكلفة عمالة — فترة رواتب ${locked.periodStart} إلى ${locked.periodEnd}`;
+
+      const createdPostings: (typeof laborCostPostings.$inferSelect)[] = [];
+      const postedAmounts: number[] = [];
+
+      for (const allocation of toPost) {
+        const [expense] = await tx
+          .insert(expenses)
+          .values({
+            projectId: allocation.projectId,
+            costCodeId: allocation.costCodeId,
+            description,
+            amount: allocation.amount,
+            expenseDate,
+          })
+          .returning();
+
+        const [posting] = await tx
+          .insert(laborCostPostings)
+          .values({
+            companyId: req.companyId!,
+            payrollPeriodId: locked.id,
+            laborAllocationId: allocation.id,
+            expenseId: expense.id,
+            kind: "posting",
+            postedBy: req.userId!,
+          })
+          .returning();
+
+        createdPostings.push(posting);
+        postedAmounts.push(Number(allocation.amount));
+
+        await recordAuditEvent(tx, {
+          companyId: req.companyId!,
+          actorUserId: req.userId!,
+          action: "laborCostPosting.created",
+          entityType: "labor_cost_posting",
+          entityId: posting.id,
+          afterValue: posting,
+          metadata: {
+            payrollPeriodId: locked.id,
+            laborAllocationId: allocation.id,
+            projectId: allocation.projectId,
+            costCodeId: allocation.costCodeId,
+            expenseId: expense.id,
+            amount: allocation.amount,
+          },
+        });
+      }
+
+      const totalPosted = sumMoney(postedAmounts);
+
+      const [updatedPeriod] = await tx
+        .update(payrollPeriods)
+        .set({ status: "posted", postedBy: req.userId!, postedAt: new Date(), updatedAt: new Date() })
+        .where(and(eq(payrollPeriods.id, locked.id), eq(payrollPeriods.status, "approved")))
+        .returning();
+      if (!updatedPeriod) return { outcome: "conflict" as const };
+
+      await recordAuditEvent(tx, {
+        companyId: req.companyId!,
+        actorUserId: req.userId!,
+        action: "payrollPeriod.posted",
+        entityType: "payroll_period",
+        entityId: locked.id,
+        beforeValue: { status: "approved" },
+        afterValue: { status: "posted" },
+        metadata: { allocationsPosted: toPost.length, totalAmountPosted: totalPosted },
+      });
+
+      return { outcome: "ok" as const, period: updatedPeriod, postings: createdPostings, totalPosted };
+    });
+
+    if (result.outcome === "conflict") {
+      return res.status(409).json({ error: "لا يمكن ترحيل فترة ليست معتمدة، أو تم ترحيلها بالفعل" });
+    }
+    if (result.outcome === "noAllocations") {
+      return res.status(400).json({ error: "لا يوجد توزيع تكلفة عمالة غير مرحّل لترحيله في هذه الفترة" });
+    }
+    res.json({ period: result.period, postings: result.postings, totalPosted: result.totalPosted });
   },
 );

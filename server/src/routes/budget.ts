@@ -6,6 +6,7 @@ import { budgetItems, budgetRevisions, expenses, projects } from "../db/schema.j
 import { sumMoney, roundMoney } from "../lib/money.js";
 import { recordAuditEvent } from "../lib/audit.js";
 import { requirePermission } from "../lib/permissions.js";
+import { pgErrorInfo } from "../lib/pgError.js";
 
 type ProjectParams = { projectId: string };
 type ItemParams = ProjectParams & { itemId: string };
@@ -312,25 +313,40 @@ budgetRouter.post("/expenses", requirePermission("budget.manage"), async (req: R
 // No PATCH /expenses/:expenseId route exists in this codebase — an
 // expense is create-or-delete only, so "updated" is not part of the
 // actual mutation surface and has no audit event to add here.
+//
+// A labor-posted expense (one with a labor_cost_postings row pointing at
+// it — see that table's schema comment) is never deletable through this
+// route: `expenseId` there has no onDelete action, so Postgres itself
+// would refuse the delete (23503 foreign_key_violation) — this just
+// converts that into a clean application error before it happens, rather
+// than exposing the raw constraint error. Normal (non-labor-posted)
+// expense deletion is completely unchanged.
 budgetRouter.delete("/expenses/:expenseId", requirePermission("budget.manage"), async (req: Request<ExpenseParams>, res: Response) => {
   const existing = await db.query.expenses.findFirst({
     where: and(eq(expenses.id, req.params.expenseId), eq(expenses.projectId, req.params.projectId)),
   });
   if (!existing) return res.status(404).json({ error: "المصروف غير موجود" });
 
-  await db.transaction(async (tx) => {
-    await tx.delete(expenses).where(eq(expenses.id, req.params.expenseId));
+  try {
+    await db.transaction(async (tx) => {
+      await tx.delete(expenses).where(eq(expenses.id, req.params.expenseId));
 
-    await recordAuditEvent(tx, {
-      companyId: req.companyId!,
-      actorUserId: req.userId!,
-      action: "expense.deleted",
-      entityType: "expense",
-      entityId: existing.id,
-      beforeValue: existing,
-      metadata: { projectId: req.params.projectId },
+      await recordAuditEvent(tx, {
+        companyId: req.companyId!,
+        actorUserId: req.userId!,
+        action: "expense.deleted",
+        entityType: "expense",
+        entityId: existing.id,
+        beforeValue: existing,
+        metadata: { projectId: req.params.projectId },
+      });
     });
-  });
+  } catch (err) {
+    if (pgErrorInfo(err).code === "23503") {
+      return res.status(409).json({ error: "لا يمكن حذف مصروف ناتج عن ترحيل تكلفة عمالة — استخدم عملية العكس بدلاً من ذلك" });
+    }
+    throw err;
+  }
 
   res.status(204).end();
 });
