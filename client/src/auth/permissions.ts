@@ -72,6 +72,11 @@ export const OWNER_ONLY_ACTIONS = [
   // "payroll.manage" above, same reason "invoice.markPaid" is separate
   // from invoice creation.
   "payroll.post",
+  // Phase C1 — mirrors server/src/lib/permissions.ts's new
+  // "projectTask.delete": deleting a schedule task/milestone or a
+  // dependency edge (create/update stay member-open, same task.delete/
+  // dailyLog.delete precedent above).
+  "projectTask.delete",
 ] as const;
 
 export type PermissionAction = (typeof OWNER_ONLY_ACTIONS)[number];

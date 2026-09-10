@@ -35,6 +35,7 @@ import { PlatformSupportSession } from "./platform/pages/PlatformSupportSession"
 import { PlatformSupportSessions } from "./platform/pages/PlatformSupportSessions";
 import { ProjectWorkspace } from "./project/ProjectWorkspace";
 import { OverviewSection } from "./project/sections/OverviewSection";
+import { ScheduleSection } from "./project/sections/ScheduleSection";
 import { ContractSection } from "./project/sections/ContractSection";
 import { BoqSection } from "./project/sections/BoqSection";
 import { CostPlanSection } from "./project/sections/CostPlanSection";
@@ -108,6 +109,7 @@ export default function App() {
       >
         <Route index element={<Navigate to="overview" replace />} />
         <Route path="overview" element={<OverviewSection />} />
+        <Route path="schedule" element={<ScheduleSection />} />
         <Route path="contract" element={<ContractSection />} />
         <Route path="boq" element={<BoqSection />} />
         <Route path="cost-plan" element={<CostPlanSection />} />

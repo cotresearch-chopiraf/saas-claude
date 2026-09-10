@@ -38,6 +38,7 @@ import { subcontractIpcDocumentsRouter } from "./routes/subcontractIpcDocuments.
 import { forecastRouter } from "./routes/forecast.js";
 import { cashflowRouter } from "./routes/cashflow.js";
 import { documentsRouter } from "./routes/documents.js";
+import { projectScheduleRouter } from "./routes/projectSchedule.js";
 import { auditEventsRouter } from "./routes/auditEvents.js";
 import { notificationsRouter } from "./routes/notifications.js";
 import { zatcaRouter } from "./routes/zatca.js";
@@ -110,6 +111,10 @@ export function buildApp() {
   app.use("/api/projects/:projectId/cash-flow", requireAuth, cashflowRouter);
   app.use("/api/projects/:projectId/invoices", requireAuth, projectInvoicesRouter);
   app.use("/api/projects/:projectId/documents", requireAuth, documentsRouter);
+  // MIDAD Phase C1 — Gantt Scheduling Foundation. Deliberately its own
+  // path segment ("schedule"), not "tasks" — /api/projects/:projectId/tasks
+  // already belongs to Slice AA's unrelated flat to-do-checklist table.
+  app.use("/api/projects/:projectId/schedule", requireAuth, projectScheduleRouter);
   app.use("/api/cost-codes", requireAuth, costCodesRouter);
   app.use("/api/suppliers", requireAuth, suppliersRouter);
   app.use("/api/customers", requireAuth, customersRouter);

@@ -23,10 +23,15 @@ export interface ProjectSection {
   permission?: string;
 }
 
-export const projectSectionGroups = ["المشروع", "العقد والنطاق", "التكاليف", "التقدم", "التوقعات والتدفقات", "الإيرادات", "التشغيل", "المستندات"] as const;
+export const projectSectionGroups = ["المشروع", "الجدولة", "العقد والنطاق", "التكاليف", "التقدم", "التوقعات والتدفقات", "الإيرادات", "التشغيل", "المستندات"] as const;
 
 export const projectSections: ProjectSection[] = [
   { key: "overview", path: "overview", label: "نظرة عامة", group: "المشروع" },
+  // MIDAD Phase C1 — Gantt Scheduling Foundation. Its own group ("الجدولة"),
+  // deliberately separate from "التقدم" (which is Measurement/IPC physical
+  // quantity progress — a different concept from schedule task progress,
+  // per this phase's own explicit no-conflation requirement).
+  { key: "schedule", path: "schedule", label: "الجدول الزمني", group: "الجدولة" },
   { key: "contract", path: "contract", label: "العقد", group: "العقد والنطاق" },
   { key: "boq", path: "boq", label: "جدول الكميات", group: "العقد والنطاق" },
   { key: "cost-plan", path: "cost-plan", label: "خطة التكلفة", group: "التكاليف" },

@@ -3089,3 +3089,154 @@ export const payrollImportRowsRelations = relations(payrollImportRows, ({ one })
   importBatch: one(payrollImportBatches, { fields: [payrollImportRows.importBatchId], references: [payrollImportBatches.id] }),
   resultingPayrollRecord: one(payrollRecords, { fields: [payrollImportRows.resultingPayrollRecordId], references: [payrollRecords.id] }),
 }));
+
+// =============================================================================
+// MIDAD Phase C1 — Gantt Scheduling Foundation.
+//
+// Discovery found no existing authoritative WBS/Gantt model: the existing
+// `tasks` table (Slice AA) is a flat, non-hierarchical to-do checklist
+// (title/assigneeName/dueDate/status) with no start+end date pair, no
+// progress percent, and no dependency concept — a deliberately different,
+// unrelated domain (site-level operational entry), not reused or touched
+// here. `projectTasks` below is the new, separate authoritative scheduling
+// model: both ordinary WBS tasks and milestones live in ONE table
+// (taskType discriminates), matching the master prompt's own instruction
+// not to build two parallel entities for what is structurally the same
+// row shape (a named, dated, progress-tracked schedule item that may have
+// children and dependencies).
+//
+// companyId is denormalized onto both tables (same "authorize from a
+// server-verified relationship, never client input" discipline every
+// tenant-scoped domain in this codebase already follows) even though it is
+// always derivable via projectId → projects.companyId — this lets every
+// query filter directly on companyId without an extra join, exactly like
+// laborAllocations/laborCostPostings above.
+// =============================================================================
+
+export const projectTaskTypeEnum = pgEnum("project_task_type", ["task", "milestone"]);
+// Repository convention check: existing statusy enums (task_status:
+// todo/in_progress/done, project_status: active/on_hold/completed) use
+// short, domain-specific vocabularies rather than a generic universal set.
+// The master prompt's own suggested NOT_STARTED/IN_PROGRESS/COMPLETED/
+// ON_HOLD is kept as-is (snake_case lowercased to match this repo's own
+// enum-value casing convention) — a schedule item's status is a genuinely
+// different concept from the checklist task_status enum above (e.g. a
+// Gantt task can be ON_HOLD, which the simple checklist has no equivalent
+// for), so it is its own enum, not a reuse.
+export const projectTaskStatusEnum = pgEnum("project_task_status", ["not_started", "in_progress", "completed", "on_hold"]);
+// FS (Finish-to-Start) only for C1, per the master prompt's explicit scope
+// limit — SS/FF/SF are deliberately not modeled. Kept as an enum (rather
+// than hardcoding "FS" as a boolean/omitted column) purely so a later
+// phase can widen it additively without a column-type migration.
+export const taskDependencyTypeEnum = pgEnum("task_dependency_type", ["FS"]);
+
+export const projectTasks = pgTable(
+  "project_tasks",
+  {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  projectId: uuid("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  // A parent's deletion sets this to null (children are promoted to
+  // top-level rows) rather than cascading the delete — losing a parent
+  // reference is a normal, already-nullable state this column supports by
+  // design; silently deleting an entire WBS subtree because its parent row
+  // was removed would be a surprising, hard-to-reverse data loss no part
+  // of this master prompt asks for.
+  parentTaskId: uuid("parent_task_id").references((): AnyPgColumn => projectTasks.id, { onDelete: "set null" }),
+  name: text("name").notNull(),
+  description: text("description"),
+  taskType: projectTaskTypeEnum("task_type").notNull().default("task"),
+  status: projectTaskStatusEnum("status").notNull().default("not_started"),
+  // Date-only (YYYY-MM-DD), matching every other date-only column in this
+  // schema (contracts.startDate, payrollPeriods.periodStart, ...) — no
+  // timestamp/timezone component, so "today" for a schedule never shifts
+  // with the server's or a viewer's timezone.
+  startDate: date("start_date").notNull(),
+  endDate: date("end_date").notNull(),
+  progressPercent: integer("progress_percent").notNull().default(0),
+  // Deterministic display ordering within a parent (WBS numbering is
+  // computed from parentTaskId + sortOrder at read time, never stored as
+  // an editable "1.2.3" string — the database id stays the sole
+  // authoritative identity, per the master prompt's explicit instruction).
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdBy: uuid("created_by")
+    .notNull()
+    .references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    projectIdx: index("project_tasks_project_idx").on(table.projectId),
+    parentIdx: index("project_tasks_parent_idx").on(table.parentTaskId),
+    dateOrder: check("project_tasks_date_order", sql`${table.startDate} <= ${table.endDate}`),
+    progressRange: check("project_tasks_progress_range", sql`${table.progressPercent} >= 0 AND ${table.progressPercent} <= 100`),
+  }),
+);
+
+export const projectTaskDependencies = pgTable(
+  "project_task_dependencies",
+  {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  projectId: uuid("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  // Both edges cascade on task delete — the master prompt is explicit that
+  // deleting a task must never leave an orphan dependency row, and an
+  // edge referencing a deleted task is otherwise meaningless (there is no
+  // valid "half-edge" state to preserve it in).
+  predecessorTaskId: uuid("predecessor_task_id")
+    .notNull()
+    .references(() => projectTasks.id, { onDelete: "cascade" }),
+  successorTaskId: uuid("successor_task_id")
+    .notNull()
+    .references(() => projectTasks.id, { onDelete: "cascade" }),
+  dependencyType: taskDependencyTypeEnum("dependency_type").notNull().default("FS"),
+  createdBy: uuid("created_by")
+    .notNull()
+    .references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    projectIdx: index("project_task_dependencies_project_idx").on(table.projectId),
+    predecessorIdx: index("project_task_dependencies_predecessor_idx").on(table.predecessorTaskId),
+    successorIdx: index("project_task_dependencies_successor_idx").on(table.successorTaskId),
+    // Recommended by the master prompt: never the same predecessor→successor
+    // edge twice within a project.
+    uniqueEdge: uniqueIndex("project_task_dependencies_unique_edge").on(
+      table.projectId,
+      table.predecessorTaskId,
+      table.successorTaskId,
+    ),
+  }),
+);
+
+export const projectTasksRelations = relations(projectTasks, ({ one, many }) => ({
+  company: one(companies, { fields: [projectTasks.companyId], references: [companies.id] }),
+  project: one(projects, { fields: [projectTasks.projectId], references: [projects.id] }),
+  parentTask: one(projectTasks, { fields: [projectTasks.parentTaskId], references: [projectTasks.id] }),
+  creator: one(users, { fields: [projectTasks.createdBy], references: [users.id] }),
+  predecessorEdges: many(projectTaskDependencies, { relationName: "predecessorTask" }),
+  successorEdges: many(projectTaskDependencies, { relationName: "successorTask" }),
+}));
+
+export const projectTaskDependenciesRelations = relations(projectTaskDependencies, ({ one }) => ({
+  company: one(companies, { fields: [projectTaskDependencies.companyId], references: [companies.id] }),
+  project: one(projects, { fields: [projectTaskDependencies.projectId], references: [projects.id] }),
+  predecessorTask: one(projectTasks, {
+    fields: [projectTaskDependencies.predecessorTaskId],
+    references: [projectTasks.id],
+    relationName: "predecessorTask",
+  }),
+  successorTask: one(projectTasks, {
+    fields: [projectTaskDependencies.successorTaskId],
+    references: [projectTasks.id],
+    relationName: "successorTask",
+  }),
+}));

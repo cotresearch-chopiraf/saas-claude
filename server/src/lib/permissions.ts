@@ -190,6 +190,20 @@ export const PERMISSIONS = {
   // split every other domain in this matrix already uses; only creation,
   // status changes, and grant/revoke require this.
   "clientPortal.manage": ["owner"],
+
+  // --- MIDAD Phase C1 — Gantt Scheduling Foundation ---
+  // Creating/updating a schedule task, milestone, or dependency stays
+  // member-open — the exact same site-level-operational-entry posture
+  // task.delete/dailyLog.delete above already document (planning entry,
+  // not a financial instrument). projectTask.delete is the one
+  // irreversible action in this domain (deleting a task or a dependency
+  // edge), so it gets its own action here, mirroring task.delete exactly.
+  // Reusing task.delete itself was considered and rejected: that action is
+  // scoped to the existing flat `tasks` checklist table, a structurally
+  // different entity — reusing its permission key would make the two
+  // unrelated tables' delete gates impossible to tell apart in this
+  // matrix's own audit trail of "why does this action exist".
+  "projectTask.delete": ["owner"],
 } as const satisfies Record<string, readonly Role[]>;
 
 export type PermissionAction = keyof typeof PERMISSIONS;

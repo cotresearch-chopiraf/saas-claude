@@ -814,6 +814,46 @@ export interface Task {
   createdAt: string;
 }
 
+// MIDAD Phase C1 — Gantt Scheduling Foundation. A structurally separate
+// domain from Task/TaskStatus above (Slice AA's flat to-do checklist) —
+// mirrors server/src/routes/projectSchedule.ts's toTaskResponse/
+// toDependencyResponse exactly. No companyId (internal-only, never
+// returned by the backend here).
+export type ProjectTaskType = "task" | "milestone";
+export type ProjectTaskStatus = "not_started" | "in_progress" | "completed" | "on_hold";
+
+export interface ProjectTask {
+  id: string;
+  projectId: string;
+  parentTaskId: string | null;
+  name: string;
+  description: string | null;
+  taskType: ProjectTaskType;
+  status: ProjectTaskStatus;
+  startDate: string;
+  endDate: string;
+  progressPercent: number;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type TaskDependencyType = "FS";
+
+export interface ProjectTaskDependency {
+  id: string;
+  projectId: string;
+  predecessorTaskId: string;
+  successorTaskId: string;
+  dependencyType: TaskDependencyType;
+  createdAt: string;
+}
+
+export interface ProjectSchedule {
+  tasks: ProjectTask[];
+  dependencies: ProjectTaskDependency[];
+}
+
 export type ChangeOrderStatus = "pending" | "approved" | "rejected";
 
 export interface ChangeOrder {
