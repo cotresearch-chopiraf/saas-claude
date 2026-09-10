@@ -4,13 +4,18 @@ import { db } from "../db/client.js";
 import { clientProjectAccess, projects } from "../db/schema.js";
 import { requireClientProjectAccess } from "../middleware/requireClientProjectAccess.js";
 
-// MIDAD Phase B1 — the only Client Portal data surface this slice ships:
-// the minimal, safe project identity a granted project's access confirms.
-// Deliberately NOT a Project Overview (see this phase's own hard-scope
-// boundary) — no progress, documents, IPC, invoices, or any financial
-// field. Every field below is already exposed to internal company members
-// on GET /api/projects; nothing here is a new disclosure, only a narrower
-// audience for a subset of already-non-sensitive fields.
+// MIDAD Phase B1/B2 — the only Client Portal data surface these two
+// slices ship: the minimal, safe project identity a granted project's
+// access confirms, plus (B2) the small set of additional fields the
+// dashboard/detail view needs for a client to recognize and understand
+// their own project — never progress, documents, IPC, invoices, or any
+// financial field. Every field below is already exposed to internal
+// company members on GET /api/projects; nothing here is a new
+// disclosure, only a narrower audience for a subset of already-non-
+// sensitive fields. clientName/address are included even when null
+// (never omitted) — same "always-present, possibly-null field" shape
+// every other API response in this codebase already uses, so the client
+// only has to guard for null, not for a missing key.
 //
 // clientPortalAuth is applied at the app.ts mount site (same convention
 // platformAuth/platformOrganizationsRouter already uses), not inside this
@@ -23,10 +28,19 @@ interface MinimalProject {
   name: string;
   status: string;
   startDate: string | null;
+  clientName: string | null;
+  address: string | null;
 }
 
 function toMinimalProject(p: typeof projects.$inferSelect): MinimalProject {
-  return { id: p.id, name: p.name, status: p.status, startDate: p.startDate };
+  return {
+    id: p.id,
+    name: p.name,
+    status: p.status,
+    startDate: p.startDate,
+    clientName: p.clientName,
+    address: p.address,
+  };
 }
 
 clientPortalProjectsRouter.get("/", async (req: Request, res: Response) => {

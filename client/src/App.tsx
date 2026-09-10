@@ -23,6 +23,10 @@ import { Compliance } from "./pages/Compliance";
 import { ZatcaSettings } from "./pages/ZatcaSettings";
 import { Activity } from "./pages/Activity";
 import { usePlatformAuth } from "./platform/auth/PlatformAuthContext";
+import { useClientPortalAuth } from "./portal/auth/ClientPortalAuthContext";
+import { PortalLogin } from "./portal/pages/PortalLogin";
+import { PortalDashboard } from "./portal/pages/PortalDashboard";
+import { PortalProjectDetail } from "./portal/pages/PortalProjectDetail";
 import { PlatformLogin } from "./platform/pages/PlatformLogin";
 import { PlatformDashboard } from "./platform/pages/PlatformDashboard";
 import { PlatformOrganizations } from "./platform/pages/PlatformOrganizations";
@@ -61,6 +65,18 @@ function ProtectedRoute({ children }: { children: JSX.Element }) {
 function PlatformProtectedRoute({ children }: { children: JSX.Element }) {
   const { operator } = usePlatformAuth();
   if (!operator) return <Navigate to="/platform/login" replace />;
+  return children;
+}
+
+// MIDAD Phase B2 — deliberately its own guard, not a parameterized version
+// of ProtectedRoute/PlatformProtectedRoute: reads useClientPortalAuth(),
+// never useAuth()/usePlatformAuth() — a tenant or platform session must
+// never satisfy a Client Portal route and vice versa, on the client
+// exactly as on the server (middleware/clientPortalAuth.ts never reads or
+// sets req.userId/req.companyId/req.platformOperatorId).
+function PortalProtectedRoute({ children }: { children: JSX.Element }) {
+  const { portalUser } = useClientPortalAuth();
+  if (!portalUser) return <Navigate to="/portal/login" replace />;
   return children;
 }
 
@@ -221,6 +237,23 @@ export default function App() {
           <ProtectedRoute>
             <Activity />
           </ProtectedRoute>
+        }
+      />
+      <Route path="/portal/login" element={<PortalLogin />} />
+      <Route
+        path="/portal"
+        element={
+          <PortalProtectedRoute>
+            <PortalDashboard />
+          </PortalProtectedRoute>
+        }
+      />
+      <Route
+        path="/portal/projects/:projectId"
+        element={
+          <PortalProtectedRoute>
+            <PortalProjectDetail />
+          </PortalProtectedRoute>
         }
       />
       <Route path="/platform/login" element={<PlatformLogin />} />

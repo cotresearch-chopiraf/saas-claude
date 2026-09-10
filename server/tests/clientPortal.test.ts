@@ -377,7 +377,7 @@ describe("Client Portal — data leakage", () => {
     await grantAccess(id, projectA1Id);
     const res = await getPortalProject(projectA1Id, portalToken);
     expect(res.status).toBe(200);
-    expect(Object.keys(res.body).sort()).toEqual(["id", "name", "startDate", "status"].sort());
+    expect(Object.keys(res.body).sort()).toEqual(["id", "name", "startDate", "status", "clientName", "address"].sort());
   });
 
   it("35. the portal project list response contains only minimal safe fields per row", async () => {
@@ -386,7 +386,38 @@ describe("Client Portal — data leakage", () => {
     const res = await listPortalProjects(portalToken);
     expect(res.status).toBe(200);
     for (const row of res.body) {
-      expect(Object.keys(row).sort()).toEqual(["id", "name", "startDate", "status"].sort());
+      expect(Object.keys(row).sort()).toEqual(["id", "name", "startDate", "status", "clientName", "address"].sort());
+    }
+  });
+
+  it("38. financial/internal field names are absent from any portal project response, checked directly against the raw JSON", async () => {
+    const { id, portalToken } = await createAndLoginPortalUser("عميل فحص تسريب مالي");
+    await grantAccess(id, projectA1Id);
+
+    const detail = await getPortalProject(projectA1Id, portalToken);
+    const list = await listPortalProjects(portalToken);
+    const dump = JSON.stringify([detail.body, list.body]);
+
+    const forbiddenFieldNames = [
+      "budget",
+      "budgetTotal",
+      "actualCost",
+      "expenses",
+      "commitment",
+      "forecast",
+      "cashFlow",
+      "profit",
+      "margin",
+      "costCode",
+      "procurement",
+      "payroll",
+      "labor",
+      "companyId",
+      "customerId",
+      "passwordHash",
+    ];
+    for (const field of forbiddenFieldNames) {
+      expect(dump.toLowerCase()).not.toContain(field.toLowerCase());
     }
   });
 });

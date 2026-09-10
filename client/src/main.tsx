@@ -4,6 +4,7 @@ import { BrowserRouter } from "react-router-dom";
 import App from "./App";
 import { AuthProvider } from "./auth/AuthContext";
 import { PlatformAuthProvider } from "./platform/auth/PlatformAuthContext";
+import { ClientPortalAuthProvider } from "./portal/auth/ClientPortalAuthContext";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import "./styles.css";
 
@@ -12,9 +13,11 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     <BrowserRouter>
       <AuthProvider>
         <PlatformAuthProvider>
-          <ErrorBoundary>
-            <App />
-          </ErrorBoundary>
+          <ClientPortalAuthProvider>
+            <ErrorBoundary>
+              <App />
+            </ErrorBoundary>
+          </ClientPortalAuthProvider>
         </PlatformAuthProvider>
       </AuthProvider>
     </BrowserRouter>
