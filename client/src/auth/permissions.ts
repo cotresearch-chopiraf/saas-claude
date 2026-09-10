@@ -82,6 +82,12 @@ export const OWNER_ONLY_ACTIONS = [
   // transitions stay member-open, same task.delete/dailyLog.delete/
   // projectTask.delete precedent above).
   "punchItem.delete",
+  // Phase D1 — mirrors server/src/lib/permissions.ts's new
+  // "laborCompliance.manage"/"laborCompliance.verify". Deliberately NOT
+  // named "compliance.manage" — that name already exists for the
+  // unrelated tax/ZATCA compliance domain (see that file's own comment).
+  "laborCompliance.manage",
+  "laborCompliance.verify",
 ] as const;
 
 export type PermissionAction = (typeof OWNER_ONLY_ACTIONS)[number];

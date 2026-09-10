@@ -14,6 +14,7 @@ import { Suppliers } from "./pages/Suppliers";
 import { Customers } from "./pages/Customers";
 import { CustomerDetail } from "./pages/CustomerDetail";
 import { Employees } from "./pages/Employees";
+import { LaborCompliance } from "./pages/LaborCompliance";
 import { Payroll } from "./pages/Payroll";
 import { PayrollPeriodDetail } from "./pages/PayrollPeriodDetail";
 import { LaborAllocation } from "./pages/LaborAllocation";
@@ -200,6 +201,14 @@ export default function App() {
         element={
           <ProtectedRoute>
             <LaborAllocation />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/labor-compliance"
+        element={
+          <ProtectedRoute>
+            <LaborCompliance />
           </ProtectedRoute>
         }
       />

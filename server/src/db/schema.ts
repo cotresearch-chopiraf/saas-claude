@@ -3316,3 +3316,288 @@ export const projectPunchItemsRelations = relations(projectPunchItems, ({ one })
   verifiedByUser: one(users, { fields: [projectPunchItems.verifiedByUserId], references: [users.id], relationName: "punchItemVerifier" }),
   closedByUser: one(users, { fields: [projectPunchItems.closedByUserId], references: [users.id], relationName: "punchItemCloser" }),
 }));
+
+// =============================================================================
+// MIDAD Phase D1 — Nitaqat + GOSI Compliance Tracking Foundation.
+//
+// Discovery: no Nitaqat/GOSI/compliance-tracking concept exists anywhere in
+// this schema. `employees.nationality` (Slice A1) was added and explicitly
+// reserved for exactly this future use but has never been read/written by
+// any route — this phase is the first consumer. No new employee master
+// table is created; the tables below are aggregate/period-level compliance
+// RECORDS, never a duplicate workforce directory. `payrollRecords`
+// (sourceType: manual/csv_import/excel_import/external_provider +
+// verificationStatus: unverified/verified, both defaulting to the
+// least-trusted value, never auto-set to "verified" by any existing route)
+// is the direct precedent this phase's own source/verification model
+// mirrors — the only change is adding a third "pending_verification"
+// state, which this phase's own master prompt explicitly asks for.
+//
+// CRITICAL: no Nitaqat classification formula, no GOSI contribution rate,
+// and no official government API integration exist anywhere below or in
+// the routes that use these tables. `classification` is a free-text field
+// a user records as REPORTED (e.g. copied from a Qiwa screen), never a
+// MIDAD-calculated value — see routes/workforceCompliance.ts's own header
+// comment for the full non-fabrication rationale.
+//
+// Naming collision note: server/src/routes/compliance.ts and its
+// "compliance.manage" permission ALREADY EXIST for a structurally
+// different domain (VAT/Zakat/e-invoicing tax profile, Phase 1/Slice 3).
+// Reusing that route prefix or permission name here would silently gate
+// two unrelated trust boundaries with one switch. This phase therefore
+// uses its own, non-colliding mount (/api/workforce-compliance) and its
+// own permission names (laborCompliance.manage / laborCompliance.verify) —
+// see lib/permissions.ts's own comment on this same collision.
+// =============================================================================
+
+export const complianceSourceTypeEnum = pgEnum("compliance_source_type", [
+  "manual",
+  "csv_import",
+  "excel_import",
+  "external_reference",
+]);
+// Mirrors payrollVerificationStatusEnum's own unverified/verified pair,
+// widened by exactly the one state this phase's master prompt asks for.
+// Every table below defaults to "unverified" — nothing in this phase's
+// own route code ever writes "verified" outside the dedicated verify
+// action (see routes/workforceCompliance.ts).
+export const complianceVerificationStatusEnum = pgEnum("compliance_verification_status", [
+  "unverified",
+  "pending_verification",
+  "verified",
+]);
+export const compliancePeriodStatusEnum = pgEnum("compliance_period_status", ["open", "closed"]);
+export const gosiStatusEnum = pgEnum("gosi_status", ["not_recorded", "recorded", "pending_verification", "verified", "exception"]);
+export const complianceExceptionSeverityEnum = pgEnum("compliance_exception_severity", ["low", "medium", "high", "critical"]);
+export const complianceExceptionStatusEnum = pgEnum("compliance_exception_status", ["open", "in_progress", "resolved", "closed"]);
+
+export const compliancePeriods = pgTable(
+  "compliance_periods",
+  {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  periodStart: date("period_start").notNull(),
+  periodEnd: date("period_end").notNull(),
+  label: text("label"),
+  status: compliancePeriodStatusEnum("status").notNull().default("open"),
+  createdBy: uuid("created_by")
+    .notNull()
+    .references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    companyIdx: index("compliance_periods_company_idx").on(table.companyId),
+    // Same duplicate-period backstop payrollPeriods' own
+    // payroll_periods_company_period_unique already establishes.
+    periodUnique: uniqueIndex("compliance_periods_company_period_unique").on(
+      table.companyId,
+      table.periodStart,
+      table.periodEnd,
+    ),
+    dateOrder: check("compliance_periods_date_order", sql`${table.periodStart} <= ${table.periodEnd}`),
+  }),
+);
+
+// A point-in-time headcount fact — always company-reported, never
+// MIDAD-calculated. The saudi/non-Saudi split is deliberately an
+// aggregate integer pair here (never a per-employee list or nationality
+// join), per this phase's own explicit data-minimization instruction —
+// individual employee identity is never necessary for a compliance count.
+export const complianceWorkforceSnapshots = pgTable(
+  "compliance_workforce_snapshots",
+  {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  compliancePeriodId: uuid("compliance_period_id")
+    .notNull()
+    .references(() => compliancePeriods.id, { onDelete: "cascade" }),
+  snapshotDate: date("snapshot_date").notNull(),
+  totalEmployees: integer("total_employees").notNull(),
+  saudiEmployees: integer("saudi_employees").notNull(),
+  nonSaudiEmployees: integer("non_saudi_employees").notNull(),
+  sourceType: complianceSourceTypeEnum("source_type").notNull().default("manual"),
+  sourceReference: text("source_reference"),
+  verificationStatus: complianceVerificationStatusEnum("verification_status").notNull().default("unverified"),
+  verifiedAt: timestamp("verified_at"),
+  verifiedByUserId: uuid("verified_by_user_id").references(() => users.id),
+  notes: text("notes"),
+  createdBy: uuid("created_by")
+    .notNull()
+    .references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    companyIdx: index("compliance_workforce_snapshots_company_idx").on(table.companyId),
+    periodIdx: index("compliance_workforce_snapshots_period_idx").on(table.compliancePeriodId),
+    countsNonNegative: check(
+      "compliance_workforce_snapshots_counts_non_negative",
+      sql`${table.totalEmployees} >= 0 AND ${table.saudiEmployees} >= 0 AND ${table.nonSaudiEmployees} >= 0`,
+    ),
+    countsSumToTotal: check(
+      "compliance_workforce_snapshots_counts_sum",
+      sql`${table.saudiEmployees} + ${table.nonSaudiEmployees} = ${table.totalEmployees}`,
+    ),
+  }),
+);
+
+// The reported Nitaqat tracking record for a period. "classification" is
+// free text (e.g. "أخضر متوسط", copied verbatim from whatever the company
+// was told) — NEVER an enum of official band names, because this phase
+// has no independently verified, current specification of what those
+// bands or thresholds actually are. MIDAD records what was reported; it
+// never computes it.
+export const nitaqatComplianceRecords = pgTable(
+  "nitaqat_compliance_records",
+  {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  compliancePeriodId: uuid("compliance_period_id")
+    .notNull()
+    .references(() => compliancePeriods.id, { onDelete: "cascade" }),
+  sourceType: complianceSourceTypeEnum("source_type").notNull().default("manual"),
+  verificationStatus: complianceVerificationStatusEnum("verification_status").notNull().default("unverified"),
+  classification: text("classification"),
+  saudiCount: integer("saudi_count").notNull(),
+  nonSaudiCount: integer("non_saudi_count").notNull(),
+  totalCount: integer("total_count").notNull(),
+  externalReference: text("external_reference"),
+  verifiedAt: timestamp("verified_at"),
+  verifiedByUserId: uuid("verified_by_user_id").references(() => users.id),
+  notes: text("notes"),
+  createdBy: uuid("created_by")
+    .notNull()
+    .references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    companyIdx: index("nitaqat_compliance_records_company_idx").on(table.companyId),
+    periodIdx: index("nitaqat_compliance_records_period_idx").on(table.compliancePeriodId),
+    countsNonNegative: check(
+      "nitaqat_compliance_records_counts_non_negative",
+      sql`${table.saudiCount} >= 0 AND ${table.nonSaudiCount} >= 0 AND ${table.totalCount} >= 0`,
+    ),
+    countsSumToTotal: check(
+      "nitaqat_compliance_records_counts_sum",
+      sql`${table.saudiCount} + ${table.nonSaudiCount} = ${table.totalCount}`,
+    ),
+  }),
+);
+
+// GOSI tracking — three independent operational status dimensions
+// (registration/contribution bookkeeping, submission, payment), each using
+// the SAME generic, non-official-terminology status vocabulary (see
+// gosiStatusEnum above) rather than three different invented taxonomies.
+// registeredEmployeeCount is a company-reported count, never a computed
+// contribution amount — no SAR figure of any kind lives on this table.
+export const gosiComplianceRecords = pgTable(
+  "gosi_compliance_records",
+  {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  compliancePeriodId: uuid("compliance_period_id")
+    .notNull()
+    .references(() => compliancePeriods.id, { onDelete: "cascade" }),
+  registeredEmployeeCount: integer("registered_employee_count"),
+  contributionStatus: gosiStatusEnum("contribution_status").notNull().default("not_recorded"),
+  submissionStatus: gosiStatusEnum("submission_status").notNull().default("not_recorded"),
+  paymentStatus: gosiStatusEnum("payment_status").notNull().default("not_recorded"),
+  sourceType: complianceSourceTypeEnum("source_type").notNull().default("manual"),
+  verificationStatus: complianceVerificationStatusEnum("verification_status").notNull().default("unverified"),
+  externalReference: text("external_reference"),
+  verifiedAt: timestamp("verified_at"),
+  verifiedByUserId: uuid("verified_by_user_id").references(() => users.id),
+  notes: text("notes"),
+  createdBy: uuid("created_by")
+    .notNull()
+    .references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    companyIdx: index("gosi_compliance_records_company_idx").on(table.companyId),
+    periodIdx: index("gosi_compliance_records_period_idx").on(table.compliancePeriodId),
+    countNonNegative: check("gosi_compliance_records_count_non_negative", sql`${table.registeredEmployeeCount} IS NULL OR ${table.registeredEmployeeCount} >= 0`),
+  }),
+);
+
+// Operational follow-up items ("needs verification", "evidence missing",
+// ...) — never a legal violation record. compliancePeriodId is nullable:
+// some exceptions are general ("GOSI registration missing entirely") and
+// don't belong to one specific period.
+export const complianceExceptions = pgTable(
+  "compliance_exceptions",
+  {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  compliancePeriodId: uuid("compliance_period_id").references(() => compliancePeriods.id, { onDelete: "set null" }),
+  category: text("category"),
+  description: text("description").notNull(),
+  severity: complianceExceptionSeverityEnum("severity").notNull().default("medium"),
+  status: complianceExceptionStatusEnum("status").notNull().default("open"),
+  dueDate: date("due_date"),
+  resolvedAt: timestamp("resolved_at"),
+  resolvedByUserId: uuid("resolved_by_user_id").references(() => users.id),
+  closedAt: timestamp("closed_at"),
+  closedByUserId: uuid("closed_by_user_id").references(() => users.id),
+  createdBy: uuid("created_by")
+    .notNull()
+    .references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    companyIdx: index("compliance_exceptions_company_idx").on(table.companyId),
+    periodIdx: index("compliance_exceptions_period_idx").on(table.compliancePeriodId),
+  }),
+);
+
+export const compliancePeriodsRelations = relations(compliancePeriods, ({ one, many }) => ({
+  company: one(companies, { fields: [compliancePeriods.companyId], references: [companies.id] }),
+  creator: one(users, { fields: [compliancePeriods.createdBy], references: [users.id] }),
+  workforceSnapshots: many(complianceWorkforceSnapshots),
+  nitaqatRecords: many(nitaqatComplianceRecords),
+  gosiRecords: many(gosiComplianceRecords),
+  exceptions: many(complianceExceptions),
+}));
+
+export const complianceWorkforceSnapshotsRelations = relations(complianceWorkforceSnapshots, ({ one }) => ({
+  company: one(companies, { fields: [complianceWorkforceSnapshots.companyId], references: [companies.id] }),
+  period: one(compliancePeriods, { fields: [complianceWorkforceSnapshots.compliancePeriodId], references: [compliancePeriods.id] }),
+  creator: one(users, { fields: [complianceWorkforceSnapshots.createdBy], references: [users.id], relationName: "snapshotCreator" }),
+  verifiedByUser: one(users, { fields: [complianceWorkforceSnapshots.verifiedByUserId], references: [users.id], relationName: "snapshotVerifier" }),
+}));
+
+export const nitaqatComplianceRecordsRelations = relations(nitaqatComplianceRecords, ({ one }) => ({
+  company: one(companies, { fields: [nitaqatComplianceRecords.companyId], references: [companies.id] }),
+  period: one(compliancePeriods, { fields: [nitaqatComplianceRecords.compliancePeriodId], references: [compliancePeriods.id] }),
+  creator: one(users, { fields: [nitaqatComplianceRecords.createdBy], references: [users.id], relationName: "nitaqatCreator" }),
+  verifiedByUser: one(users, { fields: [nitaqatComplianceRecords.verifiedByUserId], references: [users.id], relationName: "nitaqatVerifier" }),
+}));
+
+export const gosiComplianceRecordsRelations = relations(gosiComplianceRecords, ({ one }) => ({
+  company: one(companies, { fields: [gosiComplianceRecords.companyId], references: [companies.id] }),
+  period: one(compliancePeriods, { fields: [gosiComplianceRecords.compliancePeriodId], references: [compliancePeriods.id] }),
+  creator: one(users, { fields: [gosiComplianceRecords.createdBy], references: [users.id], relationName: "gosiCreator" }),
+  verifiedByUser: one(users, { fields: [gosiComplianceRecords.verifiedByUserId], references: [users.id], relationName: "gosiVerifier" }),
+}));
+
+export const complianceExceptionsRelations = relations(complianceExceptions, ({ one }) => ({
+  company: one(companies, { fields: [complianceExceptions.companyId], references: [companies.id] }),
+  period: one(compliancePeriods, { fields: [complianceExceptions.compliancePeriodId], references: [compliancePeriods.id] }),
+  creator: one(users, { fields: [complianceExceptions.createdBy], references: [users.id], relationName: "exceptionCreator" }),
+  resolvedByUser: one(users, { fields: [complianceExceptions.resolvedByUserId], references: [users.id], relationName: "exceptionResolver" }),
+  closedByUser: one(users, { fields: [complianceExceptions.closedByUserId], references: [users.id], relationName: "exceptionCloser" }),
+}));

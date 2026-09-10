@@ -40,6 +40,7 @@ import { cashflowRouter } from "./routes/cashflow.js";
 import { documentsRouter } from "./routes/documents.js";
 import { projectScheduleRouter } from "./routes/projectSchedule.js";
 import { punchItemsRouter } from "./routes/punchItems.js";
+import { workforceComplianceRouter } from "./routes/workforceCompliance.js";
 import { auditEventsRouter } from "./routes/auditEvents.js";
 import { notificationsRouter } from "./routes/notifications.js";
 import { zatcaRouter } from "./routes/zatca.js";
@@ -120,6 +121,12 @@ export function buildApp() {
   // route in this router is ever mounted under /api/portal/*, and it never
   // will be without a separate, explicitly scoped future phase.
   app.use("/api/projects/:projectId/punch-items", requireAuth, punchItemsRouter);
+  // MIDAD Phase D1 — Nitaqat + GOSI Compliance Tracking Foundation.
+  // Deliberately NOT under /api/compliance — that prefix already belongs
+  // to the tax/ZATCA compliance domain (routes/compliance.ts). Company-
+  // wide (not project-scoped), matching employees/payroll-periods' own
+  // mount pattern. INTERNAL ONLY — never mounted under /api/portal/*.
+  app.use("/api/workforce-compliance", requireAuth, workforceComplianceRouter);
   app.use("/api/cost-codes", requireAuth, costCodesRouter);
   app.use("/api/suppliers", requireAuth, suppliersRouter);
   app.use("/api/customers", requireAuth, customersRouter);

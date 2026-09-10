@@ -887,6 +887,114 @@ export interface PunchItem {
   updatedAt: string;
 }
 
+// MIDAD Phase D1 — Nitaqat + GOSI Compliance Tracking Foundation. Mirrors
+// server/src/routes/workforceCompliance.ts's response shapers exactly. No
+// official government integration, no Nitaqat classification formula, no
+// GOSI contribution-rate calculation — see that file's own header comment.
+// Never imported from client/src/portal/.
+export type ComplianceSourceType = "manual" | "csv_import" | "excel_import" | "external_reference";
+export type ComplianceVerificationStatus = "unverified" | "pending_verification" | "verified";
+export type CompliancePeriodStatus = "open" | "closed";
+export type GosiStatus = "not_recorded" | "recorded" | "pending_verification" | "verified" | "exception";
+export type ComplianceExceptionSeverity = "low" | "medium" | "high" | "critical";
+export type ComplianceExceptionStatus = "open" | "in_progress" | "resolved" | "closed";
+
+export interface CompliancePeriod {
+  id: string;
+  periodStart: string;
+  periodEnd: string;
+  label: string | null;
+  status: CompliancePeriodStatus;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ComplianceWorkforceSnapshot {
+  id: string;
+  compliancePeriodId: string;
+  snapshotDate: string;
+  totalEmployees: number;
+  saudiEmployees: number;
+  nonSaudiEmployees: number;
+  sourceType: ComplianceSourceType;
+  sourceReference: string | null;
+  verificationStatus: ComplianceVerificationStatus;
+  verifiedAt: string | null;
+  verifiedByUserId: string | null;
+  notes: string | null;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NitaqatComplianceRecord {
+  id: string;
+  compliancePeriodId: string;
+  sourceType: ComplianceSourceType;
+  verificationStatus: ComplianceVerificationStatus;
+  classification: string | null;
+  saudiCount: number;
+  nonSaudiCount: number;
+  totalCount: number;
+  externalReference: string | null;
+  verifiedAt: string | null;
+  verifiedByUserId: string | null;
+  notes: string | null;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GosiComplianceRecord {
+  id: string;
+  compliancePeriodId: string;
+  registeredEmployeeCount: number | null;
+  contributionStatus: GosiStatus;
+  submissionStatus: GosiStatus;
+  paymentStatus: GosiStatus;
+  sourceType: ComplianceSourceType;
+  verificationStatus: ComplianceVerificationStatus;
+  externalReference: string | null;
+  verifiedAt: string | null;
+  verifiedByUserId: string | null;
+  notes: string | null;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ComplianceException {
+  id: string;
+  compliancePeriodId: string | null;
+  category: string | null;
+  description: string;
+  severity: ComplianceExceptionSeverity;
+  status: ComplianceExceptionStatus;
+  dueDate: string | null;
+  resolvedAt: string | null;
+  resolvedByUserId: string | null;
+  closedAt: string | null;
+  closedByUserId: string | null;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ComplianceEvidence {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  size: number;
+  uploadedAt: string;
+}
+
+export interface ComplianceDashboard {
+  nitaqat: NitaqatComplianceRecord | null;
+  gosi: GosiComplianceRecord | null;
+  exceptions: { open: number; highOrCritical: number };
+}
+
 export type ChangeOrderStatus = "pending" | "approved" | "rejected";
 
 export interface ChangeOrder {

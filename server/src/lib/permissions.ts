@@ -214,6 +214,29 @@ export const PERMISSIONS = {
   // documents). Deletion is the one irreversible action, so it gets its
   // own owner-only permission, mirroring those three exactly.
   "punchItem.delete": ["owner"],
+
+  // --- MIDAD Phase D1 — Nitaqat + GOSI Compliance Tracking Foundation ---
+  // NAMING COLLISION NOTE: "compliance.manage" already exists above (Phase
+  // 1/Slice 3) and gates a structurally different domain — VAT/Zakat/
+  // e-invoicing tax profile (routes/compliance.ts). Reusing that name here
+  // would silently let one permission gate two unrelated trust boundaries
+  // (tax configuration and workforce/Nitaqat/GOSI records) — the exact
+  // ambiguity this matrix's own one-action-per-domain discipline exists to
+  // prevent. laborCompliance.* is therefore its own, non-colliding name.
+  //
+  // Unlike the site-level operational domains above (task/dailyLog/
+  // projectTask/punchItem, all member-open for create/update), workforce
+  // compliance data sits in the same sensitive-business-data trust class
+  // as workforce.manage/payroll.manage — fully owner-gated end-to-end, not
+  // just its delete action. laborCompliance.manage covers every ordinary
+  // mutation (create/update a period, snapshot, Nitaqat/GOSI record, or
+  // exception); laborCompliance.verify is deliberately separate — the one
+  // action that turns UNVERIFIED data into VERIFIED, mirroring the
+  // payroll.manage/payroll.post split (payroll.post is the one
+  // irreversible, trust-elevating action kept apart from ordinary
+  // payroll.manage for the identical reason).
+  "laborCompliance.manage": ["owner"],
+  "laborCompliance.verify": ["owner"],
 } as const satisfies Record<string, readonly Role[]>;
 
 export type PermissionAction = keyof typeof PERMISSIONS;
