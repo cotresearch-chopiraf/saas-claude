@@ -6,11 +6,11 @@
 //
 // `group` is purely a visual grouping label in the sidebar — it carries no
 // financial meaning and must never be read as implying these domains
-// share a calculation or a total. Cost Plan, Commitment, and Actual Cost
-// sit in one visual group ("التكاليف") because they're all cost-side
-// concepts an estimator/PM checks together, not because they are the same
-// number — docs/MIDAD_FINANCIAL_MODEL.md's canonical separation is
-// unchanged by this grouping.
+// share a calculation or a total. Cost Plan, Contract, and BOQ sit in one
+// visual group ("التجاري") because they're all "what was agreed" concepts a
+// PM/estimator checks together, not because they are the same number —
+// docs/MIDAD_FINANCIAL_MODEL.md's canonical separation is unchanged by
+// this grouping.
 export interface ProjectSection {
   key: string;
   path: string;
@@ -23,32 +23,42 @@ export interface ProjectSection {
   permission?: string;
 }
 
-export const projectSectionGroups = ["المشروع", "الجدولة", "العقد والنطاق", "التكاليف", "التقدم", "التوقعات والتدفقات", "الإيرادات", "التشغيل", "المستندات"] as const;
+// MIDAD Phase F — UX/IA consolidation. Previously 9 separate groups (one
+// per feature-addition phase — "الجدولة" for C1, "التشغيل" for C2, etc.),
+// which read as the order features were BUILT rather than how a user
+// actually thinks about a project. Consolidated to 5 groups matching how a
+// PM/estimator/financial controller actually scans a project: Overview,
+// Commercial (what was agreed), Cost Control (what it's costing/will
+// cost), Execution (site/field activity), Commercial Documents (billing
+// instruments). This is a label/grouping change ONLY — every key, path,
+// and the section list itself is otherwise unchanged; no route, no
+// permission, no financial calculation is touched.
+export const projectSectionGroups = ["نظرة عامة", "التجاري", "ضبط التكلفة", "التنفيذ", "المستندات التجارية"] as const;
 
 export const projectSections: ProjectSection[] = [
-  { key: "overview", path: "overview", label: "نظرة عامة", group: "المشروع" },
-  // MIDAD Phase C1 — Gantt Scheduling Foundation. Its own group ("الجدولة"),
-  // deliberately separate from "التقدم" (which is Measurement/IPC physical
-  // quantity progress — a different concept from schedule task progress,
-  // per this phase's own explicit no-conflation requirement).
-  { key: "schedule", path: "schedule", label: "الجدول الزمني", group: "الجدولة" },
-  { key: "contract", path: "contract", label: "العقد", group: "العقد والنطاق" },
-  { key: "boq", path: "boq", label: "جدول الكميات", group: "العقد والنطاق" },
-  { key: "cost-plan", path: "cost-plan", label: "خطة التكلفة", group: "التكاليف" },
-  { key: "procurement", path: "procurement", label: "المشتريات والالتزامات", group: "التكاليف" },
-  { key: "actual-cost", path: "actual-cost", label: "التكلفة الفعلية", group: "التكاليف" },
-  { key: "progress", path: "progress", label: "القياسات", group: "التقدم" },
-  { key: "ipc", path: "ipc", label: "شهادات الدفع (IPC)", group: "التقدم" },
-  { key: "forecast", path: "forecast", label: "التوقعات المالية", group: "التوقعات والتدفقات" },
-  { key: "cash-flow", path: "cash-flow", label: "التدفق النقدي", group: "التوقعات والتدفقات" },
-  { key: "invoices", path: "invoices", label: "الفواتير", group: "الإيرادات" },
-  { key: "operations", path: "operations", label: "المهام والسجل اليومي", group: "التشغيل" },
-  // MIDAD Phase C2 — Punch Lists / Site Deficiencies. Alongside "operations"
-  // in the same field-level group — a punch item is site observation/
-  // deficiency tracking, the same operational class as Tasks/Daily Log,
-  // not scheduling (C1) or financial progress (التقدم).
-  { key: "punch-list", path: "punch-list", label: "قائمة الملاحظات", group: "التشغيل" },
-  { key: "documents", path: "documents", label: "المستندات", group: "المستندات" },
+  { key: "overview", path: "overview", label: "نظرة عامة", group: "نظرة عامة" },
+  { key: "contract", path: "contract", label: "العقد", group: "التجاري" },
+  { key: "boq", path: "boq", label: "جدول الكميات", group: "التجاري" },
+  { key: "cost-plan", path: "cost-plan", label: "خطة التكلفة", group: "التجاري" },
+  { key: "actual-cost", path: "actual-cost", label: "التكلفة الفعلية", group: "ضبط التكلفة" },
+  { key: "procurement", path: "procurement", label: "المشتريات والالتزامات", group: "ضبط التكلفة" },
+  { key: "forecast", path: "forecast", label: "التوقعات المالية", group: "ضبط التكلفة" },
+  { key: "cash-flow", path: "cash-flow", label: "التدفق النقدي", group: "ضبط التكلفة" },
+  { key: "progress", path: "progress", label: "القياسات", group: "التنفيذ" },
+  // MIDAD Phase C1 — Gantt Scheduling Foundation. Deliberately not
+  // conflated with "progress" above (Measurement/IPC physical-quantity
+  // progress is a different concept from schedule task progress) — the two
+  // stay separate section entries, simply grouped together visually under
+  // "التنفيذ" since both are field/execution concerns a PM checks together.
+  { key: "schedule", path: "schedule", label: "الجدول الزمني", group: "التنفيذ" },
+  { key: "operations", path: "operations", label: "المهام والسجل اليومي", group: "التنفيذ" },
+  // MIDAD Phase C2 — Punch Lists / Site Deficiencies. Alongside operations/
+  // schedule — a punch item is site observation/deficiency tracking, the
+  // same field-execution class.
+  { key: "punch-list", path: "punch-list", label: "قائمة الملاحظات", group: "التنفيذ" },
+  { key: "ipc", path: "ipc", label: "شهادات الدفع (IPC)", group: "المستندات التجارية" },
+  { key: "invoices", path: "invoices", label: "الفواتير", group: "المستندات التجارية" },
+  { key: "documents", path: "documents", label: "المستندات", group: "المستندات التجارية" },
 ];
 
 // Deliberately outside projectSections/projectSectionGroups: this is the

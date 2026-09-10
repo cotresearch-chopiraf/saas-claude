@@ -3,7 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { AuthProvider } from "../../auth/AuthContext";
 import { OverviewSection } from "./OverviewSection";
-import type { BoqRevision, BudgetAlert, BudgetSummary, CashFlowResult, Contract, ForecastResult, Project, ProjectLaborCost } from "../../api/types";
+import type { BoqRevision, BudgetAlert, BudgetSummary, CashFlowResult, Contract, ForecastResult, Project, ProjectLaborCost, ProjectTask, PunchItem } from "../../api/types";
 
 vi.mock("../context", () => ({
   useProjectContext: () => ({
@@ -225,6 +225,52 @@ const fixtureBudgetAlert: BudgetAlert = {
   updatedAt: "2026-08-01T00:00:00.000Z",
 };
 
+// MIDAD Phase F — A–E integration fixtures.
+const fixtureOverdueTask: ProjectTask = {
+  id: "t1",
+  projectId: "p1",
+  parentTaskId: null,
+  name: "أعمال الحفر",
+  description: null,
+  taskType: "task",
+  status: "in_progress",
+  startDate: "2026-01-01",
+  endDate: "2020-01-10",
+  progressPercent: 40,
+  sortOrder: 0,
+  createdAt: "2026-01-01T00:00:00.000Z",
+  updatedAt: "2026-01-01T00:00:00.000Z",
+};
+const fixtureMilestone: ProjectTask = {
+  ...fixtureOverdueTask,
+  id: "t2",
+  name: "اكتمال الأساسات",
+  taskType: "milestone",
+  status: "not_started",
+  endDate: "2099-09-12",
+};
+const fixtureCriticalPunchItem: PunchItem = {
+  id: "pi1",
+  projectId: "p1",
+  title: "تسريب في الطابق الأول",
+  description: null,
+  location: null,
+  priority: "critical",
+  status: "open",
+  assignedToUserId: null,
+  dueDate: null,
+  resolutionDescription: null,
+  resolvedAt: null,
+  resolvedByUserId: null,
+  verifiedAt: null,
+  verifiedByUserId: null,
+  closedAt: null,
+  closedByUserId: null,
+  createdBy: "u1",
+  createdAt: "2026-01-01T00:00:00.000Z",
+  updatedAt: "2026-01-01T00:00:00.000Z",
+};
+
 function mockApi(
   role: "owner" | "member",
   opts: {
@@ -235,6 +281,8 @@ function mockApi(
     revisions?: BoqRevision[];
     laborCost?: ProjectLaborCost;
     budgetAlerts?: BudgetAlert[];
+    tasks?: ProjectTask[];
+    punchItems?: PunchItem[];
     failPath?: string;
   } = {},
 ) {
@@ -245,6 +293,8 @@ function mockApi(
   const revisions = opts.revisions ?? [fixtureRevisionDraft, fixtureRevisionPublished];
   const laborCost = opts.laborCost ?? fixtureLaborCost;
   const budgetAlerts = opts.budgetAlerts ?? [];
+  const tasks = opts.tasks ?? [];
+  const punchItems = opts.punchItems ?? [];
 
   vi.mocked(apiFetch).mockImplementation((path: unknown) => {
     const p = String(path);
@@ -264,6 +314,8 @@ function mockApi(
     if (p === "/projects/p1/boq-revisions") return Promise.resolve(revisions);
     if (p === "/projects/p1/labor-cost") return Promise.resolve(laborCost);
     if (p.startsWith("/budget-alerts")) return Promise.resolve(budgetAlerts);
+    if (p === "/projects/p1/schedule") return Promise.resolve({ tasks, dependencies: [] });
+    if (p === "/projects/p1/punch-items") return Promise.resolve(punchItems);
     return Promise.reject(new Error(`unexpected apiFetch call in test: ${p}`));
   });
 }
@@ -468,6 +520,33 @@ describe("<OverviewSection/> (Executive Dashboard)", () => {
     renderSection();
     await waitFor(() => expect(screen.getByText("تنبيهات الميزانية")).toBeInTheDocument());
     expect(screen.queryByText("استهلاك الميزانية وصل إلى 105%")).not.toBeInTheDocument();
+  });
+
+  it("MIDAD Phase F: Schedule card shows an honest 'no data' state, and 'على المسار الصحيح' when nothing is overdue", async () => {
+    mockApi("owner", { tasks: [fixtureMilestone] });
+    renderSection();
+    await waitFor(() => expect(screen.getByText("على المسار الصحيح")).toBeInTheDocument());
+    expect(screen.getByText(/اكتمال الأساسات/)).toBeInTheDocument();
+  });
+
+  it("MIDAD Phase F: Schedule card flags overdue incomplete tasks as 'متأخر'", async () => {
+    mockApi("owner", { tasks: [fixtureOverdueTask] });
+    renderSection();
+    await waitFor(() => expect(screen.getByText("متأخر")).toBeInTheDocument());
+  });
+
+  it("MIDAD Phase F: Punch List card shows an open+critical count from server data verbatim", async () => {
+    mockApi("owner", { punchItems: [fixtureCriticalPunchItem] });
+    renderSection();
+    await waitFor(() => expect(screen.getByText("1 مفتوحة")).toBeInTheDocument());
+    expect(screen.getByText("1 حرجة")).toBeInTheDocument();
+  });
+
+  it("MIDAD Phase F: Punch List card shows an honest empty state when nothing is open", async () => {
+    mockApi("owner", { punchItems: [] });
+    renderSection();
+    await waitFor(() => expect(screen.getByText("قائمة الملاحظات")).toBeInTheDocument());
+    expect(screen.getByText("لا توجد ملاحظات مسجَّلة بعد.")).toBeInTheDocument();
   });
 
   it("Member read access: a member can render the full dashboard, with no mutation controls anywhere", async () => {

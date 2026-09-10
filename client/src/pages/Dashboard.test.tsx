@@ -41,6 +41,7 @@ function mockApi(opts: { projects?: Project[]; customers?: Customer[] } = {}) {
     if (p === "/auth/me") return Promise.resolve({ user: { id: "u1", name: "Test", email: "t@test.com", role: "owner" }, company: { id: "c1", name: "Test Co" } });
     if (p === "/projects" && !method) return Promise.resolve(projects);
     if (p === "/customers" && !method) return Promise.resolve(customers);
+    if (p.startsWith("/budget-alerts")) return Promise.resolve([]);
     return Promise.reject(new Error(`unexpected apiFetch call in test: ${p} ${method}`));
   });
 }
@@ -80,6 +81,7 @@ describe("<Dashboard/> — project creation customer link (Phase A')", () => {
         return Promise.resolve({});
       }
       if (p === "/projects" && !method) return Promise.resolve([]);
+      if (p.startsWith("/budget-alerts")) return Promise.resolve([]);
       return Promise.reject(new Error(`unexpected: ${p} ${method}`));
     });
 
@@ -107,6 +109,7 @@ describe("<Dashboard/> — project creation customer link (Phase A')", () => {
         return Promise.resolve({});
       }
       if (p === "/projects" && !method) return Promise.resolve([]);
+      if (p.startsWith("/budget-alerts")) return Promise.resolve([]);
       return Promise.reject(new Error(`unexpected: ${p} ${method}`));
     });
 

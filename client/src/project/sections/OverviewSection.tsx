@@ -14,6 +14,8 @@ import { getCashFlow } from "../../api/cashflow";
 import { listRevisions } from "../../api/boq";
 import { getProjectLaborCost } from "../../api/laborCost";
 import { listBudgetAlerts } from "../../api/budgetAlerts";
+import { getProjectSchedule } from "../../api/projectSchedule";
+import { listPunchItems } from "../../api/punchItems";
 import { useProjectContext } from "../context";
 import type {
   BoqRevision,
@@ -26,6 +28,8 @@ import type {
   ForecastResult,
   Project,
   ProjectLaborCost,
+  ProjectTask,
+  PunchItem,
 } from "../../api/types";
 
 const statusLabel: Record<Project["status"], string> = {
@@ -152,6 +156,11 @@ export function OverviewSection() {
         <CostPlanCard budget={data.budget} />
       </div>
 
+      <div className="grid gap-4 lg:grid-cols-2">
+        <ScheduleStatusCard projectId={projectId} />
+        <PunchListStatusCard projectId={projectId} />
+      </div>
+
       <BudgetAlertsCard projectId={projectId} />
 
       <ForecastCard forecast={data.forecast} />
@@ -247,6 +256,103 @@ function BudgetAlertsCard({ projectId }: { projectId: string }) {
             </li>
           ))}
         </ul>
+      )}
+    </Card>
+  );
+}
+
+function today(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+// MIDAD Phase F — A–E integration: Schedule (Phase C1) surfaced as a
+// compact status card, the same "summary now, full screen one click away"
+// pattern as every other card here. Never computes a schedule health
+// verdict of its own beyond the two facts a plain date comparison can
+// state honestly (an incomplete task whose end date has passed; the
+// nearest upcoming incomplete milestone) — both derived from fields the
+// Schedule API already returns, nothing invented.
+function ScheduleStatusCard({ projectId }: { projectId: string }) {
+  const [tasks, setTasks] = useState<ProjectTask[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  function load() {
+    setError(null);
+    getProjectSchedule(projectId)
+      .then((s) => setTasks(s.tasks))
+      .catch((err) => setError(err instanceof Error ? err.message : "تعذّر تحميل الجدول الزمني"));
+  }
+  useEffect(load, [projectId]);
+
+  const overdue = (tasks ?? []).filter((t) => t.status !== "completed" && t.endDate < today());
+  const nextMilestone = (tasks ?? [])
+    .filter((t) => t.taskType === "milestone" && t.status !== "completed")
+    .sort((a, b) => a.endDate.localeCompare(b.endDate))[0];
+
+  return (
+    <Card className="p-5">
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="font-semibold text-stone-800">الجدول الزمني</h2>
+        <Link to={`/projects/${projectId}/schedule`} className="text-sm text-primary hover:underline">
+          فتح الجدول الزمني
+        </Link>
+      </div>
+      {error && <ErrorState message={error} onRetry={load} />}
+      {!error && tasks === null && <p className="text-sm text-stone-400">جارٍ التحميل...</p>}
+      {!error && tasks && tasks.length === 0 && <p className="text-sm text-stone-400">لا توجد بيانات جدولة بعد.</p>}
+      {!error && tasks && tasks.length > 0 && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <Badge tone={overdue.length > 0 ? "warning" : "success"}>{overdue.length > 0 ? "متأخر" : "على المسار الصحيح"}</Badge>
+            {overdue.length > 0 && <span className="text-sm text-stone-500">{overdue.length} مهمة متأخرة</span>}
+          </div>
+          {nextMilestone && (
+            <p className="text-sm text-stone-600">المعلم القادم: {nextMilestone.name} — {formatDate(nextMilestone.endDate)}</p>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+// MIDAD Phase F — A–E integration: Punch Lists (Phase C2) surfaced as a
+// compact status card. Only counts, from server-provided statuses — never
+// invents a deficiency-resolution verdict.
+const OPEN_PUNCH_STATUSES: PunchItem["status"][] = ["open", "assigned", "in_progress"];
+
+function PunchListStatusCard({ projectId }: { projectId: string }) {
+  const [items, setItems] = useState<PunchItem[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  function load() {
+    setError(null);
+    listPunchItems(projectId)
+      .then(setItems)
+      .catch((err) => setError(err instanceof Error ? err.message : "تعذّر تحميل قائمة الملاحظات"));
+  }
+  useEffect(load, [projectId]);
+
+  const open = (items ?? []).filter((i) => OPEN_PUNCH_STATUSES.includes(i.status));
+  const critical = open.filter((i) => i.priority === "critical").length;
+
+  return (
+    <Card className="p-5">
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="font-semibold text-stone-800">قائمة الملاحظات</h2>
+        <Link to={`/projects/${projectId}/punch-list`} className="text-sm text-primary hover:underline">
+          فتح القائمة
+        </Link>
+      </div>
+      {error && <ErrorState message={error} onRetry={load} />}
+      {!error && items === null && <p className="text-sm text-stone-400">جارٍ التحميل...</p>}
+      {!error && items && items.length === 0 && <p className="text-sm text-stone-400">لا توجد ملاحظات مسجَّلة بعد.</p>}
+      {!error && items && items.length > 0 && (
+        <div className="flex items-center gap-2">
+          <Badge tone={open.length === 0 ? "success" : critical > 0 ? "danger" : "warning"}>
+            {open.length === 0 ? "لا توجد ملاحظات مفتوحة" : `${open.length} مفتوحة`}
+          </Badge>
+          {critical > 0 && <span className="text-sm text-danger-600">{critical} حرجة</span>}
+        </div>
       )}
     </Card>
   );
