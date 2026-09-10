@@ -3,6 +3,9 @@ import { apiFetch, ApiError } from "../api/client";
 import type { Task, TaskStatus } from "../api/types";
 import { Skeleton } from "../ui/Skeleton";
 import { ErrorState } from "../ui/ErrorState";
+import { EmptyState } from "../ui/EmptyState";
+import { Badge } from "../ui/Badge";
+import { Button } from "../ui/Button";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { Can } from "../auth/Can";
 
@@ -10,6 +13,15 @@ const statusLabel: Record<TaskStatus, string> = {
   todo: "لم تبدأ",
   in_progress: "جارية",
   done: "منتهية",
+};
+
+// Same neutral-for-not-active-work convention this app already uses for
+// project status (Dashboard's statusTone maps "completed" to "neutral", not
+// "success") — only in_progress is visually distinct here.
+const statusTone: Record<TaskStatus, "neutral" | "warning"> = {
+  todo: "neutral",
+  in_progress: "warning",
+  done: "neutral",
 };
 
 const nextStatus: Record<TaskStatus, TaskStatus> = {
@@ -68,42 +80,36 @@ export function TaskPanel({ projectId }: { projectId: string }) {
 
   return (
     <div>
-      <ul className="divide-y divide-stone-100 rounded-lg border border-stone-200 bg-white">
-        {tasks.map((task) => (
-          <li key={task.id} className="flex items-center justify-between gap-3 p-3">
-            <div>
-              <p className={task.status === "done" ? "text-stone-400 line-through" : "text-stone-800"}>
-                {task.title}
-              </p>
-              {task.assigneeName && <p className="text-xs text-stone-500">{task.assigneeName}</p>}
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => cycleStatus(task)}
-                className={`rounded-full px-2 py-0.5 text-xs ${
-                  task.status === "done"
-                    ? "bg-stone-200 text-stone-600"
-                    : task.status === "in_progress"
-                      ? "bg-amber-100 text-amber-700"
-                      : "bg-stone-100 text-stone-600"
-                }`}
-              >
-                {statusLabel[task.status]}
-              </button>
-              <Can permission="task.delete">
-                <button
-                  onClick={() => setPendingDelete(task)}
-                  className="text-stone-300 hover:text-red-500"
-                  aria-label="حذف المهمة"
-                >
-                  ✕
+      {tasks.length === 0 ? (
+        <EmptyState message="لا توجد مهام بعد" />
+      ) : (
+        <ul className="divide-y divide-stone-100 rounded-lg border border-stone-200 bg-white">
+          {tasks.map((task) => (
+            <li key={task.id} className="flex items-center justify-between gap-3 p-3">
+              <div>
+                <p className={task.status === "done" ? "text-stone-400 line-through" : "text-stone-800"}>
+                  {task.title}
+                </p>
+                {task.assigneeName && <p className="text-xs text-stone-500">{task.assigneeName}</p>}
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={() => cycleStatus(task)} aria-label={`تغيير حالة المهمة، الحالة الحالية: ${statusLabel[task.status]}`}>
+                  <Badge tone={statusTone[task.status]}>{statusLabel[task.status]}</Badge>
                 </button>
-              </Can>
-            </div>
-          </li>
-        ))}
-        {tasks.length === 0 && <li className="p-4 text-center text-stone-400">لا توجد مهام بعد</li>}
-      </ul>
+                <Can permission="task.delete">
+                  <button
+                    onClick={() => setPendingDelete(task)}
+                    className="text-stone-300 hover:text-red-500"
+                    aria-label="حذف المهمة"
+                  >
+                    ✕
+                  </button>
+                </Can>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
 
       <form onSubmit={addTask} className="mt-3 flex gap-2">
         <input
@@ -119,7 +125,7 @@ export function TaskPanel({ projectId }: { projectId: string }) {
           onChange={(e) => setAssigneeName(e.target.value)}
           className="w-40 rounded-md border border-stone-300 px-3 py-2 text-sm"
         />
-        <button className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white">إضافة</button>
+        <Button type="submit">إضافة</Button>
       </form>
 
       <ConfirmDialog

@@ -6,6 +6,7 @@ import { Badge } from "../../ui/Badge";
 import { Button } from "../../ui/Button";
 import { FinancialTable, type FinancialColumn } from "../../ui/FinancialTable";
 import { ErrorState } from "../../ui/ErrorState";
+import { EmptyState } from "../../ui/EmptyState";
 import { ConfirmDialog } from "../../ui/ConfirmDialog";
 import { Skeleton } from "../../ui/Skeleton";
 import { Can } from "../../auth/Can";
@@ -122,7 +123,7 @@ export function ProcurementSection() {
       />
 
       {suppliers.length === 0 && commitments !== null && (
-        <p className="text-sm text-stone-400">يجب إضافة مورد أولاً من قسم "الموردون" قبل إنشاء التزام.</p>
+        <EmptyState message='يجب إضافة مورد أولاً من قسم "الموردون" قبل إنشاء التزام.' />
       )}
 
       {showCreate && (

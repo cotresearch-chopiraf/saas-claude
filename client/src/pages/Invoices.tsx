@@ -5,8 +5,13 @@ import { apiFetch, ApiError, getToken } from "../api/client";
 import { listInvoices } from "../api/invoices";
 import { formatMoney } from "../lib/format";
 import type { DocumentLanguage, Invoice } from "../api/types";
-import { Skeleton } from "../ui/Skeleton";
+import { PageHeader } from "../ui/PageHeader";
+import { Badge } from "../ui/Badge";
+import { Button } from "../ui/Button";
+import { MetricCard } from "../ui/MetricCard";
+import { FinancialTable, type FinancialColumn } from "../ui/FinancialTable";
 import { ErrorState } from "../ui/ErrorState";
+import { EmptyState } from "../ui/EmptyState";
 
 // Slice AA Scope G — GET /api/invoices is now paginated server-side (a
 // server-enforced max page size, closing the previous unbounded-query
@@ -19,10 +24,12 @@ import { ErrorState } from "../ui/ErrorState";
 const PAGE_SIZE = 100;
 
 const statusLabel: Record<Invoice["status"], string> = { draft: "مسودة", sent: "أُرسلت", paid: "مُسدَّدة" };
-const statusColor: Record<Invoice["status"], string> = {
-  draft: "bg-stone-200 text-stone-600",
-  sent: "bg-amber-100 text-amber-700",
-  paid: "bg-emerald-100 text-emerald-700",
+// Same neutral/warning/success vocabulary used everywhere else (Badge's
+// own tone system), replacing this page's previous hand-mapped colors.
+const statusTone: Record<Invoice["status"], "neutral" | "warning" | "success"> = {
+  draft: "neutral",
+  sent: "warning",
+  paid: "success",
 };
 const money = (n: number) => formatMoney(n);
 
@@ -42,6 +49,11 @@ async function downloadInvoicePdf(id: string, invoiceNumber: string) {
   URL.revokeObjectURL(url);
 }
 
+// Phase F.2: rebuilt on the shared PageHeader/FinancialTable/Badge/
+// MetricCard vocabulary (this page previously predated/bypassed the shared
+// UI kit entirely, like Quotes.tsx). No behavior change — same endpoints,
+// same pagination walk, same feature-flag-off handling, same per-status
+// actions.
 export function Invoices() {
   const [invoices, setInvoices] = useState<Invoice[] | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -92,10 +104,8 @@ export function Invoices() {
   if (disabled) {
     return (
       <Layout>
-        <h1 className="mb-4 text-2xl font-bold text-stone-800">الفواتير</h1>
-        <p className="rounded-lg border border-dashed border-stone-300 p-8 text-center text-stone-500">
-          ميزة الفوترة معطّلة حالياً لشركتك — فعّليها من صفحة الإعدادات لبدء إصدار الفواتير.
-        </p>
+        <PageHeader title="الفواتير" />
+        <EmptyState message="ميزة الفوترة معطّلة حالياً لشركتك — فعّليها من صفحة الإعدادات لبدء إصدار الفواتير." />
       </Layout>
     );
   }
@@ -104,84 +114,70 @@ export function Invoices() {
   const paidTaxTotal = paidInvoices.reduce((sum, inv) => sum + inv.taxAmount, 0);
   const paidRevenueTotal = paidInvoices.reduce((sum, inv) => sum + inv.total, 0);
 
+  const columns: FinancialColumn<Invoice>[] = [
+    { key: "invoiceNumber", header: "رقم الفاتورة", render: (inv) => <span className="font-mono text-xs text-stone-500">{inv.invoiceNumber}</span> },
+    { key: "clientName", header: "العميل", render: (inv) => inv.clientName },
+    { key: "issueDate", header: "تاريخ الإصدار", render: (inv) => inv.issueDate },
+    { key: "subtotal", header: "المجموع الفرعي", render: (inv) => money(inv.subtotal) },
+    { key: "tax", header: "الضريبة", render: (inv) => `${money(inv.taxAmount)} (${inv.taxRatePercent}%)` },
+    { key: "total", header: "الإجمالي", render: (inv) => <span className="font-medium text-stone-700">{money(inv.total)}</span> },
+    { key: "status", header: "الحالة", render: (inv) => <Badge tone={statusTone[inv.status]}>{statusLabel[inv.status]}</Badge> },
+  ];
+
   return (
     <Layout>
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-stone-800">الفواتير</h1>
-        <button onClick={() => setShowForm((v) => !v)} className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white">
-          {showForm ? "إلغاء" : "+ فاتورة جديدة"}
-        </button>
-      </div>
-
-      {error && <ErrorState message={error} onRetry={load} />}
-      {!error && invoices === null && <Skeleton rows={3} />}
+      <PageHeader
+        title="الفواتير"
+        actions={
+          <Button size="sm" onClick={() => setShowForm((v) => !v)}>
+            {showForm ? "إلغاء" : "+ فاتورة جديدة"}
+          </Button>
+        }
+      />
 
       {!error && invoices !== null && paidInvoices.length > 0 && (
         <div className="mb-6 grid gap-4 sm:grid-cols-2">
-          <div className="rounded-lg border border-stone-200 bg-white p-4">
-            <p className="text-xs text-stone-500">إجمالي المُحصَّل (فواتير مُسدَّدة)</p>
-            <p className="mt-1 text-lg font-bold text-stone-800">{money(paidRevenueTotal)}</p>
-          </div>
-          <div className="rounded-lg border border-stone-200 bg-white p-4">
-            <p className="text-xs text-stone-500">إجمالي الضريبة من الفواتير المُسدَّدة</p>
-            <p className="mt-1 text-lg font-bold text-primary">{money(paidTaxTotal)}</p>
-          </div>
+          <MetricCard label="إجمالي المُحصَّل (فواتير مُسدَّدة)" value={money(paidRevenueTotal)} />
+          <MetricCard label="إجمالي الضريبة من الفواتير المُسدَّدة" value={money(paidTaxTotal)} />
         </div>
       )}
 
       {showForm && (
-        <NewInvoiceForm
-          onCreated={() => {
-            setShowForm(false);
-            load();
-          }}
-        />
+        <div className="mb-6">
+          <NewInvoiceForm
+            onCreated={() => {
+              setShowForm(false);
+              load();
+            }}
+          />
+        </div>
       )}
 
-      {!error && invoices !== null && (
-      <ul className="space-y-2">
-        {invoices.map((inv) => (
-          <li key={inv.id} className="rounded-lg border border-stone-200 bg-white p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="font-mono text-sm text-stone-500">{inv.invoiceNumber}</p>
-                <p className="font-semibold text-stone-800">{inv.clientName}</p>
-                <p className="text-xs text-stone-400">{inv.issueDate}</p>
-              </div>
-              <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs ${statusColor[inv.status]}`}>
-                {statusLabel[inv.status]}
-              </span>
-            </div>
-            <div className="mt-2 flex gap-4 text-xs text-stone-500">
-              <span>المجموع الفرعي: {money(inv.subtotal)}</span>
-              <span>الضريبة ({inv.taxRatePercent}%): {money(inv.taxAmount)}</span>
-              <span className="font-medium text-stone-700">الإجمالي: {money(inv.total)}</span>
-            </div>
-            <div className="mt-3 flex gap-2">
-              {inv.status === "draft" && (
-                <button onClick={() => sendInvoice(inv)} className="rounded-md bg-primary px-3 py-1 text-xs font-medium text-white">
-                  إرسال للعميل
-                </button>
-              )}
-              {inv.status === "sent" && (
-                <button onClick={() => markPaid(inv)} className="rounded-md bg-emerald-600 px-3 py-1 text-xs font-medium text-white">
-                  تسجيل كمُسدَّدة
-                </button>
-              )}
-              <button
-                onClick={() => downloadInvoicePdf(inv.id, inv.invoiceNumber)}
-                className="rounded-md border border-stone-300 px-3 py-1 text-xs text-stone-600"
-              >
-                تنزيل PDF
-              </button>
-            </div>
-          </li>
-        ))}
-        {invoices.length === 0 && (
-          <li className="rounded-lg border border-dashed border-stone-300 p-8 text-center text-stone-500">لا توجد فواتير بعد</li>
+      <FinancialTable
+        columns={columns}
+        rows={invoices}
+        rowKey={(inv) => inv.id}
+        error={error}
+        onRetry={load}
+        emptyMessage="لا توجد فواتير بعد"
+        rowActions={(inv) => (
+          <div className="flex flex-wrap justify-end gap-2">
+            {inv.status === "draft" && (
+              <Button size="sm" onClick={() => sendInvoice(inv)}>
+                إرسال للعميل
+              </Button>
+            )}
+            {inv.status === "sent" && (
+              <Button size="sm" onClick={() => markPaid(inv)}>
+                تسجيل كمُسدَّدة
+              </Button>
+            )}
+            <Button size="sm" variant="secondary" onClick={() => downloadInvoicePdf(inv.id, inv.invoiceNumber)}>
+              تنزيل PDF
+            </Button>
+          </div>
         )}
-      </ul>
-      )}
+      />
     </Layout>
   );
 }
@@ -219,8 +215,8 @@ function NewInvoiceForm({ onCreated }: { onCreated: () => void }) {
   }
 
   return (
-    <form onSubmit={onSubmit} className="mb-6 space-y-3 rounded-lg border border-stone-200 bg-white p-5">
-      {error && <div className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+    <form onSubmit={onSubmit} className="space-y-3 rounded-lg border border-stone-200 bg-white p-5">
+      {error && <ErrorState message={error} />}
       <div className="grid gap-3 sm:grid-cols-2">
         <input
           required
@@ -251,7 +247,7 @@ function NewInvoiceForm({ onCreated }: { onCreated: () => void }) {
             <input
               type="number"
               min="0"
-              placeholder="المبلغ ($)"
+              placeholder="المبلغ"
               value={item.amount}
               onChange={(e) => updateItem(i, { amount: e.target.value })}
               className="w-40 rounded-md border border-stone-300 px-3 py-2 text-sm"
@@ -268,7 +264,7 @@ function NewInvoiceForm({ onCreated }: { onCreated: () => void }) {
       </div>
 
       <p className="text-xs text-stone-400">الترقيم ونسبة الضريبة ومعلومات الشركة تُملأ تلقائياً من الإعدادات.</p>
-      <button className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white">حفظ كمسودة</button>
+      <Button type="submit">حفظ كمسودة</Button>
     </form>
   );
 }

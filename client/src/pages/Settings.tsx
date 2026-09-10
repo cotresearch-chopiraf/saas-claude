@@ -1,6 +1,11 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Layout } from "../components/Layout";
 import { apiFetch, ApiError, getToken } from "../api/client";
+import { PageHeader } from "../ui/PageHeader";
+import { Card } from "../ui/Card";
+import { Badge } from "../ui/Badge";
+import { Button } from "../ui/Button";
+import { ErrorState } from "../ui/ErrorState";
 import type { CompanySettings } from "../api/types";
 
 export function Settings() {
@@ -75,12 +80,16 @@ export function Settings() {
 
   return (
     <Layout>
-      <h1 className="mb-6 text-2xl font-bold text-stone-800">إعدادات الشركة</h1>
+      <PageHeader title="إعدادات الشركة" subtitle="الشعار، معلومات الشركة، والميزات الاختيارية." />
 
-      {error && <div className="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
-      {notice && <div className="mb-4 rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{notice}</div>}
+      {error && (
+        <div className="mb-4">
+          <ErrorState message={error} />
+        </div>
+      )}
+      {notice && <p className="mb-4 rounded-md bg-success-50 px-3 py-2 text-sm text-success-700">{notice}</p>}
 
-      <div className="mb-6 rounded-lg border border-stone-200 bg-white p-5">
+      <Card className="mb-6 p-5">
         <h3 className="mb-3 font-semibold text-stone-700">شعار الشركة (يظهر تلقائياً في ترويسة كل مستند)</h3>
         <div className="flex items-center gap-4">
           {settings.logoPath && (
@@ -97,9 +106,10 @@ export function Settings() {
             />
           </label>
         </div>
-      </div>
+      </Card>
 
-      <form onSubmit={saveProfile} className="mb-6 space-y-3 rounded-lg border border-stone-200 bg-white p-5">
+      <form onSubmit={saveProfile} className="mb-6">
+        <Card className="space-y-3 p-5">
         <h3 className="font-semibold text-stone-700">معلومات الشركة (تُملأ تلقائياً في كل عرض سعر وفاتورة)</h3>
         <input
           placeholder="العنوان"
@@ -133,10 +143,11 @@ export function Settings() {
             className="mt-1 w-40 rounded-md border border-stone-300 px-3 py-2 text-sm"
           />
         </label>
-        <button className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white">حفظ</button>
+        <Button type="submit">حفظ</Button>
+        </Card>
       </form>
 
-      <div className="rounded-lg border border-stone-200 bg-white p-5">
+      <Card className="p-5">
         <h3 className="mb-1 font-semibold text-stone-700">الميزات الاختيارية</h3>
         <p className="mb-3 text-sm text-stone-500">فعّلي أو عطّلي أي ميزة حسب حاجة شركتك — لا حاجة لاستخدام ما لا تريدين.</p>
         <div className="flex items-center justify-between rounded-md border border-stone-200 p-3">
@@ -144,16 +155,13 @@ export function Settings() {
             <p className="text-sm font-medium text-stone-800">الفوترة</p>
             <p className="text-xs text-stone-500">إنشاء فواتير رسمية بترقيم وضريبة تلقائيين</p>
           </div>
-          <button
-            onClick={toggleInvoicing}
-            className={`rounded-full px-4 py-1 text-xs font-medium ${
-              settings.featureFlags.invoicing ? "bg-primary text-white" : "bg-stone-200 text-stone-600"
-            }`}
-          >
-            {settings.featureFlags.invoicing ? "مُفعَّلة" : "معطَّلة"}
+          <button onClick={toggleInvoicing} aria-label={`تبديل ميزة الفوترة، الحالة الحالية: ${settings.featureFlags.invoicing ? "مُفعَّلة" : "معطَّلة"}`}>
+            <Badge tone={settings.featureFlags.invoicing ? "success" : "neutral"}>
+              {settings.featureFlags.invoicing ? "مُفعَّلة" : "معطَّلة"}
+            </Badge>
           </button>
         </div>
-      </div>
+      </Card>
     </Layout>
   );
 }

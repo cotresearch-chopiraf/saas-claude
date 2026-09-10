@@ -6,7 +6,11 @@ import { apiFetch, ApiError, getToken } from "../api/client";
 import { listQuotes } from "../api/quotes";
 import { formatMoney } from "../lib/format";
 import type { DocumentLanguage, Quote } from "../api/types";
-import { Skeleton } from "../ui/Skeleton";
+import { PageHeader } from "../ui/PageHeader";
+import { Card } from "../ui/Card";
+import { Badge } from "../ui/Badge";
+import { Button } from "../ui/Button";
+import { FinancialTable, type FinancialColumn } from "../ui/FinancialTable";
 import { ErrorState } from "../ui/ErrorState";
 
 const PAGE_SIZE = 20;
@@ -31,11 +35,14 @@ const statusLabel: Record<Quote["status"], string> = {
   rejected: "مرفوض",
 };
 
-const statusColor: Record<Quote["status"], string> = {
-  draft: "bg-stone-200 text-stone-600",
-  sent: "bg-amber-100 text-amber-700",
-  accepted: "bg-emerald-100 text-emerald-700",
-  rejected: "bg-red-100 text-red-700",
+// Same neutral/warning/success/danger vocabulary used by every other
+// status field in the app (Badge's own tone system), replacing this page's
+// previous hand-mapped color classes.
+const statusTone: Record<Quote["status"], "neutral" | "warning" | "success" | "danger"> = {
+  draft: "neutral",
+  sent: "warning",
+  accepted: "success",
+  rejected: "danger",
 };
 
 interface DraftItem {
@@ -43,6 +50,11 @@ interface DraftItem {
   amount: string;
 }
 
+// Global nav page (not project-scoped) — company-wide quote list. Phase F.2:
+// rebuilt on the shared PageHeader/FinancialTable/Badge vocabulary (this
+// page previously predated/bypassed the shared UI kit entirely); no
+// behavior change — same endpoints, same pagination, same per-status
+// actions.
 export function Quotes() {
   const [quotes, setQuotes] = useState<Quote[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -88,113 +100,148 @@ export function Quotes() {
 
   async function convertToInvoice(quote: Quote) {
     const full = await apiFetch<Quote & { items: { description: string; amount: string }[] }>(`/quotes/${quote.id}`);
+    await apiFetch("/invoices", {
+      method: "POST",
+      body: JSON.stringify({
+        quoteId: quote.id,
+        clientName: quote.clientName,
+        language: quote.language,
+        items: full.items.map((i) => ({ description: i.description, amount: i.amount })),
+      }),
+    });
+    navigate("/invoices");
+  }
+
+  const columns: FinancialColumn<Quote>[] = [
+    { key: "quoteNumber", header: "رقم العرض", render: (q) => <span className="font-mono text-xs text-stone-500">{q.quoteNumber}</span> },
+    {
+      key: "project",
+      header: "المشروع",
+      render: (q) => (
+        <div>
+          <p className="font-medium text-stone-800">{q.projectName}</p>
+          {q.acceptedByName && (
+            <p className="mt-0.5 text-xs text-success-600">
+              قبِله {q.acceptedByName} بتاريخ {q.acceptedAt?.slice(0, 10)}
+            </p>
+          )}
+        </div>
+      ),
+    },
+    { key: "clientName", header: "العميل", render: (q) => q.clientName },
+    { key: "subtotal", header: "الإجمالي", render: (q) => money(q.subtotal) },
+    { key: "status", header: "الحالة", render: (q) => <Badge tone={statusTone[q.status]}>{statusLabel[q.status]}</Badge> },
+  ];
+
+  return (
+    <Layout>
+      <PageHeader
+        title="عروض الأسعار"
+        actions={
+          <Button size="sm" onClick={() => setShowForm((v) => !v)}>
+            {showForm ? "إلغاء" : "+ عرض سعر جديد"}
+          </Button>
+        }
+      />
+
+      {showForm && (
+        <div className="mb-6">
+          <NewQuoteForm
+            onCreated={() => {
+              setShowForm(false);
+              load();
+            }}
+          />
+        </div>
+      )}
+
+      <FinancialTable
+        columns={columns}
+        rows={quotes}
+        rowKey={(q) => q.id}
+        error={error}
+        onRetry={load}
+        emptyMessage="لا توجد عروض أسعار بعد"
+        rowActions={(quote) => (
+          <QuoteRowActions
+            quote={quote}
+            onSend={() => sendQuote(quote)}
+            onCopyLink={() => copyLink(quote)}
+            onDownload={() => downloadQuotePdf(quote.id, quote.quoteNumber)}
+            onConvert={() => convertToInvoice(quote)}
+          />
+        )}
+      />
+
+      {!error && quotes !== null && hasMore && (
+        <div className="pt-4 text-center">
+          <Button variant="secondary" size="sm" disabled={loadingMore} onClick={loadMore}>
+            {loadingMore ? "جارٍ التحميل..." : "تحميل المزيد"}
+          </Button>
+        </div>
+      )}
+    </Layout>
+  );
+}
+
+// Isolates each row's own convert-to-invoice error (previously a jarring
+// native alert()) so it appears next to the action that caused it, without
+// disturbing every other row — same pattern SupplierRowActions already
+// uses for its own per-row error state.
+function QuoteRowActions({
+  quote,
+  onSend,
+  onCopyLink,
+  onDownload,
+  onConvert,
+}: {
+  quote: Quote;
+  onSend: () => Promise<void>;
+  onCopyLink: () => void;
+  onDownload: () => Promise<void>;
+  onConvert: () => Promise<void>;
+}) {
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function run(action: () => Promise<void>, fallbackMessage: string) {
+    setBusy(true);
+    setError(null);
     try {
-      await apiFetch("/invoices", {
-        method: "POST",
-        body: JSON.stringify({
-          quoteId: quote.id,
-          clientName: quote.clientName,
-          language: quote.language,
-          items: full.items.map((i) => ({ description: i.description, amount: i.amount })),
-        }),
-      });
-      navigate("/invoices");
+      await action();
     } catch (err) {
-      alert(err instanceof ApiError ? err.message : "تعذّر إنشاء الفاتورة");
+      setError(err instanceof ApiError ? err.message : fallbackMessage);
+    } finally {
+      setBusy(false);
     }
   }
 
   return (
-    <Layout>
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-stone-800">عروض الأسعار</h1>
-        <button onClick={() => setShowForm((v) => !v)} className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white">
-          {showForm ? "إلغاء" : "+ عرض سعر جديد"}
-        </button>
-      </div>
-
-      {showForm && (
-        <NewQuoteForm
-          onCreated={() => {
-            setShowForm(false);
-            load();
-          }}
-        />
-      )}
-
-      {error && <ErrorState message={error} onRetry={load} />}
-      {!error && quotes === null && <Skeleton rows={3} />}
-      {!error && quotes !== null && (
-      <ul className="space-y-2">
-        {quotes.map((quote) => (
-          <li key={quote.id} className="rounded-lg border border-stone-200 bg-white p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="font-mono text-xs text-stone-400">{quote.quoteNumber}</p>
-                <p className="font-semibold text-stone-800">{quote.projectName}</p>
-                <p className="text-sm text-stone-500">
-                  العميل: {quote.clientName} · {money(quote.subtotal)}
-                </p>
-                {quote.acceptedByName && (
-                  <p className="text-sm text-emerald-600">قبِله {quote.acceptedByName} بتاريخ {quote.acceptedAt?.slice(0, 10)}</p>
-                )}
-              </div>
-              <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs ${statusColor[quote.status]}`}>
-                {statusLabel[quote.status]}
-              </span>
-            </div>
-            <div className="mt-3 flex gap-2">
-              {quote.status === "draft" && (
-                <button onClick={() => sendQuote(quote)} className="rounded-md bg-primary px-3 py-1 text-xs font-medium text-white">
-                  إرسال للعميل
-                </button>
-              )}
-              {quote.status !== "draft" && (
-                <>
-                  <button
-                    onClick={() => copyLink(quote)}
-                    className="rounded-md border border-stone-300 px-3 py-1 text-xs text-stone-600"
-                  >
-                    نسخ رابط العميل
-                  </button>
-                  <button
-                    onClick={() => downloadQuotePdf(quote.id, quote.quoteNumber)}
-                    className="rounded-md border border-stone-300 px-3 py-1 text-xs text-stone-600"
-                  >
-                    تنزيل PDF
-                  </button>
-                </>
-              )}
-              {quote.status === "accepted" && (
-                <button
-                  onClick={() => convertToInvoice(quote)}
-                  className="rounded-md bg-accent px-3 py-1 text-xs font-medium text-white"
-                >
-                  تحويل إلى فاتورة
-                </button>
-              )}
-            </div>
-          </li>
-        ))}
-        {quotes.length === 0 && (
-          <li className="rounded-lg border border-dashed border-stone-300 p-8 text-center text-stone-500">
-            لا توجد عروض أسعار بعد
-          </li>
+    <div className="flex flex-col items-end gap-1">
+      {error && <span className="text-xs text-danger-600">{error}</span>}
+      <div className="flex flex-wrap justify-end gap-2">
+        {quote.status === "draft" && (
+          <Button size="sm" disabled={busy} onClick={() => run(onSend, "تعذّر إرسال عرض السعر")}>
+            إرسال للعميل
+          </Button>
         )}
-      </ul>
-      )}
-      {!error && quotes !== null && hasMore && (
-        <div className="pt-4 text-center">
-          <button
-            disabled={loadingMore}
-            onClick={loadMore}
-            className="rounded-md border border-stone-300 px-4 py-2 text-sm text-stone-600 disabled:opacity-50"
-          >
-            {loadingMore ? "جارٍ التحميل..." : "تحميل المزيد"}
-          </button>
-        </div>
-      )}
-    </Layout>
+        {quote.status !== "draft" && (
+          <>
+            <Button size="sm" variant="secondary" onClick={onCopyLink}>
+              نسخ رابط العميل
+            </Button>
+            <Button size="sm" variant="secondary" disabled={busy} onClick={() => run(onDownload, "تعذّر تنزيل الملف")}>
+              تنزيل PDF
+            </Button>
+          </>
+        )}
+        {quote.status === "accepted" && (
+          <Button size="sm" disabled={busy} onClick={() => run(onConvert, "تعذّر إنشاء الفاتورة")}>
+            تحويل إلى فاتورة
+          </Button>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -231,56 +278,58 @@ function NewQuoteForm({ onCreated }: { onCreated: () => void }) {
   }
 
   return (
-    <form onSubmit={onSubmit} className="mb-6 space-y-3 rounded-lg border border-stone-200 bg-white p-5">
-      {error && <div className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
-      <div className="grid gap-3 sm:grid-cols-2">
-        <input
-          required
-          placeholder="اسم العميل"
-          value={clientName}
-          onChange={(e) => setClientName(e.target.value)}
-          className="rounded-md border border-stone-300 px-3 py-2 text-sm"
-        />
-        <input
-          required
-          placeholder="اسم المشروع"
-          value={projectName}
-          onChange={(e) => setProjectName(e.target.value)}
-          className="rounded-md border border-stone-300 px-3 py-2 text-sm"
-        />
-      </div>
+    <Card className="p-5">
+      <form onSubmit={onSubmit} className="space-y-3">
+        {error && <ErrorState message={error} />}
+        <div className="grid gap-3 sm:grid-cols-2">
+          <input
+            required
+            placeholder="اسم العميل"
+            value={clientName}
+            onChange={(e) => setClientName(e.target.value)}
+            className="rounded-md border border-stone-300 px-3 py-2 text-sm"
+          />
+          <input
+            required
+            placeholder="اسم المشروع"
+            value={projectName}
+            onChange={(e) => setProjectName(e.target.value)}
+            className="rounded-md border border-stone-300 px-3 py-2 text-sm"
+          />
+        </div>
 
-      <LanguageSelect value={language} onChange={setLanguage} />
+        <LanguageSelect value={language} onChange={setLanguage} />
 
-      <div className="space-y-2">
-        {items.map((item, i) => (
-          <div key={i} className="flex gap-2">
-            <input
-              placeholder="بند (مثال: تركيب بلاط)"
-              value={item.description}
-              onChange={(e) => updateItem(i, { description: e.target.value })}
-              className="flex-1 rounded-md border border-stone-300 px-3 py-2 text-sm"
-            />
-            <input
-              type="number"
-              min="0"
-              placeholder="المبلغ ($)"
-              value={item.amount}
-              onChange={(e) => updateItem(i, { amount: e.target.value })}
-              className="w-40 rounded-md border border-stone-300 px-3 py-2 text-sm"
-            />
-          </div>
-        ))}
-        <button
-          type="button"
-          onClick={() => setItems((prev) => [...prev, { description: "", amount: "" }])}
-          className="text-sm text-primary underline decoration-dotted"
-        >
-          + إضافة بند آخر
-        </button>
-      </div>
+        <div className="space-y-2">
+          {items.map((item, i) => (
+            <div key={i} className="flex gap-2">
+              <input
+                placeholder="بند (مثال: تركيب بلاط)"
+                value={item.description}
+                onChange={(e) => updateItem(i, { description: e.target.value })}
+                className="flex-1 rounded-md border border-stone-300 px-3 py-2 text-sm"
+              />
+              <input
+                type="number"
+                min="0"
+                placeholder="المبلغ"
+                value={item.amount}
+                onChange={(e) => updateItem(i, { amount: e.target.value })}
+                className="w-40 rounded-md border border-stone-300 px-3 py-2 text-sm"
+              />
+            </div>
+          ))}
+          <button
+            type="button"
+            onClick={() => setItems((prev) => [...prev, { description: "", amount: "" }])}
+            className="text-sm text-primary underline decoration-dotted"
+          >
+            + إضافة بند آخر
+          </button>
+        </div>
 
-      <button className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white">حفظ كمسودة</button>
-    </form>
+        <Button type="submit">حفظ كمسودة</Button>
+      </form>
+    </Card>
   );
 }

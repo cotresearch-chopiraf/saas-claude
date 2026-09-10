@@ -7,6 +7,7 @@ import { Button } from "../ui/Button";
 import { ErrorState } from "../ui/ErrorState";
 import { EmptyState } from "../ui/EmptyState";
 import { Skeleton } from "../ui/Skeleton";
+import { Table } from "../ui/Table";
 import { Modal } from "../ui/Modal";
 import { Tabs, type TabItem } from "../ui/Tabs";
 import { Can } from "../auth/Can";
@@ -521,45 +522,43 @@ function OverridesTab({
       ) : overrides.length === 0 ? (
         <EmptyState message="لا توجد استثناءات نشطة حالياً — القيم الرسمية للدولة مطبّقة كما هي." />
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-stone-200 bg-white">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-stone-200 text-right text-stone-500">
-                <th className="px-4 py-2">الإعداد</th>
-                <th className="px-4 py-2">القيمة الحالية</th>
-                <th className="px-4 py-2">القيمة الرسمية عند الإنشاء</th>
-                <th className="px-4 py-2">سارٍ من</th>
-                <th className="px-4 py-2">الحالة</th>
-                <th className="px-4 py-2"></th>
+        <Table>
+          <thead>
+            <tr className="border-b border-stone-200 text-right text-stone-500">
+              <th className="px-4 py-2">الإعداد</th>
+              <th className="px-4 py-2">القيمة الحالية</th>
+              <th className="px-4 py-2">القيمة الرسمية عند الإنشاء</th>
+              <th className="px-4 py-2">سارٍ من</th>
+              <th className="px-4 py-2">الحالة</th>
+              <th className="px-4 py-2"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {overrides.map((o) => (
+              <tr key={o.id} className="border-b border-stone-100">
+                <td className="px-4 py-2">{overrideKeyLabel(o.settingKey)}</td>
+                <td className="px-4 py-2">{renderRawValue(o.overrideValue)}</td>
+                <td className="px-4 py-2">{renderRawValue(o.officialDefaultSnapshot)}</td>
+                <td className="px-4 py-2">{formatDate(o.effectiveFrom)}</td>
+                <td className="px-4 py-2">
+                  <Badge tone={overrideStatusTone[o.status]}>{o.status}</Badge>
+                </td>
+                <td className="px-4 py-2">
+                  <Can permission="compliance.manage">
+                    <button
+                      type="button"
+                      onClick={() => onReset(o.id)}
+                      disabled={resettingId === o.id}
+                      className="text-sm text-primary hover:underline disabled:text-stone-400"
+                    >
+                      {resettingId === o.id ? "جارٍ إعادة التعيين..." : "إعادة تعيين"}
+                    </button>
+                  </Can>
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {overrides.map((o) => (
-                <tr key={o.id} className="border-b border-stone-100">
-                  <td className="px-4 py-2">{overrideKeyLabel(o.settingKey)}</td>
-                  <td className="px-4 py-2">{renderRawValue(o.overrideValue)}</td>
-                  <td className="px-4 py-2">{renderRawValue(o.officialDefaultSnapshot)}</td>
-                  <td className="px-4 py-2">{formatDate(o.effectiveFrom)}</td>
-                  <td className="px-4 py-2">
-                    <Badge tone={overrideStatusTone[o.status]}>{o.status}</Badge>
-                  </td>
-                  <td className="px-4 py-2">
-                    <Can permission="compliance.manage">
-                      <button
-                        type="button"
-                        onClick={() => onReset(o.id)}
-                        disabled={resettingId === o.id}
-                        className="text-sm text-primary hover:underline disabled:text-stone-400"
-                      >
-                        {resettingId === o.id ? "جارٍ إعادة التعيين..." : "إعادة تعيين"}
-                      </button>
-                    </Can>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+            ))}
+          </tbody>
+        </Table>
       )}
     </div>
   );

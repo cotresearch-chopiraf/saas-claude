@@ -3,6 +3,8 @@ import { apiFetch, ApiError } from "../api/client";
 import type { DailyLog } from "../api/types";
 import { Skeleton } from "../ui/Skeleton";
 import { ErrorState } from "../ui/ErrorState";
+import { EmptyState } from "../ui/EmptyState";
+import { Button } from "../ui/Button";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { Can } from "../auth/Can";
 
@@ -61,33 +63,32 @@ export function DailyLogsPanel({ projectId }: { projectId: string }) {
           onChange={(e) => setNote(e.target.value)}
           className="flex-1 rounded-md border border-stone-300 px-3 py-2 text-sm"
         />
-        <button className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white">تسجيل</button>
+        <Button type="submit">تسجيل</Button>
       </form>
 
-      <ul className="space-y-2">
-        {logs.map((log) => (
-          <li key={log.id} className="flex items-start justify-between gap-3 rounded-lg border border-stone-200 bg-white p-3">
-            <div>
-              <p className="text-xs font-medium text-stone-400">{log.logDate}</p>
-              <p className="text-stone-700">{log.note}</p>
-            </div>
-            <Can permission="dailyLog.delete">
-              <button
-                onClick={() => setPendingDelete(log)}
-                className="text-stone-300 hover:text-red-500"
-                aria-label="حذف السجل"
-              >
-                ✕
-              </button>
-            </Can>
-          </li>
-        ))}
-        {logs.length === 0 && (
-          <li className="rounded-lg border border-dashed border-stone-300 p-4 text-center text-stone-400">
-            لا توجد سجلات يومية بعد
-          </li>
-        )}
-      </ul>
+      {logs.length === 0 ? (
+        <EmptyState message="لا توجد سجلات يومية بعد" />
+      ) : (
+        <ul className="space-y-2">
+          {logs.map((log) => (
+            <li key={log.id} className="flex items-start justify-between gap-3 rounded-lg border border-stone-200 bg-white p-3">
+              <div>
+                <p className="text-xs font-medium text-stone-400">{log.logDate}</p>
+                <p className="text-stone-700">{log.note}</p>
+              </div>
+              <Can permission="dailyLog.delete">
+                <button
+                  onClick={() => setPendingDelete(log)}
+                  className="text-stone-300 hover:text-red-500"
+                  aria-label="حذف السجل"
+                >
+                  ✕
+                </button>
+              </Can>
+            </li>
+          ))}
+        </ul>
+      )}
 
       <ConfirmDialog
         open={pendingDelete !== null}

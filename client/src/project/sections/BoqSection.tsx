@@ -5,6 +5,7 @@ import { Badge } from "../../ui/Badge";
 import { Button } from "../../ui/Button";
 import { FinancialTable, type FinancialColumn } from "../../ui/FinancialTable";
 import { ErrorState } from "../../ui/ErrorState";
+import { EmptyState } from "../../ui/EmptyState";
 import { ConfirmDialog } from "../../ui/ConfirmDialog";
 import { Skeleton } from "../../ui/Skeleton";
 import { Can } from "../../auth/Can";
@@ -92,7 +93,7 @@ export function BoqSection() {
       />
 
       {contracts.length === 0 && revisions !== null && (
-        <p className="text-sm text-stone-400">يجب إنشاء عقد أولاً من قسم "العقد" قبل إضافة جدول كميات.</p>
+        <EmptyState message='يجب إنشاء عقد أولاً من قسم "العقد" قبل إضافة جدول كميات.' />
       )}
 
       {showCreate && (

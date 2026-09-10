@@ -381,7 +381,11 @@ function IpcDetail({
               </Button>
             )}
             {isApproved && (
-              <Button size="sm" variant="danger" onClick={() => setPendingAction("certify")}>
+              // Certify finalizes/approves — a positive terminal action, not a
+              // destructive one, so it should not carry the same visual
+              // weight as "رفض" above; the ConfirmDialog already states the
+              // irreversibility warning, the button itself doesn't need to.
+              <Button size="sm" onClick={() => setPendingAction("certify")}>
                 تصديق
               </Button>
             )}

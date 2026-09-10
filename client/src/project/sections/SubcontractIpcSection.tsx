@@ -4,6 +4,7 @@ import { PageHeader } from "../../ui/PageHeader";
 import { Card } from "../../ui/Card";
 import { Badge } from "../../ui/Badge";
 import { Button } from "../../ui/Button";
+import { MetricCard } from "../../ui/MetricCard";
 import { FinancialTable, type FinancialColumn } from "../../ui/FinancialTable";
 import { ErrorState } from "../../ui/ErrorState";
 import { ConfirmDialog } from "../../ui/ConfirmDialog";
@@ -357,7 +358,9 @@ function SubcontractIpcDetail({
               </Button>
             )}
             {isApproved && (
-              <Button size="sm" variant="danger" onClick={() => setPendingAction("certify")}>
+              // Certify finalizes/approves — a positive terminal action, not
+              // a destructive one; see IpcSection.tsx's identical fix.
+              <Button size="sm" onClick={() => setPendingAction("certify")}>
                 تصديق
               </Button>
             )}
@@ -388,11 +391,15 @@ function SubcontractIpcDetail({
       </dl>
 
       <div className="mb-5 grid gap-4 sm:grid-cols-3 lg:grid-cols-5">
-        <Field label="الإجمالي (Gross)" value={ipc.grossValue !== null ? formatMoney(ipc.grossValue, ipc.currency) : "—"} />
-        <Field label="نسبة الضمان" value={ipc.retentionPercent !== null ? `${ipc.retentionPercent}%` : "—"} />
-        <Field label="الضمان المحتجز" value={ipc.retentionAmount !== null ? formatMoney(ipc.retentionAmount, ipc.currency) : "—"} />
-        <Field label="خصومات أخرى" value={ipc.otherDeductions !== null ? formatMoney(ipc.otherDeductions, ipc.currency) : "—"} />
-        <Field label="الصافي المصدَّق" value={ipc.netCertified !== null ? formatMoney(ipc.netCertified, ipc.currency) : "—"} />
+        <MetricCard label="الإجمالي (Gross)" value={ipc.grossValue !== null ? formatMoney(ipc.grossValue, ipc.currency) : "—"} />
+        <MetricCard label="نسبة الضمان" value={ipc.retentionPercent !== null ? `${ipc.retentionPercent}%` : "—"} />
+        <MetricCard label="الضمان المحتجز" value={ipc.retentionAmount !== null ? formatMoney(ipc.retentionAmount, ipc.currency) : "—"} />
+        <MetricCard label="خصومات أخرى" value={ipc.otherDeductions !== null ? formatMoney(ipc.otherDeductions, ipc.currency) : "—"} />
+        <MetricCard
+          label="الصافي المصدَّق"
+          value={ipc.netCertified !== null ? formatMoney(ipc.netCertified, ipc.currency) : "—"}
+          tone={ipc.netCertified !== null ? "success" : "default"}
+        />
       </div>
 
       {showAddLine && isEditable && (

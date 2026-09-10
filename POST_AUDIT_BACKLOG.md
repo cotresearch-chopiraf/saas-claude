@@ -109,3 +109,45 @@ company-wide financial aggregate endpoint exists; per-row fan-out would be
 N+1). Search, status filter, and column sorting were added this phase (all
 client-side over already-loaded rows); the financial columns remain blocked
 on the same backend aggregate recommended in item 1.
+
+## Phase F.2 additions
+
+Item 6 above is now superseded: Phase F.2 actually reviewed every page it
+lists (via a 4-way research pass covering Commercial/Cost Control/Execution
+&amp; Workforce/Compliance &amp; Documents &amp; Admin &amp; Portal) and fixed the
+consistency gaps that survived verification — `Quotes.tsx` and `Invoices.tsx`
+(previously hand-rolled, predating the shared UI kit) rebuilt on
+`PageHeader`/`FinancialTable`/`Badge`/`MetricCard`; `Team.tsx`/`Settings.tsx`
+given `PageHeader`/`ErrorState`/`Card`; `TaskPanel.tsx`/`DailyLogsPanel.tsx`
+(used by Operations) given `Badge`/`EmptyState`/`Button`;
+`PayrollPeriodDetail.tsx`'s `window.prompt()` reject flow replaced with an
+in-app `Modal` form; IPC/Subcontract-IPC's "certify" action no longer shares
+"رفض"'s danger styling; `FinancialTable` gained reusable sortable-header
+support. Two audit suggestions were investigated and found to already match
+established convention on closer inspection (not applied): `CostPlanSection`'s
+per-tab primary-action placement mirrors `LaborCompliance.tsx`'s own
+Tabs-without-header-action pattern, and `ActualCostSection`/`ForecastSection`'s
+whole-page loading/error early-return (rather than passing error into
+`FinancialTable`) is the same pattern `OverviewSection.tsx` uses deliberately
+to avoid a misleading zero-value flash before data resolves.
+
+**Genuinely deferred (not applied this phase):**
+
+- `LaborCompliance.tsx` (6 list views — periods/snapshots/Nitaqat/GOSI/
+  exceptions) and `ZatcaOnboardingPanel.tsx` (2 history lists) still hand-roll
+  `<ul><li>` rows instead of the shared `Table` primitive. Each file is
+  800–950 lines with no dedicated visual-regression coverage; converting all
+  8 list views in one pass was judged higher-risk than warranted for a
+  cosmetic table-primitive swap. Recommend converting one file at a time in
+  a follow-up, verifying each in a real browser before moving to the next.
+- The native `<input type="file">` control (Documents upload) renders its
+  browser-default "Choose File" / "No file chosen" label in English inside
+  an otherwise fully Arabic page. Fixing this requires a custom styled file
+  -input component (a real primitive addition, not a class tweak) — out of
+  scope for a UI-polish-only pass; candidate for a small dedicated
+  `FileInput` primitive in a future phase.
+- `CashFlowSection.tsx`'s "افتراضات الحساب" block still hand-builds its own
+  `<dl>/<dt>/<dd>` row markup instead of reusing the `Field` helper already
+  defined in `ForecastSection.tsx`/`IpcSection.tsx` — zero visual difference
+  today (the markup is already identical), purely a code-dedup opportunity,
+  not applied to avoid touching a working file for no user-visible gain.

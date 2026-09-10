@@ -2,6 +2,11 @@ import { FormEvent, useEffect, useState } from "react";
 import { Layout } from "../components/Layout";
 import { apiFetch, ApiError } from "../api/client";
 import { Can } from "../auth/Can";
+import { PageHeader } from "../ui/PageHeader";
+import { Card } from "../ui/Card";
+import { Badge } from "../ui/Badge";
+import { Button } from "../ui/Button";
+import { ErrorState } from "../ui/ErrorState";
 import type { CompanyInvite, CompanyMember, CompanyRole } from "../api/types";
 
 const roleLabel: Record<string, string> = { owner: "مالك", member: "عضو" };
@@ -49,7 +54,7 @@ export function Team() {
 
   return (
     <Layout>
-      <h1 className="mb-6 text-2xl font-bold text-stone-800">الفريق</h1>
+      <PageHeader title="الفريق" subtitle="أعضاء الشركة، صلاحياتهم، والدعوات المُرسَلة." />
 
       <h3 className="mb-2 font-semibold text-stone-700">الأعضاء</h3>
       <ul className="mb-6 divide-y divide-stone-100 rounded-lg border border-stone-200 bg-white">
@@ -70,19 +75,23 @@ export function Team() {
       )}
 
       <h3 className="mb-2 font-semibold text-stone-700">دعوة عضو جديد</h3>
-      {error && <div className="mb-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
-      {notice && <div className="mb-3 rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{notice}</div>}
-      <form onSubmit={invite} className="flex gap-2">
-        <input
-          type="email"
-          required
-          placeholder="البريد الإلكتروني"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          className="flex-1 rounded-md border border-stone-300 px-3 py-2 text-sm"
-        />
-        <button className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white">إرسال دعوة</button>
-      </form>
+      <Card className="p-5">
+        <form onSubmit={invite} className="space-y-3">
+          {error && <ErrorState message={error} />}
+          {notice && <p className="rounded-md bg-success-50 px-3 py-2 text-sm text-success-700">{notice}</p>}
+          <div className="flex gap-2">
+            <input
+              type="email"
+              required
+              placeholder="البريد الإلكتروني"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="flex-1 rounded-md border border-stone-300 px-3 py-2 text-sm"
+            />
+            <Button type="submit">إرسال دعوة</Button>
+          </div>
+        </form>
+      </Card>
     </Layout>
   );
 }
@@ -116,9 +125,7 @@ function MemberRow({ member, onChanged }: { member: CompanyMember; onChanged: ()
         {error && <p className="text-xs text-red-600">{error}</p>}
       </div>
       <div className="flex items-center gap-2">
-        <span className="rounded-full bg-stone-100 px-2 py-0.5 text-xs text-stone-600">
-          {statusLabel[member.status]}
-        </span>
+        <Badge tone={member.status === "active" ? "success" : "neutral"}>{statusLabel[member.status]}</Badge>
         <Can permission="company.manage">
           <select
             value={member.role}
@@ -138,7 +145,7 @@ function MemberRow({ member, onChanged }: { member: CompanyMember; onChanged: ()
             {member.status === "active" ? "إلغاء التفعيل" : "إعادة التفعيل"}
           </button>
         </Can>
-        <span className="rounded-full bg-stone-100 px-2 py-0.5 text-xs text-stone-600">{roleLabel[member.role]}</span>
+        <Badge tone="neutral">{roleLabel[member.role]}</Badge>
       </div>
     </li>
   );

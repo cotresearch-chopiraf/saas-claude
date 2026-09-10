@@ -71,6 +71,7 @@ export function PayrollPeriodDetail() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
   const [postings, setPostings] = useState<LaborCostPosting[] | null>(null);
+  const [showRejectModal, setShowRejectModal] = useState(false);
 
   function load() {
     if (!id) return;
@@ -129,14 +130,13 @@ export function PayrollPeriodDetail() {
     }
   }
 
-  async function onRejectPeriod() {
+  async function onRejectPeriod(reason: string) {
     if (!period) return;
-    const reason = window.prompt("سبب الرفض:");
-    if (!reason) return;
     setActionBusy(true);
     setActionError(null);
     try {
       await rejectPayrollPeriod(period.id, reason);
+      setShowRejectModal(false);
       load();
     } catch (err) {
       setActionError(err instanceof ApiError ? err.message : "تعذّر رفض الفترة");
@@ -198,7 +198,7 @@ export function PayrollPeriodDetail() {
                       <Button size="sm" onClick={onApprovePeriod} disabled={actionBusy}>
                         اعتماد
                       </Button>
-                      <Button size="sm" variant="secondary" onClick={onRejectPeriod} disabled={actionBusy}>
+                      <Button size="sm" variant="secondary" onClick={() => setShowRejectModal(true)} disabled={actionBusy}>
                         رفض
                       </Button>
                     </>
@@ -284,6 +284,13 @@ export function PayrollPeriodDetail() {
                 )}
               </div>
             )}
+          />
+
+          <RejectPeriodModal
+            open={showRejectModal}
+            busy={actionBusy}
+            onClose={() => setShowRejectModal(false)}
+            onReject={onRejectPeriod}
           />
         </>
       )}
@@ -471,6 +478,54 @@ function RecordRowActions({ record, onChanged }: { record: PayrollRecord; onChan
 // LaborAllocation.tsx's own established preview precedent, never the
 // number actually recorded (that always comes back from the POST
 // response after load() re-fetches the period).
+// Phase F.2 — replaces a native window.prompt() with the same in-app
+// reject-reason pattern already established by ProgressSection.tsx's own
+// RejectForm (a required textarea inside a real dialog, with its own
+// error/disabled/busy states) — window.prompt has no error display, no
+// cancel styling, and blocks the render thread.
+function RejectPeriodModal({
+  open,
+  busy,
+  onClose,
+  onReject,
+}: {
+  open: boolean;
+  busy: boolean;
+  onClose: () => void;
+  onReject: (reason: string) => Promise<void>;
+}) {
+  const [reason, setReason] = useState("");
+
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (!reason.trim()) return;
+    onReject(reason);
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title="رفض فترة الرواتب" className="mx-4 w-full max-w-md">
+      <form onSubmit={handleSubmit} className="space-y-3">
+        <textarea
+          required
+          placeholder="سبب الرفض"
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          className="w-full rounded-md border border-stone-300 px-3 py-2 text-sm"
+          rows={3}
+        />
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="secondary" size="sm" onClick={onClose} disabled={busy}>
+            إلغاء
+          </Button>
+          <Button type="submit" size="sm" variant="danger" disabled={busy || !reason.trim()}>
+            {busy ? "جارٍ الرفض..." : "تأكيد الرفض"}
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 function PostAction({
   period,
   busy,
