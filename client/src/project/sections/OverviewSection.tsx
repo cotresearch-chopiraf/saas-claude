@@ -262,24 +262,43 @@ function CashFlowCard({ cashFlow }: { cashFlow: CashFlowResult }) {
   );
 }
 
-// MIDAD Phase A4 — read-only Labor Allocation visibility. Deliberately a
-// SEPARATE card from Cost Plan/Forecast/Cash Flow above, never merged
-// into their totals: routes/laborAllocations.ts never posts to
-// `expenses`, so this figure is pre-posting internal data, not yet part
-// of Actual Cost. The explicit "غير مرحّلة" (not yet posted) label and
-// the drill-down link are what keep that distinction visible to the user
-// rather than only living in a code comment.
+// MIDAD Phase A4/A5.1 — read-only Labor Allocation visibility. Deliberately
+// a SEPARATE card from Cost Plan/Forecast/Cash Flow above, never merged
+// into their totals: this card never reads/writes `expenses` itself — a
+// posted allocation's real Actual Cost contribution lives entirely in the
+// project's own Expense/Actual Cost total, driven by routes/
+// payrollPeriods.ts's post(). What this card shows is the posting STATUS
+// of the labor cost already allocated here (posted/unposted, sourced from
+// `labor_cost_postings` — see api/laborCost.ts's own comment), not a
+// second Actual Cost figure.
 function LaborCostCard({ laborCost }: { laborCost: ProjectLaborCost }) {
+  if (laborCost.allocationCount === 0) {
+    return (
+      <Card className="p-5">
+        <h2 className="mb-3 font-semibold text-stone-800">تكلفة العمالة الموزَّعة</h2>
+        <p className="text-sm text-stone-400">لا توجد تكلفة عمالة موزعة</p>
+      </Card>
+    );
+  }
+
+  const fullyUnposted = laborCost.postedTotal === 0;
+
   return (
     <Card className="p-5">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="font-semibold text-stone-800">تكلفة العمالة الموزَّعة</h2>
-        <span className="text-xs text-stone-400">بيانات داخلية — غير مرحّلة إلى التكلفة الفعلية</span>
+        {laborCost.posted && <Badge tone="success">مرحّلة بالكامل</Badge>}
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
         <MetricCard label="إجمالي الموزَّع" value={formatMoney(laborCost.allocatedTotal)} />
         <MetricCard label="عدد التوزيعات" value={String(laborCost.allocationCount)} />
       </div>
+      {!laborCost.posted && (
+        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          {!fullyUnposted && <MetricCard label="مرحّلة" value={formatMoney(laborCost.postedTotal)} tone="success" />}
+          <MetricCard label="غير مرحّلة" value={formatMoney(laborCost.unpostedTotal)} tone="warning" />
+        </div>
+      )}
       <div className="mt-3 text-end">
         <Link to="/payroll" className="text-sm text-primary hover:underline">
           عرض تفاصيل توزيع الرواتب

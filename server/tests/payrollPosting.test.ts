@@ -657,3 +657,129 @@ describe("Financial posting — unauthenticated access", () => {
     expect((await request(app).get("/api/labor-cost-postings")).status).toBe(401);
   });
 });
+
+// MIDAD Phase A5.1 — the Project Overview labor-cost card must reflect
+// REAL posting status (sourced from labor_cost_postings, kind="posting",
+// never inferred from an Expense existing) instead of the A4-era hardcoded
+// "posted: false". Each case uses a fresh, isolated project — same
+// precedent as laborAllocations.test.ts's own "isolated project" tests —
+// so asserting exact totals is never order-dependent on other tests in
+// this file that also allocate/post against the shared `projectId`.
+function getLaborCost(pid: string, token = ownerToken) {
+  return request(app).get(`/api/projects/${pid}/labor-cost`).set("Authorization", `Bearer ${token}`);
+}
+
+async function freshProject(token = ownerToken, name = "مشروع لاختبار حالة الترحيل") {
+  const res = await request(app).post("/api/projects").set("Authorization", `Bearer ${token}`).send({ name });
+  return res.body.id as string;
+}
+
+describe("Labor cost status display (A5.1)", () => {
+  it("Case 1: an unposted allocation reports allocated=10000, posted=0, unposted=10000", async () => {
+    const pid = await freshProject();
+    const { periodId, recordId } = await createRecordInFreshPeriod(10000);
+    await createAllocation({ payrollRecordId: recordId, projectId: pid, percentage: 100 });
+
+    const res = await getLaborCost(pid);
+    expect(res.status).toBe(200);
+    expect(res.body.allocatedTotal).toBe(10000);
+    expect(res.body.postedTotal).toBe(0);
+    expect(res.body.unpostedTotal).toBe(10000);
+    expect(res.body.posted).toBe(false);
+  });
+
+  it("Case 2: partial posting reports allocated=10000, posted=8000, unposted=2000", async () => {
+    const pid = await freshProject();
+    const { periodId, recordId } = await createRecordInFreshPeriod(10000);
+    await createAllocation({ payrollRecordId: recordId, projectId: pid, percentage: 80 });
+    await submitAndApprove(periodId);
+    const postRes = await postPeriod(periodId);
+    expect(postRes.status).toBe(200);
+
+    const res = await getLaborCost(pid);
+    expect(res.body.allocatedTotal).toBe(8000);
+    expect(res.body.postedTotal).toBe(8000);
+    expect(res.body.unpostedTotal).toBe(0);
+    expect(res.body.posted).toBe(true);
+  });
+
+  it("Case 2b: partial posting across two allocations on the same project reports the correct split", async () => {
+    const pid = await freshProject();
+    const { periodId, recordId } = await createRecordInFreshPeriod(10000);
+    await createAllocation({ payrollRecordId: recordId, projectId: pid, percentage: 80 });
+    // A second, still-unposted allocation on a fresh period against the
+    // same project — the card must sum across allocations, not just
+    // reflect a single one.
+    const { periodId: period2Id, recordId: record2Id } = await createRecordInFreshPeriod(2000);
+    await createAllocation({ payrollRecordId: record2Id, projectId: pid, percentage: 100 });
+
+    await submitAndApprove(periodId);
+    await postPeriod(periodId);
+
+    const res = await getLaborCost(pid);
+    expect(res.body.allocatedTotal).toBe(10000); // 8000 posted + 2000 unposted
+    expect(res.body.postedTotal).toBe(8000);
+    expect(res.body.unpostedTotal).toBe(2000);
+    expect(res.body.posted).toBe(false);
+  });
+
+  it("Case 3: fully posted reports allocated=10000, posted=10000, unposted=0, posted=true", async () => {
+    const pid = await freshProject();
+    const { periodId, recordId } = await createRecordInFreshPeriod(10000);
+    await createAllocation({ payrollRecordId: recordId, projectId: pid, percentage: 100 });
+    await submitAndApprove(periodId);
+    await postPeriod(periodId);
+
+    const res = await getLaborCost(pid);
+    expect(res.body.allocatedTotal).toBe(10000);
+    expect(res.body.postedTotal).toBe(10000);
+    expect(res.body.unpostedTotal).toBe(0);
+    expect(res.body.posted).toBe(true);
+  });
+
+  it("Case 4: a project with no allocations reports all-zero totals, not an error", async () => {
+    const pid = await freshProject();
+    const res = await getLaborCost(pid);
+    expect(res.status).toBe(200);
+    expect(res.body.allocatedTotal).toBe(0);
+    expect(res.body.allocationCount).toBe(0);
+    expect(res.body.postedTotal).toBe(0);
+    expect(res.body.unpostedTotal).toBe(0);
+    expect(res.body.posted).toBe(false);
+  });
+
+  it("Case 5: reversing a posting makes it read back as unposted, never as still-posted or double-counted", async () => {
+    const pid = await freshProject();
+    const { periodId, recordId } = await createRecordInFreshPeriod(10000);
+    await createAllocation({ payrollRecordId: recordId, projectId: pid, percentage: 100 });
+    await submitAndApprove(periodId);
+    const postRes = await postPeriod(periodId);
+
+    const beforeReverse = await getLaborCost(pid);
+    expect(beforeReverse.body.postedTotal).toBe(10000);
+    expect(beforeReverse.body.posted).toBe(true);
+
+    await reversePosting(postRes.body.postings[0].id);
+
+    const afterReverse = await getLaborCost(pid);
+    expect(afterReverse.body.allocatedTotal).toBe(10000); // the allocation itself is untouched
+    expect(afterReverse.body.postedTotal).toBe(0);
+    expect(afterReverse.body.unpostedTotal).toBe(10000);
+    expect(afterReverse.body.posted).toBe(false);
+  });
+
+  it("Case 6: cross-tenant isolation — a foreign company cannot read this company's labor-cost status by direct project id", async () => {
+    const pid = await freshProject();
+    const { periodId, recordId } = await createRecordInFreshPeriod(5000);
+    await createAllocation({ payrollRecordId: recordId, projectId: pid, percentage: 100 });
+    await submitAndApprove(periodId);
+    await postPeriod(periodId);
+
+    const res = await getLaborCost(pid, companyBToken);
+    expect(res.status).toBe(404);
+
+    // And the reverse: this company cannot read the foreign company's project.
+    const foreignRes = await getLaborCost(companyBProjectId, ownerToken);
+    expect(foreignRes.status).toBe(404);
+  });
+});

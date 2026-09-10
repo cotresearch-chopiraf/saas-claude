@@ -186,7 +186,14 @@ const fixtureRevisionPublished: BoqRevision = { ...fixtureRevisionDraft, revisio
 // in this file, and deliberately NOT derivable from Budget/Forecast/Cash
 // Flow figures, so a test asserting on it proves the card renders its own
 // source data, not a recomputation of something else on the page.
-const fixtureLaborCost: ProjectLaborCost = { projectId: "p1", allocatedTotal: 88.88, allocationCount: 3, posted: false };
+const fixtureLaborCost: ProjectLaborCost = {
+  projectId: "p1",
+  allocatedTotal: 88.88,
+  allocationCount: 3,
+  postedTotal: 30,
+  unpostedTotal: 58.88,
+  posted: false,
+};
 
 function mockApi(
   role: "owner" | "member",
@@ -360,17 +367,49 @@ describe("<OverviewSection/> (Executive Dashboard)", () => {
     expect(screen.getAllByText(/بتاريخ/).length).toBeGreaterThanOrEqual(2);
   });
 
-  it("MIDAD Phase A4: Labor Cost card renders its own backend-provided total, clearly labeled as not-yet-posted, never merged into Cost Plan's totals", async () => {
+  it("MIDAD Phase A4: Labor Cost card renders its own backend-provided total, never merged into Cost Plan's totals", async () => {
     mockApi("owner");
     renderSection();
     await waitFor(() => expect(screen.getByText("تكلفة العمالة الموزَّعة")).toBeInTheDocument());
     expect(screen.getByText(/88\.88/)).toBeInTheDocument();
     expect(screen.getByText("3")).toBeInTheDocument();
-    expect(screen.getByText("بيانات داخلية — غير مرحّلة إلى التكلفة الفعلية")).toBeInTheDocument();
     // 88.88 must never appear inside Cost Plan's own planned/spent/remaining figures.
     expect(fixtureBudget.totals.planned).not.toBe(88.88);
     expect(fixtureBudget.totals.spent).not.toBe(88.88);
     expect(fixtureBudget.totals.remaining).not.toBe(88.88);
+  });
+
+  it("MIDAD Phase A5.1: Labor Cost card shows the real posting status, not a hardcoded 'not yet posted' label", async () => {
+    // Case: nothing posted yet — shows only the unposted breakdown.
+    mockApi("owner", { laborCost: { projectId: "p1", allocatedTotal: 10000, allocationCount: 1, postedTotal: 0, unpostedTotal: 10000, posted: false } });
+    renderSection();
+    await waitFor(() => expect(screen.getByText("تكلفة العمالة الموزَّعة")).toBeInTheDocument());
+    expect(screen.getByText("غير مرحّلة")).toBeInTheDocument();
+    expect(screen.queryByText("مرحّلة")).not.toBeInTheDocument();
+    expect(screen.queryByText("مرحّلة بالكامل")).not.toBeInTheDocument();
+  });
+
+  it("MIDAD Phase A5.1: partial posting shows both the posted and unposted amounts", async () => {
+    mockApi("owner", { laborCost: { projectId: "p1", allocatedTotal: 10000, allocationCount: 1, postedTotal: 8000, unpostedTotal: 2000, posted: false } });
+    renderSection();
+    await waitFor(() => expect(screen.getByText("تكلفة العمالة الموزَّعة")).toBeInTheDocument());
+    expect(screen.getByText("مرحّلة")).toBeInTheDocument();
+    expect(screen.getByText("غير مرحّلة")).toBeInTheDocument();
+    expect(screen.queryByText("مرحّلة بالكامل")).not.toBeInTheDocument();
+  });
+
+  it("MIDAD Phase A5.1: a fully posted allocation shows 'مرحّلة بالكامل' with no breakdown rows", async () => {
+    mockApi("owner", { laborCost: { projectId: "p1", allocatedTotal: 10000, allocationCount: 1, postedTotal: 10000, unpostedTotal: 0, posted: true } });
+    renderSection();
+    await waitFor(() => expect(screen.getByText("مرحّلة بالكامل")).toBeInTheDocument());
+    expect(screen.queryByText("غير مرحّلة")).not.toBeInTheDocument();
+  });
+
+  it("MIDAD Phase A5.1: no allocations at all shows an honest empty state, not a zeroed breakdown", async () => {
+    mockApi("owner", { laborCost: { projectId: "p1", allocatedTotal: 0, allocationCount: 0, postedTotal: 0, unpostedTotal: 0, posted: false } });
+    renderSection();
+    await waitFor(() => expect(screen.getByText("لا توجد تكلفة عمالة موزعة")).toBeInTheDocument());
+    expect(screen.queryByText("إجمالي الموزَّع")).not.toBeInTheDocument();
   });
 
   it("Member read access: a member can render the full dashboard, with no mutation controls anywhere", async () => {

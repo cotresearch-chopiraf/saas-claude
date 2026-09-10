@@ -353,19 +353,23 @@ export interface LaborAllocation {
   costCode: LaborAllocationCostCode | null;
 }
 
-// GET /projects/:id/labor-cost's response — read-only, pre-posting
-// visibility only. `posted` is always false: this total is the RAW
-// allocated sum regardless of whether any of it has since been posted —
-// see routes/laborCost.ts's own comment. Once an allocation is posted,
-// its real financial contribution lives in the project's own Actual
-// Cost/Expenses (driven by the Expense A5 created), not here — this card
-// is known to still label already-posted amounts as "غير مرحّلة" (not yet
-// posted); see the A5 implementation report's Known Limitations.
+// GET /projects/:id/labor-cost's response — read-only visibility into
+// this project's Labor Allocation total AND how much of it has actually
+// been posted (see routes/laborCost.ts's own comment on why a reversed
+// posting reads back as unposted). Never a second Actual Cost source: the
+// real financial contribution of a posted allocation lives in the
+// project's own Expenses/Actual Cost, driven by the Expense A5's posting
+// route created — this endpoint only answers "how much of what's
+// allocated here has been posted so far."
 export interface ProjectLaborCost {
   projectId: string;
   allocatedTotal: number;
   allocationCount: number;
-  posted: false;
+  postedTotal: number;
+  unpostedTotal: number;
+  // true only when there is at least one allocation AND none of it remains
+  // unposted (unpostedTotal === 0) — i.e. fully posted, not merely "some".
+  posted: boolean;
 }
 
 // --- MIDAD Phase A5: Labor Cost Posting ---
