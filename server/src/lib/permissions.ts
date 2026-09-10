@@ -175,6 +175,21 @@ export const PERMISSIONS = {
   "workforce.manage": ["owner"],
   "payroll.manage": ["owner"],
   "payroll.post": ["owner"],
+
+  // --- MIDAD Phase B1 — Client Portal Identity & Project Access ---
+  // Creating/disabling a Client Portal User and granting/revoking a
+  // project access grant is a trust-boundary action of the same class as
+  // customer.manage/workforce.manage (company-sensitive master data), but
+  // with a materially higher stake: it is literally deciding who outside
+  // the company can read this company's project data. No existing action
+  // in this matrix covers "grant an external party access" — reusing
+  // customer.manage would conflate CRM-contact editing with live data-
+  // access provisioning, two different trust domains this matrix's own
+  // one-action-per-domain discipline keeps separate everywhere else. Read
+  // access to Client Portal User records (GET) stays unrestricted, same
+  // split every other domain in this matrix already uses; only creation,
+  // status changes, and grant/revoke require this.
+  "clientPortal.manage": ["owner"],
 } as const satisfies Record<string, readonly Role[]>;
 
 export type PermissionAction = keyof typeof PERMISSIONS;

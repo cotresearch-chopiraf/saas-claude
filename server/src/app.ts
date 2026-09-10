@@ -46,8 +46,12 @@ import { platformAuthRouter } from "./routes/platformAuth.js";
 import { platformOrganizationsRouter } from "./routes/platformOrganizations.js";
 import { platformSupportSessionsRouter } from "./routes/platformSupportSessions.js";
 import { platformAuditEventsRouter } from "./routes/platformAuditEvents.js";
+import { clientPortalUsersRouter } from "./routes/clientPortalUsers.js";
+import { clientPortalAuthRouter } from "./routes/clientPortalAuth.js";
+import { clientPortalProjectsRouter } from "./routes/clientPortalProjects.js";
 import { requireAuth } from "./middleware/auth.js";
 import { platformAuth } from "./middleware/platformAuth.js";
+import { clientPortalAuth } from "./middleware/clientPortalAuth.js";
 import { uploadsDir } from "./lib/uploads.js";
 import { logger } from "./lib/logger.js";
 import { requestIdMiddleware } from "./middleware/requestId.js";
@@ -136,6 +140,20 @@ export function buildApp() {
   // MIDAD ZATCA e-invoicing (Slice 3) — tenant-scoped configuration and
   // connection API. See routes/zatca.ts's own file comment.
   app.use("/api/zatca", requireAuth, zatcaRouter);
+  // MIDAD Phase B1 — internal, tenant-side management of Client Portal
+  // Users and their project access grants. Ordinary requireAuth mount,
+  // same as every other master-data domain above; every mutation inside
+  // additionally requires clientPortal.manage (see permissions.ts).
+  app.use("/api/client-portal-users", requireAuth, clientPortalUsersRouter);
+
+  // MIDAD Phase B1 — CLIENT_PORTAL_SCOPE, structurally separate from every
+  // route above (tenant) and below (platform): clientPortalAuthRouter is
+  // unauthenticated (it IS the login surface, mirroring authRouter's own
+  // mount); clientPortalProjectsRouter is gated by clientPortalAuth, never
+  // requireAuth — no route in this pair ever passes through requireAuth or
+  // sets req.userId/req.companyId/req.platformOperatorId.
+  app.use("/api/portal/auth", clientPortalAuthRouter);
+  app.use("/api/portal/projects", clientPortalAuth, clientPortalProjectsRouter);
 
   // MIDAD Phase D1 — PLATFORM_SCOPE, structurally separate from every
   // route above: platformAuthRouter is unauthenticated (it IS the login

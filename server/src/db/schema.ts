@@ -1438,6 +1438,141 @@ export const customersRelations = relations(customers, ({ one, many }) => ({
   projects: many(projects),
 }));
 
+// =============================================================================
+// MIDAD Phase B1 — Client Portal Identity & Project Access Foundation.
+//
+// A Client Portal User is a THIRD, structurally separate identity class —
+// neither a `users` row (internal company member with owner/member RBAC)
+// nor a `platform_operators` row (MIDAD-internal platform staff). It
+// follows the exact same isolation discipline already proven for
+// platform_operators/support_sessions (Phase D1/D2): its own
+// table, its own JWT (lib/clientPortalJwt.ts, a cryptographically distinct
+// derived key — never verifiable against lib/jwt.ts's or
+// lib/platformJwt.ts's secret), its own middleware
+// (middleware/clientPortalAuth.ts) that sets ONLY req.clientPortalUserId —
+// never req.userId/req.companyId/req.platformOperatorId, and vice versa. A
+// Client Portal User can never become a `users` row, never gets a role
+// (owner/member), and never enters lib/permissions.ts's PERMISSIONS
+// matrix — see requireClientProjectAccess.ts for its own, deliberately
+// narrower authorization model (an explicit per-project grant, not a role).
+//
+// Email uniqueness is GLOBAL (like users.email/platformOperators.email),
+// not company-scoped: login takes only email+password with no company
+// selector step anywhere in this architecture, so email must resolve to
+// exactly one account unambiguously, the same reason both of those
+// existing tables are globally unique. The tradeoff this accepts: the same
+// real person cannot hold two separate Client Portal identities (e.g. as a
+// client of two different MIDAD-using contractors) under the same email —
+// a company-selector/multi-tenant-identity flow could relax this later,
+// but is out of this slice's scope.
+export const clientPortalUserStatusEnum = pgEnum("client_portal_user_status", ["active", "deactivated"]);
+
+export const clientPortalUsers = pgTable(
+  "client_portal_users",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    // The company that created this identity — immutable, same posture as
+    // users.companyId. Determines which company's owner can manage
+    // (create/disable) this row and which company's projects it may ever
+    // be granted access to (enforced at grant-creation time in
+    // routes/clientPortalUsers.ts, not by a DB constraint spanning two
+    // tables).
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    // Optional, additive link to the CRM `customers` entity — same posture
+    // as projects.customerId: never required, never auto-populated by
+    // email/name matching, only ever set by an explicit admin choice. A
+    // Client Portal User existing does not imply a Customer row exists,
+    // and vice versa.
+    customerId: uuid("customer_id").references((): AnyPgColumn => customers.id, { onDelete: "set null" }),
+    name: text("name").notNull(),
+    email: text("email").notNull().unique(),
+    passwordHash: text("password_hash").notNull(),
+    status: clientPortalUserStatusEnum("status").notNull().default("active"),
+    createdBy: uuid("created_by")
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    companyIdx: index("client_portal_users_company_idx").on(table.companyId),
+  }),
+);
+
+// Session revocation for Client Portal Users — the exact same "row per
+// issued token, revokedAt re-checked on every request" pattern as
+// userSessions above (id doubles as the JWT's sessionId claim). Without
+// this, a compromised or logged-out client token would keep working for
+// up to the JWT's own expiry. Deliberately its own table, not a shared
+// "sessions" table keyed by a polymorphic ownerType/ownerId — the same
+// reasoning platform_operators got its own identity table rather than a
+// role flag on `users`: mixing session rows across identity classes would
+// make "which secret verifies this token" and "which status check applies"
+// implicit instead of structural.
+export const clientPortalSessions = pgTable(
+  "client_portal_sessions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    clientPortalUserId: uuid("client_portal_user_id")
+      .notNull()
+      .references(() => clientPortalUsers.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    revokedAt: timestamp("revoked_at"),
+  },
+  (table) => ({
+    userIdx: index("client_portal_sessions_user_idx").on(table.clientPortalUserId),
+  }),
+);
+
+// The explicit, revocable, project-specific grant that IS Client Portal
+// authorization — see requireClientProjectAccess.ts. Bound permanently at
+// creation, mirroring support_sessions.targetCompanyId's own "no route
+// anywhere lets this be changed after the fact" discipline: a grant is
+// never UPDATEd to point at a different project or company. To move a
+// client onto a different project, revoke this row (revokedAt/revokedBy)
+// and create a new one — never mutate scope in place. companyId is
+// denormalized onto this row (rather than derived via a join through
+// projectId every request) specifically so authorization never has to
+// trust a client-supplied projectId's company membership implicitly; it is
+// set once, server-side, from the already-verified project at grant time.
+export const clientProjectAccess = pgTable(
+  "client_project_access",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    clientPortalUserId: uuid("client_portal_user_id")
+      .notNull()
+      .references(() => clientPortalUsers.id, { onDelete: "cascade" }),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    grantedBy: uuid("granted_by")
+      .notNull()
+      .references(() => users.id),
+    grantedAt: timestamp("granted_at").notNull().defaultNow(),
+    revokedBy: uuid("revoked_by").references(() => users.id),
+    revokedAt: timestamp("revoked_at"),
+  },
+  (table) => ({
+    userIdx: index("client_project_access_user_idx").on(table.clientPortalUserId),
+    projectIdx: index("client_project_access_project_idx").on(table.projectId),
+    // DB-level backstop (defense-in-depth under the application's own
+    // insert-then-catch-23505 handling) — same partial-unique-index
+    // pattern as company_tax_overrides_one_open_active /
+    // labor_cost_postings_one_posting_per_allocation: at most one row with
+    // revokedAt IS NULL per (clientPortalUserId, projectId), so two
+    // concurrent grant attempts can never both leave an active grant
+    // behind, and a revoked grant never blocks a fresh one from being
+    // created for the same pair.
+    oneActiveGrantPerUserProject: uniqueIndex("client_project_access_one_active_per_user_project")
+      .on(table.clientPortalUserId, table.projectId)
+      .where(sql`${table.revokedAt} IS NULL`),
+  }),
+);
+
 export const commitmentsRelations = relations(commitments, ({ one, many }) => ({
   company: one(companies, { fields: [commitments.companyId], references: [companies.id] }),
   project: one(projects, { fields: [commitments.projectId], references: [projects.id] }),

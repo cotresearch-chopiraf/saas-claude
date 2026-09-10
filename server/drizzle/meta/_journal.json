@@ -253,6 +253,13 @@
       "when": 1789031089732,
       "tag": "0035_absent_chamber",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1789045494676,
+      "tag": "0036_left_impossible_man",
+      "breakpoints": true
     }
   ]
 }
