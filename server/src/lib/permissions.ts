@@ -237,6 +237,21 @@ export const PERMISSIONS = {
   // payroll.manage for the identical reason).
   "laborCompliance.manage": ["owner"],
   "laborCompliance.verify": ["owner"],
+
+  // --- MIDAD Phase E — Proactive Budget Overrun Alerts ---
+  // Reads (GET) and evaluation (POST /evaluate) are deliberately NOT listed
+  // here — they stay member-open. Evaluation only derives an observation
+  // from financial data every member can already read via the existing
+  // unrestricted GET /budget, /commitments, /forecast routes; it never
+  // mutates canonical financial truth. Acknowledge/resolve are the two
+  // lifecycle-mutating actions ("a responsible user has reviewed this" /
+  // "this condition is addressed") — one permission covers both, matching
+  // this matrix's "smallest necessary" discipline: unlike
+  // laborCompliance.manage/.verify (an ordinary-mutation vs. one specific
+  // trust-elevating action split), acknowledge and resolve are the same
+  // trust class here, so a second permission would not separate anything
+  // meaningful.
+  "budgetAlert.manage": ["owner"],
 } as const satisfies Record<string, readonly Role[]>;
 
 export type PermissionAction = keyof typeof PERMISSIONS;

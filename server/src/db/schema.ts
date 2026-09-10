@@ -3601,3 +3601,109 @@ export const complianceExceptionsRelations = relations(complianceExceptions, ({ 
   resolvedByUser: one(users, { fields: [complianceExceptions.resolvedByUserId], references: [users.id], relationName: "exceptionResolver" }),
   closedByUser: one(users, { fields: [complianceExceptions.closedByUserId], references: [users.id], relationName: "exceptionCloser" }),
 }));
+
+// --- MIDAD Phase E — Proactive Budget Overrun Alerts ---
+// budget_alerts is NOT a second financial truth: it never stores an
+// independently-computed Budget/Actual Cost/Commitment/Forecast value. Every
+// amount here is a frozen SNAPSHOT of a number lib/forecast.ts's own
+// collectForecastInputs()/calculateForecast() already computed from their
+// existing canonical sources (budgetItems.plannedAmount, expenses.amount,
+// commitmentLines.amount via eligible commitments, calculateForecast's EAC)
+// at the moment this alert was generated — see routes/budgetAlerts.ts and
+// lib/budgetAlerts.ts. The snapshot exists so an alert stays explainable
+// even after the live financial data changes; it is never re-read as if it
+// were current live data (the UI must label it "عند إنشاء التنبيه").
+export const budgetAlertRuleCodeEnum = pgEnum("budget_alert_rule_code", [
+  // (actual + commitments) / budget crosses an INFO/WARNING/CRITICAL tier.
+  "budget_consumption_threshold",
+  // Forecast EAC (commitment_aware method, the same method cashflow.ts
+  // already treats as canonical) exceeds the approved budget.
+  "forecast_over_budget",
+  // actual + commitments already exceeds the approved budget outright —
+  // stronger than the consumption-threshold rule above.
+  "actual_commitments_over_budget",
+  // Same consumption-threshold logic as budget_consumption_threshold, but
+  // scoped to one cost code's own budget (only for cost codes that
+  // genuinely have budget mapped to them via budgetItems.costCodeId).
+  "cost_code_risk",
+]);
+export const budgetAlertSeverityEnum = pgEnum("budget_alert_severity", ["info", "warning", "critical"]);
+// OPEN -> ACKNOWLEDGED -> RESOLVED, strictly forward-only (see
+// routes/budgetAlerts.ts — no generic PATCH exists, only the two dedicated
+// transition actions below).
+export const budgetAlertStatusEnum = pgEnum("budget_alert_status", ["open", "acknowledged", "resolved"]);
+
+export const budgetAlerts = pgTable(
+  "budget_alerts",
+  {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  projectId: uuid("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  // Only set for ruleCode = 'cost_code_risk'; null for every project-wide rule.
+  costCodeId: uuid("cost_code_id").references((): AnyPgColumn => costCodes.id),
+  ruleCode: budgetAlertRuleCodeEnum("rule_code").notNull(),
+  severity: budgetAlertSeverityEnum("severity").notNull(),
+  status: budgetAlertStatusEnum("status").notNull().default("open"),
+
+  // What was actually measured/compared — e.g. "budget_consumption_percent",
+  // "forecast_eac_variance", "exposure_variance" — always paired with
+  // thresholdValue in the SAME unit (both percentages, or both money), never
+  // mixed units.
+  metricType: text("metric_type").notNull(),
+  metricValue: numeric("metric_value", { precision: 14, scale: 2 }).notNull(),
+  thresholdValue: numeric("threshold_value", { precision: 14, scale: 2 }).notNull(),
+
+  // Frozen snapshot of the inputs that produced metricValue, exactly as
+  // collectForecastInputs()/calculateForecast() returned them at evaluation
+  // time — never re-derived independently, never live-updated afterward.
+  budgetAmount: numeric("budget_amount", { precision: 14, scale: 2 }),
+  actualAmount: numeric("actual_amount", { precision: 14, scale: 2 }),
+  commitmentAmount: numeric("commitment_amount", { precision: 14, scale: 2 }),
+  forecastAmount: numeric("forecast_amount", { precision: 14, scale: 2 }),
+  currency: text("currency").notNull(),
+
+  title: text("title").notNull(),
+  description: text("description").notNull(),
+  recommendedAction: text("recommended_action").notNull(),
+
+  // Deterministic: ruleCode + costCodeId (or "project") + severity — a new
+  // key only when the threshold TIER actually changes (80%->90%->100%), so
+  // repeated evaluation at an unchanged severity never creates a duplicate.
+  // Never includes a timestamp (that would defeat deduplication entirely).
+  deduplicationKey: text("deduplication_key").notNull(),
+
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  acknowledgedAt: timestamp("acknowledged_at"),
+  acknowledgedByUserId: uuid("acknowledged_by_user_id").references(() => users.id),
+  resolvedAt: timestamp("resolved_at"),
+  resolvedByUserId: uuid("resolved_by_user_id").references(() => users.id),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    companyIdx: index("budget_alerts_company_idx").on(table.companyId),
+    projectIdx: index("budget_alerts_project_idx").on(table.projectId),
+    // Concurrency + dedup, DB-enforced: two simultaneous evaluations can
+    // never both insert a non-resolved alert for the same
+    // (company, project, deduplicationKey) — the loser's INSERT ... ON
+    // CONFLICT DO NOTHING simply no-ops (see routes/budgetAlerts.ts). A
+    // RESOLVED alert is deliberately excluded from this constraint: once a
+    // condition is resolved, a later genuine re-trigger creates a NEW alert
+    // instance rather than being blocked forever by the old resolved row —
+    // history is preserved, never overwritten.
+    openDedupUnique: uniqueIndex("budget_alerts_open_dedup_unique")
+      .on(table.companyId, table.projectId, table.deduplicationKey)
+      .where(sql`${table.status} <> 'resolved'`),
+  }),
+);
+
+export const budgetAlertsRelations = relations(budgetAlerts, ({ one }) => ({
+  company: one(companies, { fields: [budgetAlerts.companyId], references: [companies.id] }),
+  project: one(projects, { fields: [budgetAlerts.projectId], references: [projects.id] }),
+  costCode: one(costCodes, { fields: [budgetAlerts.costCodeId], references: [costCodes.id] }),
+  acknowledgedByUser: one(users, { fields: [budgetAlerts.acknowledgedByUserId], references: [users.id], relationName: "budgetAlertAcknowledger" }),
+  resolvedByUser: one(users, { fields: [budgetAlerts.resolvedByUserId], references: [users.id], relationName: "budgetAlertResolver" }),
+}));

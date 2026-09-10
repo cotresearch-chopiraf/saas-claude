@@ -29,6 +29,7 @@ export function Layout({ children, fullWidth = false }: { children: ReactNode; f
                 <Link to="/employees" className="hover:text-primary">الموظفون</Link>
                 <Link to="/payroll" className="hover:text-primary">الرواتب</Link>
                 <Link to="/labor-compliance" className="hover:text-primary">نطاقات و GOSI</Link>
+                <Link to="/budget-alerts" className="hover:text-primary">تنبيهات الميزانية</Link>
                 <Link to="/team" className="hover:text-primary">الفريق</Link>
                 <Link to="/compliance" className="hover:text-primary">الامتثال الضريبي</Link>
                 <Link to="/zatca" className="hover:text-primary">الفوترة الإلكترونية (ZATCA)</Link>

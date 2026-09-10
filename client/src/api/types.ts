@@ -1550,3 +1550,51 @@ export interface ZatcaProviderOperation {
   startedAt: string;
   finishedAt: string;
 }
+
+// --- MIDAD Phase E — Proactive Budget Overrun Alerts ---
+// An alert is an OBSERVATION of existing financial data, never a second
+// financial truth: budgetAmount/actualAmount/commitmentAmount/forecastAmount
+// are a frozen snapshot of what triggered this alert at createdAt — never
+// re-derived and never the same as the project's CURRENT live figures once
+// time has passed. The UI must always label them "عند إنشاء التنبيه."
+export type BudgetAlertRuleCode =
+  | "budget_consumption_threshold"
+  | "forecast_over_budget"
+  | "actual_commitments_over_budget"
+  | "cost_code_risk";
+export type BudgetAlertSeverity = "info" | "warning" | "critical";
+export type BudgetAlertStatus = "open" | "acknowledged" | "resolved";
+
+export interface BudgetAlert {
+  id: string;
+  companyId: string;
+  projectId: string;
+  costCodeId: string | null;
+  ruleCode: BudgetAlertRuleCode;
+  severity: BudgetAlertSeverity;
+  status: BudgetAlertStatus;
+  metricType: string;
+  metricValue: string;
+  thresholdValue: string;
+  budgetAmount: string | null;
+  actualAmount: string | null;
+  commitmentAmount: string | null;
+  forecastAmount: string | null;
+  currency: string;
+  title: string;
+  description: string;
+  recommendedAction: string;
+  createdAt: string;
+  acknowledgedAt: string | null;
+  acknowledgedByUserId: string | null;
+  resolvedAt: string | null;
+  resolvedByUserId: string | null;
+  updatedAt: string;
+  project?: { id: string; name: string } | null;
+  costCode?: { id: string; code: string; name: string } | null;
+}
+
+export interface BudgetAlertEvaluateResult {
+  evaluatedProjectCount: number;
+  createdCount: number;
+}

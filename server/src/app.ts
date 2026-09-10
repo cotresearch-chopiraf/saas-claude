@@ -41,6 +41,7 @@ import { documentsRouter } from "./routes/documents.js";
 import { projectScheduleRouter } from "./routes/projectSchedule.js";
 import { punchItemsRouter } from "./routes/punchItems.js";
 import { workforceComplianceRouter } from "./routes/workforceCompliance.js";
+import { budgetAlertsRouter } from "./routes/budgetAlerts.js";
 import { auditEventsRouter } from "./routes/auditEvents.js";
 import { notificationsRouter } from "./routes/notifications.js";
 import { zatcaRouter } from "./routes/zatca.js";
@@ -127,6 +128,11 @@ export function buildApp() {
   // wide (not project-scoped), matching employees/payroll-periods' own
   // mount pattern. INTERNAL ONLY — never mounted under /api/portal/*.
   app.use("/api/workforce-compliance", requireAuth, workforceComplianceRouter);
+  // MIDAD Phase E — Proactive Budget Overrun Alerts. Company-wide (not
+  // project-scoped), same mount pattern as workforce-compliance: alerts
+  // span multiple projects for the dashboard's cross-project view. INTERNAL
+  // ONLY — never mounted under /api/portal/*.
+  app.use("/api/budget-alerts", requireAuth, budgetAlertsRouter);
   app.use("/api/cost-codes", requireAuth, costCodesRouter);
   app.use("/api/suppliers", requireAuth, suppliersRouter);
   app.use("/api/customers", requireAuth, customersRouter);

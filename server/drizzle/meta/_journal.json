@@ -288,6 +288,13 @@
       "when": 1789061112548,
       "tag": "0040_past_onslaught",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1789072393933,
+      "tag": "0041_tearful_eternity",
+      "breakpoints": true
     }
   ]
 }

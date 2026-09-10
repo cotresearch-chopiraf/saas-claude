@@ -13,9 +13,11 @@ import { getForecast } from "../../api/forecast";
 import { getCashFlow } from "../../api/cashflow";
 import { listRevisions } from "../../api/boq";
 import { getProjectLaborCost } from "../../api/laborCost";
+import { listBudgetAlerts } from "../../api/budgetAlerts";
 import { useProjectContext } from "../context";
 import type {
   BoqRevision,
+  BudgetAlert,
   BudgetSummary,
   CashFlowResult,
   Contract,
@@ -150,6 +152,8 @@ export function OverviewSection() {
         <CostPlanCard budget={data.budget} />
       </div>
 
+      <BudgetAlertsCard projectId={projectId} />
+
       <ForecastCard forecast={data.forecast} />
 
       <CashFlowCard cashFlow={data.cashFlow} />
@@ -191,6 +195,59 @@ function CostPlanCard({ budget }: { budget: BudgetSummary }) {
           tone={budget.totals.remaining < 0 ? "danger" : "default"}
         />
       </div>
+    </Card>
+  );
+}
+
+const alertSeverityLabel: Record<BudgetAlert["severity"], string> = { info: "معلومات", warning: "تحذير", critical: "حرج" };
+const alertSeverityTone: Record<BudgetAlert["severity"], "info" | "warning" | "danger"> = { info: "info", warning: "warning", critical: "danger" };
+const alertSeverityRank: Record<BudgetAlert["severity"], number> = { critical: 0, warning: 1, info: 2 };
+
+// MIDAD Phase E — compact, read-only summary of this project's own OPEN/
+// ACKNOWLEDGED budget alerts. Deliberately independent of the Promise.all
+// above (its own load/error state): a Budget Alerts failure must never
+// block the rest of this already-established Overview from rendering. Only
+// ever displays server-generated alerts — never computes a rule or metric
+// itself. See pages/BudgetAlerts.tsx for the full list/detail/acknowledge/
+// resolve experience this card links out to.
+function BudgetAlertsCard({ projectId }: { projectId: string }) {
+  const [alerts, setAlerts] = useState<BudgetAlert[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  function load() {
+    setError(null);
+    listBudgetAlerts({ projectId })
+      .then(setAlerts)
+      .catch((err) => setError(err instanceof Error ? err.message : "تعذّر تحميل تنبيهات الميزانية"));
+  }
+  useEffect(load, [projectId]);
+
+  const active = (alerts ?? []).filter((a) => a.status !== "resolved");
+  const top = [...active].sort((a, b) => alertSeverityRank[a.severity] - alertSeverityRank[b.severity]).slice(0, 3);
+
+  return (
+    <Card className="p-5">
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="font-semibold text-stone-800">تنبيهات الميزانية</h2>
+        <Link to={`/budget-alerts?projectId=${projectId}`} className="text-sm text-primary hover:underline">
+          عرض جميع التنبيهات
+        </Link>
+      </div>
+      {error && <ErrorState message={error} onRetry={load} />}
+      {!error && alerts === null && <p className="text-sm text-stone-400">جارٍ التحميل...</p>}
+      {!error && alerts && active.length === 0 && (
+        <p className="text-sm text-stone-400">لا توجد حالياً مؤشرات مالية تتجاوز قواعد التنبيه المحددة.</p>
+      )}
+      {!error && top.length > 0 && (
+        <ul className="space-y-1.5">
+          {top.map((a) => (
+            <li key={a.id} className="flex items-center justify-between gap-2 text-sm">
+              <span className="text-stone-700">{a.title}</span>
+              <Badge tone={alertSeverityTone[a.severity]}>{alertSeverityLabel[a.severity]}</Badge>
+            </li>
+          ))}
+        </ul>
+      )}
     </Card>
   );
 }

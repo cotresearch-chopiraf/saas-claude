@@ -3,7 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { AuthProvider } from "../../auth/AuthContext";
 import { OverviewSection } from "./OverviewSection";
-import type { BoqRevision, BudgetSummary, CashFlowResult, Contract, ForecastResult, Project, ProjectLaborCost } from "../../api/types";
+import type { BoqRevision, BudgetAlert, BudgetSummary, CashFlowResult, Contract, ForecastResult, Project, ProjectLaborCost } from "../../api/types";
 
 vi.mock("../context", () => ({
   useProjectContext: () => ({
@@ -195,6 +195,36 @@ const fixtureLaborCost: ProjectLaborCost = {
   posted: false,
 };
 
+// MIDAD Phase E — deliberately distinct wording from every other fixture in
+// this file so a test asserting on it proves BudgetAlertsCard renders its
+// own source data.
+const fixtureBudgetAlert: BudgetAlert = {
+  id: "ba1",
+  companyId: "co1",
+  projectId: "p1",
+  costCodeId: null,
+  ruleCode: "budget_consumption_threshold",
+  severity: "critical",
+  status: "open",
+  metricType: "budget_consumption_percent",
+  metricValue: "105.00",
+  thresholdValue: "100.00",
+  budgetAmount: "10000.00",
+  actualAmount: "10500.00",
+  commitmentAmount: "0.00",
+  forecastAmount: "10500.00",
+  currency: "SAR",
+  title: "استهلاك الميزانية وصل إلى 105%",
+  description: "بلغت التكلفة الفعلية والالتزامات مجتمعة 105% من الميزانية المعتمدة.",
+  recommendedAction: "أوقف الاعتمادات غير الضرورية وراجع الميزانية فوراً مع الإدارة.",
+  createdAt: "2026-08-01T00:00:00.000Z",
+  acknowledgedAt: null,
+  acknowledgedByUserId: null,
+  resolvedAt: null,
+  resolvedByUserId: null,
+  updatedAt: "2026-08-01T00:00:00.000Z",
+};
+
 function mockApi(
   role: "owner" | "member",
   opts: {
@@ -204,6 +234,7 @@ function mockApi(
     cashFlow?: CashFlowResult;
     revisions?: BoqRevision[];
     laborCost?: ProjectLaborCost;
+    budgetAlerts?: BudgetAlert[];
     failPath?: string;
   } = {},
 ) {
@@ -213,6 +244,7 @@ function mockApi(
   const cashFlow = opts.cashFlow ?? fixtureCashFlow;
   const revisions = opts.revisions ?? [fixtureRevisionDraft, fixtureRevisionPublished];
   const laborCost = opts.laborCost ?? fixtureLaborCost;
+  const budgetAlerts = opts.budgetAlerts ?? [];
 
   vi.mocked(apiFetch).mockImplementation((path: unknown) => {
     const p = String(path);
@@ -231,6 +263,7 @@ function mockApi(
     if (p === "/projects/p1/cash-flow") return Promise.resolve(cashFlow);
     if (p === "/projects/p1/boq-revisions") return Promise.resolve(revisions);
     if (p === "/projects/p1/labor-cost") return Promise.resolve(laborCost);
+    if (p.startsWith("/budget-alerts")) return Promise.resolve(budgetAlerts);
     return Promise.reject(new Error(`unexpected apiFetch call in test: ${p}`));
   });
 }
@@ -410,6 +443,31 @@ describe("<OverviewSection/> (Executive Dashboard)", () => {
     renderSection();
     await waitFor(() => expect(screen.getByText("لا توجد تكلفة عمالة موزعة")).toBeInTheDocument());
     expect(screen.queryByText("إجمالي الموزَّع")).not.toBeInTheDocument();
+  });
+
+  it("MIDAD Phase E: Budget Alerts card shows an honest empty state when there are no active alerts", async () => {
+    mockApi("owner");
+    renderSection();
+    await waitFor(() => expect(screen.getByText("لا توجد حالياً مؤشرات مالية تتجاوز قواعد التنبيه المحددة.")).toBeInTheDocument());
+    // Never claims the project is "safe" — absence of an alert is not a
+    // health guarantee.
+    expect(document.body.textContent).not.toMatch(/آمن/);
+  });
+
+  it("MIDAD Phase E: Budget Alerts card renders a server-generated alert's own title/severity verbatim, and links to the full list", async () => {
+    mockApi("owner", { budgetAlerts: [fixtureBudgetAlert] });
+    renderSection();
+    await waitFor(() => expect(screen.getByText("استهلاك الميزانية وصل إلى 105%")).toBeInTheDocument());
+    expect(screen.getByText("حرج")).toBeInTheDocument();
+    const link = screen.getByText("عرض جميع التنبيهات").closest("a");
+    expect(link).toHaveAttribute("href", "/budget-alerts?projectId=p1");
+  });
+
+  it("MIDAD Phase E: a resolved alert is excluded from the compact card's active view", async () => {
+    mockApi("owner", { budgetAlerts: [{ ...fixtureBudgetAlert, status: "resolved" }] });
+    renderSection();
+    await waitFor(() => expect(screen.getByText("تنبيهات الميزانية")).toBeInTheDocument());
+    expect(screen.queryByText("استهلاك الميزانية وصل إلى 105%")).not.toBeInTheDocument();
   });
 
   it("Member read access: a member can render the full dashboard, with no mutation controls anywhere", async () => {

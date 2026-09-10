@@ -88,6 +88,11 @@ export const OWNER_ONLY_ACTIONS = [
   // unrelated tax/ZATCA compliance domain (see that file's own comment).
   "laborCompliance.manage",
   "laborCompliance.verify",
+  // Phase E — mirrors server/src/lib/permissions.ts's new
+  // "budgetAlert.manage" (acknowledge/resolve). Reads and triggering
+  // evaluation stay member-open, same split every other domain in this list
+  // uses.
+  "budgetAlert.manage",
 ] as const;
 
 export type PermissionAction = (typeof OWNER_ONLY_ACTIONS)[number];
