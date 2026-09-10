@@ -1,9 +1,12 @@
 import { Router, type Request, type Response, type NextFunction } from "express";
 import multer from "multer";
+import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { files, projects } from "../db/schema.js";
 import { uploadFile, getFile, readFileBuffer } from "../lib/storage/index.js";
+import { requirePermission } from "../lib/permissions.js";
+import { recordAuditEvent } from "../lib/audit.js";
 
 // MIDAD UI-10 — project-scoped Documents (evidence repository).
 //
@@ -82,7 +85,10 @@ function handleDocumentUpload(req: Request, res: Response, next: NextFunction) {
 // `files`). uploadedByName comes from a direct relational join (the
 // `filesRelations.uploader` relation already defined in schema.ts) — not
 // from listFilesForEntity(), which has no `with` support; upload/download
-// below still go through the shared storage service unchanged.
+// below still go through the shared storage service unchanged. clientVisible
+// (Phase B3) IS exposed here — this is the internal-facing response, and an
+// internal user managing a document's visibility needs to see its current
+// state.
 function toDocumentResponse(row: {
   id: string;
   fileName: string;
@@ -91,6 +97,7 @@ function toDocumentResponse(row: {
   uploadedAt: Date;
   version: number;
   previousVersionId: string | null;
+  clientVisible: boolean;
   uploader?: { name: string } | null;
 }) {
   return {
@@ -102,6 +109,7 @@ function toDocumentResponse(row: {
     uploadedByName: row.uploader?.name ?? null,
     version: row.version,
     previousVersionId: row.previousVersionId,
+    clientVisible: row.clientVisible,
   };
 }
 
@@ -163,3 +171,63 @@ documentsRouter.get("/:documentId", async (req: Request<DocumentParams>, res: Re
   res.setHeader("Content-Disposition", "attachment");
   res.send(buffer);
 });
+
+// MIDAD Phase B3 — explicit client visibility toggle. Reuses
+// clientPortal.manage (Phase B1): flipping this flag is the exact same
+// class of decision that permission already governs — "who outside this
+// company can read this company's project data" — just at document grain
+// instead of project grain, so a second permission would only fragment
+// one trust boundary into two without adding precision. An ordinary member
+// can upload/view/download documents (unchanged), but only an owner may
+// decide one becomes visible to the client, matching the master prompt's
+// "do not make ordinary members able to expose documents" requirement.
+const visibilitySchema = z.object({ clientVisible: z.boolean() });
+
+documentsRouter.patch(
+  "/:documentId",
+  requirePermission("clientPortal.manage"),
+  async (req: Request<DocumentParams>, res: Response) => {
+    const parsed = visibilitySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
+
+    const existing = await getFile(req.companyId!, req.params.documentId);
+    if (!existing || existing.entityType !== PROJECT_DOCUMENT_ENTITY_TYPE || existing.entityId !== req.params.projectId) {
+      return res.status(404).json({ error: "الملف غير موجود" });
+    }
+
+    if (existing.clientVisible === parsed.data.clientVisible) {
+      const withUploader = await db.query.files.findFirst({
+        where: eq(files.id, existing.id),
+        with: { uploader: { columns: { name: true } } },
+      });
+      return res.json(toDocumentResponse(withUploader!));
+    }
+
+    const updated = await db.transaction(async (tx) => {
+      const [row] = await tx
+        .update(files)
+        .set({ clientVisible: parsed.data.clientVisible })
+        .where(eq(files.id, existing.id))
+        .returning();
+
+      await recordAuditEvent(tx, {
+        companyId: req.companyId!,
+        actorUserId: req.userId!,
+        action: parsed.data.clientVisible ? "client_document_visibility_enabled" : "client_document_visibility_disabled",
+        entityType: PROJECT_DOCUMENT_ENTITY_TYPE,
+        entityId: existing.id,
+        beforeValue: { clientVisible: existing.clientVisible },
+        afterValue: { clientVisible: row.clientVisible },
+        metadata: { projectId: req.params.projectId },
+      });
+
+      return row;
+    });
+
+    const withUploader = await db.query.files.findFirst({
+      where: eq(files.id, updated.id),
+      with: { uploader: { columns: { name: true } } },
+    });
+    res.json(toDocumentResponse(withUploader!));
+  },
+);

@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
 import { Link, useParams, useNavigate } from "react-router-dom";
 import { PortalLayout } from "../components/PortalLayout";
-import { Card, Badge, ErrorState, Skeleton } from "../../ui";
+import { Card, Badge, EmptyState, ErrorState, Skeleton } from "../../ui";
 import { ApiError } from "../../api/client";
 import { formatDate } from "../../lib/format";
 import { getPortalProject } from "../api/portalProjects";
+import { listPortalDocuments, downloadPortalDocument } from "../api/portalDocuments";
 import { useClientPortalAuth } from "../auth/ClientPortalAuthContext";
 import { portalStatusLabel, portalStatusTone } from "../lib/projectStatus";
-import type { PortalProject } from "../api/types";
+import type { PortalProject, PortalDocument } from "../api/types";
 
 function Field({ label, value }: { label: string; value: string }) {
   return (
@@ -15,6 +16,76 @@ function Field({ label, value }: { label: string; value: string }) {
       <dt className="text-stone-500">{label}</dt>
       <dd className="font-medium text-stone-800">{value}</dd>
     </div>
+  );
+}
+
+// MIDAD Phase B3 — the client-facing Documents section. Every document
+// rendered here already passed all four server-side conditions
+// (authenticated + active grant + belongs to this project + clientVisible
+// = true) — this component filters nothing itself, it only displays what
+// the server already decided to return. Its own load/download failures are
+// two independent error states (list failure vs. one download failure)
+// so a broken download never blanks out an otherwise-working list.
+function PortalDocumentsSection({ projectId }: { projectId: string }) {
+  const { logout } = useClientPortalAuth();
+  const navigate = useNavigate();
+  const [documents, setDocuments] = useState<PortalDocument[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+
+  function load() {
+    setError(null);
+    setDocuments(null);
+    listPortalDocuments(projectId)
+      .then(setDocuments)
+      .catch((err) => {
+        if (err instanceof ApiError && err.status === 401) {
+          logout();
+          navigate("/portal/login", { replace: true });
+          return;
+        }
+        setError(err instanceof ApiError ? err.message : "تعذّر تحميل المستندات");
+      });
+  }
+  useEffect(load, [projectId]);
+
+  async function onDownload(doc: PortalDocument) {
+    setDownloadError(null);
+    try {
+      await downloadPortalDocument(projectId, doc.id, doc.fileName);
+    } catch (err) {
+      setDownloadError(err instanceof ApiError ? err.message : "تعذّر تنزيل الملف");
+    }
+  }
+
+  return (
+    <Card className="mt-6 p-5">
+      <h2 className="mb-3 font-semibold text-stone-800">المستندات</h2>
+
+      {error && <ErrorState message={error} onRetry={load} />}
+      {!error && !documents && <Skeleton rows={3} />}
+      {!error && documents && documents.length === 0 && <EmptyState message="لا توجد مستندات متاحة لهذا المشروع حالياً" />}
+      {!error && documents && documents.length > 0 && (
+        <div className="space-y-3">
+          {documents.map((doc) => (
+            <div key={doc.id} className="flex items-center justify-between rounded-lg border border-stone-200 p-3">
+              <div>
+                <p className="text-sm font-medium text-stone-800">{doc.fileName}</p>
+                <p className="text-xs text-stone-500">{formatDate(doc.uploadedAt)}</p>
+              </div>
+              <button type="button" onClick={() => onDownload(doc)} className="text-sm text-primary hover:underline">
+                عرض/تحميل
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      {downloadError && (
+        <div className="mt-3">
+          <ErrorState message={downloadError} />
+        </div>
+      )}
+    </Card>
   );
 }
 
@@ -87,6 +158,8 @@ export function PortalProjectDetail() {
               {project.address && <Field label="الموقع" value={project.address} />}
             </dl>
           </Card>
+
+          <PortalDocumentsSection projectId={project.id} />
         </>
       )}
     </PortalLayout>

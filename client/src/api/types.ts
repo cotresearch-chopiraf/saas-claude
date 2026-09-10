@@ -943,6 +943,10 @@ export interface ProjectDocument {
   uploadedByName: string | null;
   version: number;
   previousVersionId: string | null;
+  // MIDAD Phase B3 — explicit Client Portal visibility. false by default
+  // for every document, old and new alike; only an owner flipping it via
+  // PATCH /api/projects/:projectId/documents/:documentId changes it.
+  clientVisible: boolean;
 }
 
 // MIDAD Phase 3 — mirrors server/src/routes/subcontractIpcDocuments.ts's

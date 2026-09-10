@@ -22,3 +22,16 @@ export interface PortalProject {
   clientName: string | null;
   address: string | null;
 }
+
+// MIDAD Phase B3 — mirrors server/src/routes/clientPortalDocuments.ts's
+// toPortalDocument exactly: only an explicitly clientVisible=true document
+// ever reaches this shape. No companyId, no uploader, no storage details,
+// no version lineage — never a Project's internal document shape reused
+// here.
+export interface PortalDocument {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  size: number;
+  uploadedAt: string;
+}

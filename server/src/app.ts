@@ -49,9 +49,11 @@ import { platformAuditEventsRouter } from "./routes/platformAuditEvents.js";
 import { clientPortalUsersRouter } from "./routes/clientPortalUsers.js";
 import { clientPortalAuthRouter } from "./routes/clientPortalAuth.js";
 import { clientPortalProjectsRouter } from "./routes/clientPortalProjects.js";
+import { clientPortalDocumentsRouter } from "./routes/clientPortalDocuments.js";
 import { requireAuth } from "./middleware/auth.js";
 import { platformAuth } from "./middleware/platformAuth.js";
 import { clientPortalAuth } from "./middleware/clientPortalAuth.js";
+import { requireClientProjectAccess } from "./middleware/requireClientProjectAccess.js";
 import { uploadsDir } from "./lib/uploads.js";
 import { logger } from "./lib/logger.js";
 import { requestIdMiddleware } from "./middleware/requestId.js";
@@ -154,6 +156,17 @@ export function buildApp() {
   // sets req.userId/req.companyId/req.platformOperatorId.
   app.use("/api/portal/auth", clientPortalAuthRouter);
   app.use("/api/portal/projects", clientPortalAuth, clientPortalProjectsRouter);
+  // MIDAD Phase B3 — same two-middleware chain as clientPortalProjectsRouter's
+  // own GET /:projectId (clientPortalAuth first, then requireClientProjectAccess
+  // to resolve the active grant and set req.clientPortalGrantCompanyId), applied
+  // at the mount site exactly like documentsRouter's project-ownership check is
+  // for the internal /api/projects/:projectId/documents route above.
+  app.use(
+    "/api/portal/projects/:projectId/documents",
+    clientPortalAuth,
+    requireClientProjectAccess,
+    clientPortalDocumentsRouter,
+  );
 
   // MIDAD Phase D1 — PLATFORM_SCOPE, structurally separate from every
   // route above: platformAuthRouter is unauthenticated (it IS the login

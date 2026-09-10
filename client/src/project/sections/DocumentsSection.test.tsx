@@ -26,6 +26,7 @@ const fixtureDocA: ProjectDocument = {
   uploadedByName: "أحمد المالك",
   version: 1,
   previousVersionId: null,
+  clientVisible: false,
 };
 
 const fixtureDocB: ProjectDocument = {
@@ -37,6 +38,7 @@ const fixtureDocB: ProjectDocument = {
   uploadedByName: "سارة العضو",
   version: 1,
   previousVersionId: null,
+  clientVisible: false,
 };
 
 const LONG_NAME =
@@ -51,6 +53,7 @@ const fixtureDocLongName: ProjectDocument = {
   uploadedByName: null,
   version: 1,
   previousVersionId: null,
+  clientVisible: false,
 };
 
 function mockApi(documents: ProjectDocument[] = [fixtureDocA]) {
@@ -257,6 +260,29 @@ describe("<DocumentsSection/>", () => {
         expect.objectContaining({ headers: { Authorization: "Bearer fake-token" } }),
       ),
     );
+  });
+
+  it("MIDAD Phase B3 — toggling the client-visibility checkbox PATCHes the document and reflects the server's response", async () => {
+    mockApi([fixtureDocA]);
+    renderSection();
+    await waitFor(() => expect(screen.getByText(fixtureDocA.fileName)).toBeInTheDocument());
+
+    const checkbox = screen.getByRole("checkbox") as HTMLInputElement;
+    expect(checkbox.checked).toBe(false);
+
+    vi.mocked(apiFetch).mockImplementation((path: unknown, options?: unknown) => {
+      const p = String(path);
+      const opts = options as { method?: string; body?: string } | undefined;
+      if (p === "/auth/me") return Promise.resolve({ user: { id: "u1", name: "Test", email: "t@test.com", role: "owner" }, company: { id: "co1", name: "Test Co" } });
+      if (p === `/projects/p1/documents/${fixtureDocA.id}` && opts?.method === "PATCH") {
+        expect(JSON.parse(opts.body!)).toEqual({ clientVisible: true });
+        return Promise.resolve({ ...fixtureDocA, clientVisible: true });
+      }
+      return Promise.reject(new Error(`unexpected apiFetch call in test: ${p}`));
+    });
+
+    fireEvent.click(checkbox);
+    await waitFor(() => expect(checkbox.checked).toBe(true));
   });
 
   it("a very long filename is truncated rather than breaking the layout", async () => {

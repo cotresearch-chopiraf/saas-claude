@@ -5,7 +5,7 @@ import { Button } from "../../ui/Button";
 import { FinancialTable, type FinancialColumn } from "../../ui/FinancialTable";
 import { ErrorState } from "../../ui/ErrorState";
 import { formatFileSize, formatDate } from "../../lib/format";
-import { listProjectDocuments, uploadProjectDocument, downloadProjectDocument } from "../../api/documents";
+import { listProjectDocuments, uploadProjectDocument, downloadProjectDocument, setDocumentClientVisibility } from "../../api/documents";
 import { ApiError } from "../../api/client";
 import type { ProjectDocument } from "../../api/types";
 import { useProjectContext } from "../context";
@@ -44,6 +44,8 @@ export function DocumentsSection() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [visibilityError, setVisibilityError] = useState<string | null>(null);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   function load() {
@@ -94,6 +96,25 @@ export function DocumentsSection() {
     }
   }
 
+  // MIDAD Phase B3 — explicit Client Portal visibility toggle. Server-
+  // authoritative (owner-only, clientPortal.manage); this checkbox reflects
+  // whatever the last successful PATCH returned, never an optimistic guess
+  // — on failure the row is left exactly as it was and the error surfaces
+  // inline, no silent revert needed because nothing was changed locally.
+  async function onToggleVisibility(doc: ProjectDocument) {
+    if (togglingId) return;
+    setVisibilityError(null);
+    setTogglingId(doc.id);
+    try {
+      const updated = await setDocumentClientVisibility(projectId, doc.id, !doc.clientVisible);
+      setDocuments((prev) => prev?.map((d) => (d.id === updated.id ? updated : d)) ?? prev);
+    } catch (err) {
+      setVisibilityError(err instanceof ApiError ? err.message : "تعذّر تحديث ظهور المستند للعميل");
+    } finally {
+      setTogglingId(null);
+    }
+  }
+
   const columns: FinancialColumn<ProjectDocument>[] = [
     {
       key: "fileName",
@@ -108,6 +129,20 @@ export function DocumentsSection() {
     { key: "size", header: "الحجم", align: "end", render: (d) => formatFileSize(d.size) },
     { key: "uploadedAt", header: "تاريخ الرفع", render: (d) => formatDate(d.uploadedAt) },
     { key: "uploadedByName", header: "بواسطة", render: (d) => d.uploadedByName ?? "—" },
+    {
+      key: "clientVisible",
+      header: "مرئي للعميل",
+      render: (d) => (
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={d.clientVisible}
+            disabled={togglingId === d.id}
+            onChange={() => onToggleVisibility(d)}
+          />
+        </label>
+      ),
+    },
   ];
 
   return (
@@ -146,6 +181,12 @@ export function DocumentsSection() {
         )}
         {notice && <p className="mt-3 text-sm text-success-700">{notice}</p>}
       </Card>
+
+      {visibilityError && (
+        <div>
+          <ErrorState message={visibilityError} />
+        </div>
+      )}
 
       <FinancialTable
         columns={columns}

@@ -1,6 +1,20 @@
 import { apiFetch, ApiError, getToken } from "./client";
 import type { ProjectDocument } from "./types";
 
+// MIDAD Phase B3 — flips a document's explicit Client Portal visibility.
+// owner-only server-side (clientPortal.manage); never inferred, never
+// bulk, one document at a time.
+export function setDocumentClientVisibility(
+  projectId: string,
+  documentId: string,
+  clientVisible: boolean,
+): Promise<ProjectDocument> {
+  return apiFetch<ProjectDocument>(`/projects/${projectId}/documents/${documentId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ clientVisible }),
+  });
+}
+
 // Thin typed wrappers over the existing, verified Documents API
 // (server/src/routes/documents.ts) — no calculation, no authorization
 // logic, no client-side project filtering. The backend is the sole source

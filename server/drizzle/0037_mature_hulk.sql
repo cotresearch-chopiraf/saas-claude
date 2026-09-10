@@ -1,0 +1,1 @@
+ALTER TABLE "files" ADD COLUMN "client_visible" boolean DEFAULT false NOT NULL;

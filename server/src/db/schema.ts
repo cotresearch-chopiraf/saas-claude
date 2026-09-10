@@ -6,6 +6,7 @@ import {
   numeric,
   date,
   integer,
+  boolean,
   jsonb,
   pgEnum,
   uniqueIndex,
@@ -1081,6 +1082,15 @@ export const files = pgTable(
   entityId: uuid("entity_id").notNull(),
   version: integer("version").notNull().default(1),
   previousVersionId: uuid("previous_version_id").references((): AnyPgColumn => files.id),
+  // MIDAD Phase B3 — Client Portal document visibility. Explicit-only:
+  // "false" is the safe default for both new inserts and every existing
+  // row after migration, so a document is never client-visible merely
+  // because it exists. Never inferred from filename/folder/uploader/
+  // project access/customer relationship — only this column, flipped by
+  // an authorized internal user via routes/documents.ts's PATCH route,
+  // ever controls whether routes/clientPortalDocuments.ts's queries can
+  // return a given file.
+  clientVisible: boolean("client_visible").notNull().default(false),
   },
   (table) => ({
     // Slice Z — routes/documents.ts's list route filters by companyId
