@@ -546,7 +546,34 @@ describe("<OverviewSection/> (Executive Dashboard)", () => {
     mockApi("owner", { punchItems: [] });
     renderSection();
     await waitFor(() => expect(screen.getByText("قائمة الملاحظات")).toBeInTheDocument());
-    expect(screen.getByText("لا توجد ملاحظات مسجَّلة بعد.")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("لا توجد ملاحظات مسجَّلة بعد.")).toBeInTheDocument());
+  });
+
+  it("MIDAD Phase F.1: Project Health shows healthy financial + schedule dimensions from existing sources, never Progress/Compliance", async () => {
+    mockApi("owner", { tasks: [fixtureMilestone] });
+    renderSection();
+    await waitFor(() => expect(screen.getByText("سليمة")).toBeInTheDocument());
+    expect(screen.getByText("ضمن الجدول المخطط")).toBeInTheDocument();
+  });
+
+  it("MIDAD Phase F.1: Project Health financial dimension turns critical from the same open critical Budget Alert as the Budget Alerts card", async () => {
+    mockApi("owner", { budgetAlerts: [fixtureBudgetAlert] });
+    renderSection();
+    await waitFor(() => expect(screen.getByText("صحة المشروع")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("حرجة")).toBeInTheDocument());
+  });
+
+  it("MIDAD Phase F.1: Project Health schedule dimension flags a delay from the same overdue task as the Schedule card", async () => {
+    mockApi("owner", { tasks: [fixtureOverdueTask] });
+    renderSection();
+    await waitFor(() => expect(screen.getByText("تأخر عن الجدول")).toBeInTheDocument());
+  });
+
+  it("MIDAD Phase F.1: Project Health shows an honest 'insufficient data' state for schedule when the project has no tasks, never a fabricated verdict", async () => {
+    mockApi("owner", { tasks: [] });
+    renderSection();
+    await waitFor(() => expect(screen.getByText("صحة المشروع")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("لا توجد بيانات كافية")).toBeInTheDocument());
   });
 
   it("Member read access: a member can render the full dashboard, with no mutation controls anywhere", async () => {

@@ -23,6 +23,12 @@ export interface FinancialColumn<T> {
   // — throughout the existing MIDAD UI. Only override to "end" for a
   // genuinely trailing element (e.g. a row-action icon column).
   align?: "start" | "end";
+  // Phase F.1 — purely presentational opt-in: marks a column's header as
+  // clickable. This component still never reorders `rows` itself (it has
+  // no data of its own to compare); the caller owns `sort`/`onSort` and
+  // passes back already-sorted `rows`, same as it already owns `search`/
+  // `statusFilter` for the Dashboard project table.
+  sortable?: boolean;
   render: (row: T) => ReactNode;
   total?: (rows: T[]) => ReactNode;
 }
@@ -36,6 +42,8 @@ export interface FinancialTableProps<T> {
   onRetry?: () => void;
   emptyMessage?: string;
   rowActions?: (row: T) => ReactNode;
+  sort?: { key: string; direction: "asc" | "desc" };
+  onSort?: (key: string) => void;
 }
 
 export function FinancialTable<T>({
@@ -47,6 +55,8 @@ export function FinancialTable<T>({
   onRetry,
   emptyMessage = "لا توجد بيانات بعد",
   rowActions,
+  sort,
+  onSort,
 }: FinancialTableProps<T>) {
   if (error) return <ErrorState message={error} onRetry={onRetry} />;
   if (loading || rows === null) return <Skeleton rows={4} />;
@@ -60,7 +70,18 @@ export function FinancialTable<T>({
         <tr>
           {columns.map((c) => (
             <th key={c.key} className={`p-3 font-medium ${c.align === "end" ? "text-end" : "text-start"}`}>
-              {c.header}
+              {c.sortable && onSort ? (
+                <button
+                  type="button"
+                  onClick={() => onSort(c.key)}
+                  className="inline-flex items-center gap-1 hover:text-stone-700"
+                >
+                  {c.header}
+                  {sort?.key === c.key && <span aria-hidden="true">{sort.direction === "asc" ? "▲" : "▼"}</span>}
+                </button>
+              ) : (
+                c.header
+              )}
             </th>
           ))}
           {rowActions && <th className="p-3" aria-label="إجراءات" />}

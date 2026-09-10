@@ -67,11 +67,45 @@ complexity. Revisit if the group count grows materially.
 
 ## 5. Full RTL/responsive device matrix verification
 
-RTL correctness was verified by code inspection (every new component uses
-logical properties — `border-e`, `text-end`, `justify-end` — matching the
-codebase's existing convention) and by the existing automated test suite's
-`[dir="rtl"]` assertions. It was **not** verified by manually driving the app
-in a real browser at each of desktop/laptop/tablet/mobile breakpoints (no
-running dev server + browser session was exercised this phase). Recommend a
-manual pass (or a Playwright visual-regression suite) before claiming full
-responsive confidence.
+**Status: partially resolved in Phase F.1.** Real browser verification (Chromium
+via Playwright, desktop 1440px / tablet 834px / mobile 390px) was performed for:
+Dashboard (incl. search/status-filter/sort on the project table), Project
+Overview (incl. the new Project Health card), the global nav's collapsed
+sidebar and mobile drawer, the project workspace's own mobile drawer, Budget
+Alerts, Payroll, Labor Compliance, and the Gantt/Schedule page. Two real bugs
+were found and fixed this way (see `client/src/ui/MetricCard.tsx` and
+`client/src/ui/Modal.tsx` history) — proving code inspection alone would have
+missed them.
+
+**Still not driven in a real browser:** Forms in isolation (the brief's own
+"logical sections" requirement — existing create/edit forms were not
+individually re-verified), the Client Portal experience, the ZATCA settings
+flow, and the ~19 individual pages listed in item 6 below. Recommend covering
+these in a follow-up pass, ideally as an automated Playwright visual-regression
+suite rather than ad hoc manual screenshots each phase.
+
+## 6. Individual page polish (Phase F.1 §17) — not fully covered
+
+Phase F.1 focused its actual UI changes on the App Shell, Dashboard, and
+Project Overview (the two highest-traffic screens, same prioritization Phase F
+already established) plus a Project Health card and a sortable portfolio
+table. The ~19 other listed pages (Contract, BOQ, Cost Plan, Procurement,
+Actual Cost, Progress, Forecast, Cash Flow, IPC, Subcontract IPC, Invoices,
+Documents, Operations, Punch List, Employees, Labor Allocation, Customers,
+Suppliers, Quotes, Team, Settings, ZATCA) were **not** individually reviewed or
+redesigned this phase — they already follow the established `PageHeader` /
+`Card` / `FinancialTable` primitives from earlier phases, but a dedicated
+per-page Header/Summary/Content/Actions audit (per the master prompt's §17
+template) was not performed. Recommend a dedicated follow-up phase, working
+through the list in priority order (financial pages first: Cost Plan,
+Forecast, Cash Flow, IPC, Invoices), rather than attempting all ~19 in one
+UI-only pass.
+
+## 7. Portfolio table Budget/Actual+Commitments/Forecast/Variance/Risk columns
+
+Phase F.1's brief (§6) asked for these columns on the Dashboard's project
+table again. Not implemented, same root cause as item 1 above (no
+company-wide financial aggregate endpoint exists; per-row fan-out would be
+N+1). Search, status filter, and column sorting were added this phase (all
+client-side over already-loaded rows); the financial columns remain blocked
+on the same backend aggregate recommended in item 1.

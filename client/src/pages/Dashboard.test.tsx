@@ -33,8 +33,40 @@ const fixtureCustomer: Customer = {
   updatedAt: "2026-01-01T00:00:00.000Z",
 };
 
-function mockApi(opts: { projects?: Project[]; customers?: Customer[] } = {}) {
+const fixtureProjectA: Project = {
+  id: "p1",
+  companyId: "c1",
+  name: "برج الرياض السكني",
+  clientName: "مجموعة الرياض العقارية",
+  customerId: null,
+  address: null,
+  status: "active",
+  budgetTotal: "0.00",
+  startDate: null,
+  createdAt: "2026-01-01T00:00:00.000Z",
+};
+const fixtureProjectB: Project = {
+  id: "p2",
+  companyId: "c1",
+  name: "مجمع جدة التجاري",
+  clientName: "شركة جدة للتطوير",
+  customerId: null,
+  address: null,
+  status: "on_hold",
+  budgetTotal: "0.00",
+  startDate: null,
+  createdAt: "2026-02-01T00:00:00.000Z",
+};
+
+function mockApi(
+  opts: {
+    projects?: Project[];
+    customers?: Customer[];
+    exceptions?: { open: number; highOrCritical: number };
+  } = {},
+) {
   const { projects = [], customers = [fixtureCustomer] } = opts;
+  const exceptions = opts.exceptions ?? { open: 0, highOrCritical: 0 };
   vi.mocked(apiFetch).mockImplementation((path: unknown, reqOpts?: RequestInit) => {
     const p = String(path);
     const method = reqOpts?.method;
@@ -42,6 +74,7 @@ function mockApi(opts: { projects?: Project[]; customers?: Customer[] } = {}) {
     if (p === "/projects" && !method) return Promise.resolve(projects);
     if (p === "/customers" && !method) return Promise.resolve(customers);
     if (p.startsWith("/budget-alerts")) return Promise.resolve([]);
+    if (p === "/workforce-compliance") return Promise.resolve({ nitaqat: null, gosi: null, exceptions });
     return Promise.reject(new Error(`unexpected apiFetch call in test: ${p} ${method}`));
   });
 }
@@ -82,6 +115,7 @@ describe("<Dashboard/> — project creation customer link (Phase A')", () => {
       }
       if (p === "/projects" && !method) return Promise.resolve([]);
       if (p.startsWith("/budget-alerts")) return Promise.resolve([]);
+      if (p === "/workforce-compliance") return Promise.resolve({ nitaqat: null, gosi: null, exceptions: { open: 0, highOrCritical: 0 } });
       return Promise.reject(new Error(`unexpected: ${p} ${method}`));
     });
 
@@ -110,6 +144,7 @@ describe("<Dashboard/> — project creation customer link (Phase A')", () => {
       }
       if (p === "/projects" && !method) return Promise.resolve([]);
       if (p.startsWith("/budget-alerts")) return Promise.resolve([]);
+      if (p === "/workforce-compliance") return Promise.resolve({ nitaqat: null, gosi: null, exceptions: { open: 0, highOrCritical: 0 } });
       return Promise.reject(new Error(`unexpected: ${p} ${method}`));
     });
 
@@ -118,5 +153,58 @@ describe("<Dashboard/> — project creation customer link (Phase A')", () => {
 
     await waitFor(() => expect(captured.body?.name).toBe("مشروع بدون عميل"));
     expect(captured.body?.customerId).toBeUndefined();
+  });
+});
+
+describe("<Dashboard/> — Executive Command Center (Phase F/F.1)", () => {
+  it("MIDAD Phase F.1: an open compliance exception appears in Needs Attention, sourced from the existing company-wide dashboard endpoint", async () => {
+    mockApi({ projects: [fixtureProjectA], exceptions: { open: 2, highOrCritical: 1 } });
+    renderDashboard();
+    await waitFor(() => expect(screen.getByText("استثناءات امتثال العمالة")).toBeInTheDocument());
+    expect(screen.getByText(/2 استثناء مفتوح، منها 1 عالية الأولوية/)).toBeInTheDocument();
+  });
+
+  it("MIDAD Phase F.1: searching the project table filters by name/client, client-side, over already-loaded data only", async () => {
+    mockApi({ projects: [fixtureProjectA, fixtureProjectB] });
+    renderDashboard();
+    await waitFor(() => expect(screen.getByText("برج الرياض السكني")).toBeInTheDocument());
+    expect(screen.getByText("مجمع جدة التجاري")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText("البحث بالاسم أو العميل"), { target: { value: "جدة" } });
+    await waitFor(() => expect(screen.queryByText("برج الرياض السكني")).not.toBeInTheDocument());
+    expect(screen.getByText("مجمع جدة التجاري")).toBeInTheDocument();
+  });
+
+  it("MIDAD Phase F.1: the status filter narrows the project table to the selected status only", async () => {
+    mockApi({ projects: [fixtureProjectA, fixtureProjectB] });
+    renderDashboard();
+    await waitFor(() => expect(screen.getByText("برج الرياض السكني")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "متوقف مؤقتاً" }));
+    await waitFor(() => expect(screen.queryByText("برج الرياض السكني")).not.toBeInTheDocument());
+    expect(screen.getByText("مجمع جدة التجاري")).toBeInTheDocument();
+  });
+
+  it("MIDAD Phase F.1: clicking a sortable column header reorders the already-loaded project rows, client-side", async () => {
+    mockApi({ projects: [fixtureProjectA, fixtureProjectB] });
+    renderDashboard();
+    await waitFor(() => expect(screen.getByText("برج الرياض السكني")).toBeInTheDocument());
+
+    const rowsInOrder = () => screen.getAllByRole("row").slice(1).map((r) => r.textContent ?? "");
+    // Default sort is createdAt desc: project B (2026-02-01) before project A (2026-01-01).
+    expect(rowsInOrder()[0]).toContain("مجمع جدة التجاري");
+
+    fireEvent.click(screen.getByRole("button", { name: /المشروع/ }));
+    await waitFor(() => expect(rowsInOrder()[0]).toContain("برج الرياض السكني"));
+
+    fireEvent.click(screen.getByRole("button", { name: /المشروع/ }));
+    await waitFor(() => expect(rowsInOrder()[0]).toContain("مجمع جدة التجاري"));
+  });
+
+  it("no compliance exception item appears when there are none open — never a fabricated risk", async () => {
+    mockApi({ projects: [fixtureProjectA], exceptions: { open: 0, highOrCritical: 0 } });
+    renderDashboard();
+    await waitFor(() => expect(screen.getByText("برج الرياض السكني")).toBeInTheDocument());
+    expect(screen.queryByText("استثناءات امتثال العمالة")).not.toBeInTheDocument();
   });
 });

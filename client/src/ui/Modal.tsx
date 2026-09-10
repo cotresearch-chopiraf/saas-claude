@@ -25,6 +25,19 @@ export function Modal({
   // sidebar's own side) and stretches it full-height, giving a drawer-like
   // presentation from the same primitive as a plain centered confirmation
   // — see project/ProjectSidebar.tsx's mobile menu.
+  //
+  // Phase F.1 fix (found via actual browser screenshotting, not code
+  // review): CSS flexbox's "main-end" is direction-aware — under
+  // `flex-direction: row` + `direction: rtl` (this app is RTL-only),
+  // `justify-content: flex-end` resolves to the LEFT edge, not the right.
+  // This component's own doc comment above always intended visually-right
+  // (matching the hamburger trigger button, which sits on the visual right
+  // in every header in this app); the CSS keyword that actually produces
+  // that under RTL is `flex-start`, not `flex-end` — Tailwind's `justify-end`
+  // was silently opening every "end"-aligned drawer (the global nav drawer,
+  // the project-sidebar mobile drawer) on the wrong side, disconnected from
+  // its own trigger button. Confirmed both visually broken before this fix
+  // and visually correct after it.
   align?: "center" | "end";
 }) {
   useEffect(() => {
@@ -38,7 +51,7 @@ export function Modal({
 
   if (!open) return null;
 
-  const wrapperAlign = align === "end" ? "items-stretch justify-end" : "items-center justify-center";
+  const wrapperAlign = align === "end" ? "items-stretch justify-start" : "items-center justify-center";
   const panelShape = align === "end" ? "h-full overflow-y-auto rounded-none" : "rounded-lg";
 
   return (

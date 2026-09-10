@@ -151,6 +151,8 @@ export function OverviewSection() {
         </div>
       )}
 
+      <ProjectHealthCard projectId={projectId} />
+
       <div className="grid gap-4 lg:grid-cols-2">
         <ContractCard contract={mainContract} />
         <CostPlanCard budget={data.budget} />
@@ -263,6 +265,105 @@ function BudgetAlertsCard({ projectId }: { projectId: string }) {
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+type HealthTone = "healthy" | "watch" | "critical";
+const healthToneBadge: Record<HealthTone, "success" | "warning" | "danger"> = {
+  healthy: "success",
+  watch: "warning",
+  critical: "danger",
+};
+
+// MIDAD Phase F.1 — "Project Health" (master prompt §8): a compact,
+// at-a-glance read of the project across the dimensions for which this
+// codebase actually has an authoritative, already-computed source. This
+// card NEVER derives a health score from a formula of its own — each
+// dimension is a direct restatement of a fact another already-tested
+// domain already establishes:
+//   - Financial: the worst OPEN/ACKNOWLEDGED Budget Alert severity for
+//     this project (Phase E's own rule engine — never re-evaluated here).
+//   - Schedule: whether any incomplete task's end date has passed (the
+//     same plain date comparison ScheduleStatusCard below already makes).
+// Progress and Compliance are deliberately OMITTED: there is no
+// authoritative per-project "% complete" metric anywhere in this codebase
+// (see docs/MIDAD_FINANCIAL_MODEL.md / UI-08 discovery — BOQ has no
+// backend-computed total, so no progress-against-BOQ figure exists
+// either), and Workforce Compliance (Nitaqat/GOSI) is a company-level
+// concept with no per-project breakdown (see POST_AUDIT_BACKLOG.md #3).
+// Fabricating either would violate the master prompt's own explicit rule:
+// "Only display dimensions for which authoritative data exists. Do NOT
+// fabricate a score." Independent fetch, like every other card here — a
+// failure here must not block the rest of the page.
+function ProjectHealthCard({ projectId }: { projectId: string }) {
+  const [alerts, setAlerts] = useState<BudgetAlert[] | null>(null);
+  const [alertsError, setAlertsError] = useState<string | null>(null);
+  const [tasks, setTasks] = useState<ProjectTask[] | null>(null);
+  const [tasksError, setTasksError] = useState<string | null>(null);
+
+  function load() {
+    setAlertsError(null);
+    setTasksError(null);
+    listBudgetAlerts({ projectId })
+      .then(setAlerts)
+      .catch((err) => setAlertsError(err instanceof Error ? err.message : "تعذّر تحميل تنبيهات الميزانية"));
+    getProjectSchedule(projectId)
+      .then((s) => setTasks(s.tasks))
+      .catch((err) => setTasksError(err instanceof Error ? err.message : "تعذّر تحميل الجدول الزمني"));
+  }
+  useEffect(load, [projectId]);
+
+  const activeAlerts = (alerts ?? []).filter((a) => a.status !== "resolved");
+  const financialLoading = alerts === null && !alertsError;
+  const financialTone: HealthTone | null =
+    alerts === null
+      ? null
+      : activeAlerts.some((a) => a.severity === "critical")
+        ? "critical"
+        : activeAlerts.length > 0
+          ? "watch"
+          : "healthy";
+
+  const overdueTasks = (tasks ?? []).filter((t) => t.status !== "completed" && t.endDate < today());
+  const scheduleLoading = tasks === null && !tasksError;
+  const scheduleHasData = tasks !== null && tasks.length > 0;
+  const scheduleTone: HealthTone | null = scheduleHasData ? (overdueTasks.length > 0 ? "critical" : "healthy") : null;
+
+  // Deliberately distinct wording from BudgetAlertsCard's/ScheduleStatusCard's
+  // own badge text below (e.g. their "متأخر" / "على المسار الصحيح") — this
+  // card is a separate, higher-level summary, not a duplicate label for the
+  // same fact, and distinct text keeps the two cards independently testable.
+  const financialLabel: Record<HealthTone, string> = { healthy: "سليمة", watch: "تحتاج مراقبة", critical: "حرجة" };
+  const scheduleLabel: Record<HealthTone, string> = { healthy: "ضمن الجدول المخطط", watch: "قيد المراقبة", critical: "تأخر عن الجدول" };
+
+  return (
+    <Card className="p-5">
+      <h2 className="mb-3 font-semibold text-stone-800">صحة المشروع</h2>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="flex items-center justify-between rounded-md border border-stone-100 p-3">
+          <span className="text-sm text-stone-600">الوضع المالي</span>
+          {alertsError ? (
+            <span className="text-xs text-danger-600">تعذّر التحميل</span>
+          ) : financialLoading ? (
+            <span className="text-xs text-stone-400">جارٍ التحميل...</span>
+          ) : (
+            <Badge tone={healthToneBadge[financialTone as HealthTone]}>{financialLabel[financialTone as HealthTone]}</Badge>
+          )}
+        </div>
+        <div className="flex items-center justify-between rounded-md border border-stone-100 p-3">
+          <span className="text-sm text-stone-600">الجدول الزمني</span>
+          {tasksError ? (
+            <span className="text-xs text-danger-600">تعذّر التحميل</span>
+          ) : scheduleLoading ? (
+            <span className="text-xs text-stone-400">جارٍ التحميل...</span>
+          ) : !scheduleHasData ? (
+            <span className="text-xs text-stone-400">لا توجد بيانات كافية</span>
+          ) : (
+            <Badge tone={healthToneBadge[scheduleTone as HealthTone]}>{scheduleLabel[scheduleTone as HealthTone]}</Badge>
+          )}
+        </div>
+      </div>
+    </Card>
+  );
 }
 
 // MIDAD Phase F — A–E integration: Schedule (Phase C1) surfaced as a
