@@ -22,6 +22,7 @@ import {
 } from "../../api/punchItems";
 import type { CompanyMember, PunchItem, PunchItemPriority, PunchItemStatus } from "../../api/types";
 import { useProjectContext } from "../context";
+import { useTranslation } from "../../i18n/I18nProvider";
 
 // MIDAD Phase C2 — Punch Lists / Site Deficiencies. INTERNAL ONLY — this
 // file is never imported from client/src/portal/, and PunchItem carries no
@@ -30,14 +31,6 @@ import { useProjectContext } from "../context";
 // only and never feed Budget/Actual Cost/Commitments/Forecast/Cash Flow/
 // IPC/Invoices.
 
-const statusLabel: Record<PunchItemStatus, string> = {
-  open: "مفتوحة",
-  assigned: "معيَّنة",
-  in_progress: "قيد التنفيذ",
-  resolved: "محلولة",
-  verified: "تم التحقق",
-  closed: "مغلقة",
-};
 const statusTone: Record<PunchItemStatus, "neutral" | "info" | "success" | "warning" | "danger"> = {
   open: "neutral",
   assigned: "info",
@@ -45,12 +38,6 @@ const statusTone: Record<PunchItemStatus, "neutral" | "info" | "success" | "warn
   resolved: "success",
   verified: "success",
   closed: "neutral",
-};
-const priorityLabel: Record<PunchItemPriority, string> = {
-  low: "منخفضة",
-  medium: "متوسطة",
-  high: "عالية",
-  critical: "حرجة",
 };
 const priorityTone: Record<PunchItemPriority, "neutral" | "info" | "warning" | "danger"> = {
   low: "neutral",
@@ -62,20 +49,22 @@ const priorityTone: Record<PunchItemPriority, "neutral" | "info" | "warning" | "
 // The one valid next-action set per status, per this phase's own lifecycle
 // table — shown here for UX convenience only; the server independently
 // re-validates every transition and is the real authorization boundary.
-const STATUS_ACTIONS: Record<PunchItemStatus, { status: PunchItemStatus; label: string; needsResolution?: boolean }[]> = {
+// labelKey resolves via punchList.actions.*; isReopen distinguishes the
+// "reopen" actions for button styling without comparing translated text.
+const STATUS_ACTIONS: Record<PunchItemStatus, { status: PunchItemStatus; labelKey: string; needsResolution?: boolean; isReopen?: boolean }[]> = {
   open: [
-    { status: "in_progress", label: "بدء العمل" },
-    { status: "assigned", label: "تعيين" },
+    { status: "in_progress", labelKey: "startWork" },
+    { status: "assigned", labelKey: "assign" },
   ],
-  assigned: [{ status: "in_progress", label: "بدء العمل" }],
-  in_progress: [{ status: "resolved", label: "تحديد كمحلول", needsResolution: true }],
+  assigned: [{ status: "in_progress", labelKey: "startWork" }],
+  in_progress: [{ status: "resolved", labelKey: "markResolved", needsResolution: true }],
   resolved: [
-    { status: "verified", label: "التحقق" },
-    { status: "in_progress", label: "إعادة فتح" },
+    { status: "verified", labelKey: "verify" },
+    { status: "in_progress", labelKey: "reopen", isReopen: true },
   ],
   verified: [
-    { status: "closed", label: "إغلاق" },
-    { status: "in_progress", label: "إعادة فتح" },
+    { status: "closed", labelKey: "close" },
+    { status: "in_progress", labelKey: "reopen", isReopen: true },
   ],
   closed: [],
 };
@@ -86,6 +75,7 @@ function memberName(members: CompanyMember[], userId: string | null): string {
 }
 
 export function PunchListSection() {
+  const { t, locale } = useTranslation();
   const { projectId } = useProjectContext();
   const [items, setItems] = useState<PunchItem[] | null>(null);
   const [summaryItems, setSummaryItems] = useState<PunchItem[] | null>(null);
@@ -119,7 +109,7 @@ export function PunchListSection() {
         setItems(filtered);
         setSummaryItems(all);
       })
-      .catch((err) => setError(err instanceof ApiError ? err.message : "تعذّر تحميل قائمة الملاحظات"));
+      .catch((err) => setError(err instanceof ApiError ? err.message : t("punchList.loadError")));
   }
   useEffect(load, [projectId, filters]);
   useEffect(() => {
@@ -152,7 +142,7 @@ export function PunchListSection() {
   if (error) {
     return (
       <div className="space-y-6">
-        <PageHeader title="قائمة الملاحظات" />
+        <PageHeader title={t("punchList.title")} />
         <ErrorState message={error} onRetry={load} />
       </div>
     );
@@ -161,7 +151,7 @@ export function PunchListSection() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="قائمة الملاحظات"
+        title={t("punchList.title")}
         actions={
           <Button
             size="sm"
@@ -171,16 +161,16 @@ export function PunchListSection() {
               setShowCreate((v) => !v);
             }}
           >
-            {showCreate ? "إلغاء" : "+ ملاحظة جديدة"}
+            {showCreate ? t("common.cancel") : t("punchList.newItem")}
           </Button>
         }
       />
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <MetricCard label="مفتوحة" value={String(summary.open)} />
-        <MetricCard label="قيد التنفيذ" value={String(summary.inProgress)} tone="warning" />
-        <MetricCard label="محلولة / تم التحقق" value={String(summary.resolved)} tone="success" />
-        <MetricCard label="متأخرة" value={String(summary.overdue)} tone={summary.overdue > 0 ? "danger" : "default"} />
+        <MetricCard label={t("punchList.summary.open")} value={String(summary.open)} />
+        <MetricCard label={t("punchList.summary.inProgress")} value={String(summary.inProgress)} tone="warning" />
+        <MetricCard label={t("punchList.summary.resolved")} value={String(summary.resolved)} tone="success" />
+        <MetricCard label={t("punchList.summary.overdue")} value={String(summary.overdue)} tone={summary.overdue > 0 ? "danger" : "default"} />
       </div>
 
       {(showCreate || editingItem) && (
@@ -202,23 +192,23 @@ export function PunchListSection() {
 
       <div className="flex flex-wrap items-center gap-3">
         <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as PunchItemStatus | "all")} className="rounded-md border border-stone-300 px-3 py-1.5 text-sm">
-          <option value="all">كل الحالات</option>
-          {(Object.keys(statusLabel) as PunchItemStatus[]).map((s) => (
+          <option value="all">{t("punchList.filters.allStatuses")}</option>
+          {(["open", "assigned", "in_progress", "resolved", "verified", "closed"] as PunchItemStatus[]).map((s) => (
             <option key={s} value={s}>
-              {statusLabel[s]}
+              {t(`punchList.status.${s}`)}
             </option>
           ))}
         </select>
         <select value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value as PunchItemPriority | "all")} className="rounded-md border border-stone-300 px-3 py-1.5 text-sm">
-          <option value="all">كل الأولويات</option>
-          {(Object.keys(priorityLabel) as PunchItemPriority[]).map((p) => (
+          <option value="all">{t("punchList.filters.allPriorities")}</option>
+          {(["low", "medium", "high", "critical"] as PunchItemPriority[]).map((p) => (
             <option key={p} value={p}>
-              {priorityLabel[p]}
+              {t(`punchList.priority.${p}`)}
             </option>
           ))}
         </select>
         <select value={assigneeFilter} onChange={(e) => setAssigneeFilter(e.target.value)} className="rounded-md border border-stone-300 px-3 py-1.5 text-sm">
-          <option value="all">كل المسؤولين</option>
+          <option value="all">{t("punchList.filters.allAssignees")}</option>
           {members.map((m) => (
             <option key={m.id} value={m.id}>
               {m.name}
@@ -227,25 +217,25 @@ export function PunchListSection() {
         </select>
         <label className="flex items-center gap-1.5 text-sm text-stone-600">
           <input type="checkbox" checked={overdueOnly} onChange={(e) => setOverdueOnly(e.target.checked)} />
-          المتأخر فقط
+          {t("punchList.filters.overdueOnly")}
         </label>
       </div>
 
       {items === null && <Skeleton rows={4} />}
-      {items !== null && items.length === 0 && <EmptyState message="لا توجد ملاحظات مطابقة" />}
+      {items !== null && items.length === 0 && <EmptyState message={t("punchList.emptyMessage")} />}
       {items !== null && items.length > 0 && (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {items.map((item) => (
             <Card key={item.id} className="cursor-pointer p-4 transition-shadow hover:shadow-md" onClick={() => setSelectedId(item.id)}>
               <p className="mb-1 font-medium text-stone-800">{item.title}</p>
-              {item.location && <p className="text-xs text-stone-500">الموقع: {item.location}</p>}
+              {item.location && <p className="text-xs text-stone-500">{t("punchList.card.location", { location: item.location })}</p>}
               <div className="mt-2 flex flex-wrap items-center gap-2">
-                <Badge tone={priorityTone[item.priority]}>{priorityLabel[item.priority]}</Badge>
-                <Badge tone={statusTone[item.status]}>{statusLabel[item.status]}</Badge>
+                <Badge tone={priorityTone[item.priority]}>{t(`punchList.priority.${item.priority}`)}</Badge>
+                <Badge tone={statusTone[item.status]}>{t(`punchList.status.${item.status}`)}</Badge>
               </div>
               <div className="mt-2 flex items-center justify-between text-xs text-stone-500">
-                <span>المسؤول: {memberName(members, item.assignedToUserId)}</span>
-                {item.dueDate && <span>الاستحقاق: {formatDate(item.dueDate)}</span>}
+                <span>{t("punchList.card.assignee", { name: memberName(members, item.assignedToUserId) })}</span>
+                {item.dueDate && <span>{t("punchList.card.due", { date: formatDate(item.dueDate, locale) })}</span>}
               </div>
             </Card>
           ))}
@@ -269,8 +259,8 @@ export function PunchListSection() {
 
       <ConfirmDialog
         open={pendingDelete !== null}
-        title="حذف الملاحظة"
-        message={`هل تريد حذف "${pendingDelete?.title ?? ""}"؟ لا يمكن التراجع عن هذا الإجراء.`}
+        title={t("punchList.deleteConfirm.title")}
+        message={t("punchList.deleteConfirm.message", { title: pendingDelete?.title ?? "" })}
         destructive
         onConfirm={confirmDelete}
         onCancel={() => setPendingDelete(null)}
@@ -305,6 +295,7 @@ function PunchItemDetail({
   onDeleteRequested: () => void;
   onClose: () => void;
 }) {
+  const { t, locale } = useTranslation();
   const [resolutionDraft, setResolutionDraft] = useState("");
   const [showResolutionForm, setShowResolutionForm] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -323,7 +314,7 @@ function PunchItemDetail({
       setResolutionDraft("");
       onChanged();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر تحديث الحالة");
+      setError(err instanceof ApiError ? err.message : t("punchList.detail.actionError"));
     } finally {
       setSubmitting(false);
     }
@@ -335,20 +326,20 @@ function PunchItemDetail({
         <div>
           <h2 className="font-semibold text-stone-800">{item.title}</h2>
           <div className="mt-1 flex flex-wrap gap-2">
-            <Badge tone={priorityTone[item.priority]}>{priorityLabel[item.priority]}</Badge>
-            <Badge tone={statusTone[item.status]}>{statusLabel[item.status]}</Badge>
+            <Badge tone={priorityTone[item.priority]}>{t(`punchList.priority.${item.priority}`)}</Badge>
+            <Badge tone={statusTone[item.status]}>{t(`punchList.status.${item.status}`)}</Badge>
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <Button size="sm" variant="secondary" onClick={onEdit}>
-            تعديل
+            {t("punchList.detail.edit")}
           </Button>
           <Can permission="punchItem.delete">
             <Button size="sm" variant="danger" onClick={onDeleteRequested}>
-              حذف
+              {t("common.delete")}
             </Button>
           </Can>
-          <button type="button" onClick={onClose} className="text-stone-400 hover:text-stone-600" aria-label="إغلاق التفاصيل">
+          <button type="button" onClick={onClose} className="text-stone-400 hover:text-stone-600" aria-label={t("punchList.detail.closeDetailsAriaLabel")}>
             ✕
           </button>
         </div>
@@ -361,43 +352,43 @@ function PunchItemDetail({
       )}
 
       <dl className="mb-4">
-        {item.description && <Field label="الوصف" value={item.description} />}
-        <Field label="الموقع" value={item.location ?? "—"} />
-        <Field label="المسؤول" value={memberName(members, item.assignedToUserId)} />
-        <Field label="تاريخ الاستحقاق" value={item.dueDate ? formatDate(item.dueDate) : "—"} />
-        <Field label="أُنشئت بواسطة" value={memberName(members, item.createdBy)} />
-        <Field label="تاريخ الإنشاء" value={formatDate(item.createdAt)} />
+        {item.description && <Field label={t("punchList.detail.fields.description")} value={item.description} />}
+        <Field label={t("punchList.detail.fields.location")} value={item.location ?? "—"} />
+        <Field label={t("punchList.detail.fields.assignee")} value={memberName(members, item.assignedToUserId)} />
+        <Field label={t("punchList.detail.fields.dueDate")} value={item.dueDate ? formatDate(item.dueDate, locale) : "—"} />
+        <Field label={t("punchList.detail.fields.createdBy")} value={memberName(members, item.createdBy)} />
+        <Field label={t("punchList.detail.fields.createdAt")} value={formatDate(item.createdAt, locale)} />
       </dl>
 
       {item.resolutionDescription && (
         <div className="mb-4 rounded-lg border border-stone-100 bg-stone-50 p-3">
-          <p className="mb-1 text-xs font-semibold text-stone-500">معلومات المعالجة</p>
+          <p className="mb-1 text-xs font-semibold text-stone-500">{t("punchList.detail.resolutionHeading")}</p>
           <p className="text-sm text-stone-700">{item.resolutionDescription}</p>
           <p className="mt-1 text-xs text-stone-500">
-            بواسطة {memberName(members, item.resolvedByUserId)} — {item.resolvedAt ? formatDate(item.resolvedAt) : "—"}
+            {t("punchList.detail.byLine", { name: memberName(members, item.resolvedByUserId), date: item.resolvedAt ? formatDate(item.resolvedAt, locale) : "—" })}
           </p>
         </div>
       )}
       {item.verifiedAt && (
         <div className="mb-4 rounded-lg border border-stone-100 bg-stone-50 p-3">
-          <p className="text-xs font-semibold text-stone-500">تم التحقق</p>
+          <p className="text-xs font-semibold text-stone-500">{t("punchList.detail.verifiedHeading")}</p>
           <p className="text-xs text-stone-500">
-            بواسطة {memberName(members, item.verifiedByUserId)} — {formatDate(item.verifiedAt)}
+            {t("punchList.detail.byLine", { name: memberName(members, item.verifiedByUserId), date: formatDate(item.verifiedAt, locale) })}
           </p>
         </div>
       )}
       {item.closedAt && (
         <div className="mb-4 rounded-lg border border-stone-100 bg-stone-50 p-3">
-          <p className="text-xs font-semibold text-stone-500">تم الإغلاق</p>
+          <p className="text-xs font-semibold text-stone-500">{t("punchList.detail.closedHeading")}</p>
           <p className="text-xs text-stone-500">
-            بواسطة {memberName(members, item.closedByUserId)} — {formatDate(item.closedAt)}
+            {t("punchList.detail.byLine", { name: memberName(members, item.closedByUserId), date: formatDate(item.closedAt, locale) })}
           </p>
         </div>
       )}
 
       {showResolutionForm && (
         <div className="mb-4 rounded-lg border border-stone-200 p-3">
-          <label className="mb-1 block text-xs text-stone-500">وصف المعالجة</label>
+          <label className="mb-1 block text-xs text-stone-500">{t("punchList.detail.resolutionForm.label")}</label>
           <textarea
             value={resolutionDraft}
             onChange={(e) => setResolutionDraft(e.target.value)}
@@ -406,10 +397,10 @@ function PunchItemDetail({
           />
           <div className="mt-2 flex gap-2">
             <Button size="sm" disabled={submitting || resolutionDraft.trim().length < 2} onClick={() => onAction("resolved", true)}>
-              حفظ المعالجة
+              {t("punchList.detail.resolutionForm.save")}
             </Button>
             <Button size="sm" variant="secondary" onClick={() => setShowResolutionForm(false)}>
-              إلغاء
+              {t("common.cancel")}
             </Button>
           </div>
         </div>
@@ -421,11 +412,11 @@ function PunchItemDetail({
             <Button
               key={action.status}
               size="sm"
-              variant={action.label === "إعادة فتح" ? "secondary" : "primary"}
+              variant={action.isReopen ? "secondary" : "primary"}
               disabled={submitting}
               onClick={() => onAction(action.status, action.needsResolution)}
             >
-              {action.label}
+              {t(`punchList.actions.${action.labelKey}`)}
             </Button>
           ))}
         </div>
@@ -447,6 +438,7 @@ function PunchItemForm({
   onSaved: () => void;
   onCancel: () => void;
 }) {
+  const { t } = useTranslation();
   const [title, setTitle] = useState(editingItem?.title ?? "");
   const [description, setDescription] = useState(editingItem?.description ?? "");
   const [location, setLocation] = useState(editingItem?.location ?? "");
@@ -476,7 +468,7 @@ function PunchItemForm({
       }
       onSaved();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر حفظ الملاحظة");
+      setError(err instanceof ApiError ? err.message : t("punchList.form.genericError"));
     } finally {
       setSubmitting(false);
     }
@@ -492,33 +484,33 @@ function PunchItemForm({
         )}
         <input
           required
-          placeholder="العنوان"
+          placeholder={t("punchList.form.titlePlaceholder")}
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm sm:col-span-3"
         />
         <textarea
-          placeholder="الوصف (اختياري)"
+          placeholder={t("punchList.form.descriptionPlaceholder")}
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm sm:col-span-3"
           rows={2}
         />
         <input
-          placeholder="الموقع (اختياري)"
+          placeholder={t("punchList.form.locationPlaceholder")}
           value={location}
           onChange={(e) => setLocation(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
         />
         <select value={priority} onChange={(e) => setPriority(e.target.value as PunchItemPriority)} className="rounded-md border border-stone-300 px-3 py-2 text-sm">
-          {(Object.keys(priorityLabel) as PunchItemPriority[]).map((p) => (
+          {(["low", "medium", "high", "critical"] as PunchItemPriority[]).map((p) => (
             <option key={p} value={p}>
-              {priorityLabel[p]}
+              {t(`punchList.priority.${p}`)}
             </option>
           ))}
         </select>
         <select value={assignedToUserId} onChange={(e) => setAssignedToUserId(e.target.value)} className="rounded-md border border-stone-300 px-3 py-2 text-sm">
-          <option value="">بدون مسؤول</option>
+          <option value="">{t("punchList.form.noAssignee")}</option>
           {members.map((m) => (
             <option key={m.id} value={m.id}>
               {m.name}
@@ -529,10 +521,10 @@ function PunchItemForm({
 
         <div className="flex items-center gap-2 sm:col-span-3">
           <Button type="submit" size="sm" disabled={submitting}>
-            {submitting ? "جارٍ الحفظ..." : editingItem ? "حفظ التعديلات" : "حفظ الملاحظة"}
+            {submitting ? t("punchList.form.saving") : editingItem ? t("punchList.form.saveEdits") : t("punchList.form.saveNew")}
           </Button>
           <Button type="button" variant="secondary" size="sm" onClick={onCancel}>
-            إلغاء
+            {t("common.cancel")}
           </Button>
         </div>
       </form>

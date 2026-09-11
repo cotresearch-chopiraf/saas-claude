@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { AuthProvider } from "../../auth/AuthContext";
+import { I18nProvider } from "../../i18n/I18nProvider";
 import { PunchListSection } from "./PunchListSection";
 import type { CompanyMember, PunchItem } from "../../api/types";
 
@@ -63,9 +64,11 @@ function mockApi(opts: { items?: PunchItem[]; members?: CompanyMember[] } = {}) 
 
 function renderSection() {
   return render(
-    <AuthProvider>
-      <PunchListSection />
-    </AuthProvider>,
+    <I18nProvider>
+      <AuthProvider>
+        <PunchListSection />
+      </AuthProvider>
+    </I18nProvider>,
   );
 }
 
