@@ -15,12 +15,12 @@ import { listRevisions, getRevision, createRevision, publishRevision, addItem, d
 import { ApiError } from "../../api/client";
 import type { BoqItem, BoqRevision, BoqRevisionStatus, BoqRevisionWithItems, Contract } from "../../api/types";
 import { useProjectContext } from "../context";
+import { useTranslation } from "../../i18n/I18nProvider";
 
-const statusLabel: Record<BoqRevisionStatus, string> = {
-  draft: "مسودة",
-  published: "منشورة",
-  superseded: "مستبدَلة",
-};
+// Reuses the exact same status labels already localized for the dashboard's
+// BOQ-revision footnote (dashboard.financial.boqRevisionStatus.*) — one
+// translated status vocabulary for "draft/published/superseded", not two
+// copies that could drift apart.
 const statusTone: Record<BoqRevisionStatus, "neutral" | "success" | "warning"> = {
   draft: "warning",
   published: "success",
@@ -47,6 +47,7 @@ function itemDepth(item: BoqItem, byId: Map<string, BoqItem>): number {
 }
 
 export function BoqSection() {
+  const { t, locale } = useTranslation();
   const { projectId } = useProjectContext();
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [revisions, setRevisions] = useState<BoqRevision[] | null>(null);
@@ -62,7 +63,7 @@ export function BoqSection() {
         setContracts(contractRows);
         setRevisions(revisionRows);
       })
-      .catch((err) => setError(err instanceof Error ? err.message : "تعذّر تحميل جدول الكميات"));
+      .catch((err) => setError(err instanceof Error ? err.message : t("boq.loadError")));
   }
 
   useEffect(load, [projectId]);
@@ -73,27 +74,27 @@ export function BoqSection() {
   };
 
   const columns: FinancialColumn<BoqRevision>[] = [
-    { key: "revisionNumber", header: "رقم النسخة", render: (r) => `#${r.revisionNumber}` },
-    { key: "contract", header: "العقد", render: (r) => contractLabel(r.contractId) },
-    { key: "status", header: "الحالة", render: (r) => <Badge tone={statusTone[r.status]}>{statusLabel[r.status]}</Badge> },
-    { key: "publishedAt", header: "تاريخ النشر", render: (r) => formatDate(r.publishedAt) },
+    { key: "revisionNumber", header: t("boq.columns.revisionNumber"), render: (r) => `#${r.revisionNumber}` },
+    { key: "contract", header: t("boq.columns.contract"), render: (r) => contractLabel(r.contractId) },
+    { key: "status", header: t("boq.columns.status"), render: (r) => <Badge tone={statusTone[r.status]}>{t(`dashboard.financial.boqRevisionStatus.${r.status}`)}</Badge> },
+    { key: "publishedAt", header: t("boq.columns.publishedAt"), render: (r) => formatDate(r.publishedAt, locale) },
   ];
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="جدول الكميات"
+        title={t("boq.title")}
         actions={
           <Can permission="boq.manage">
             <Button size="sm" onClick={() => setShowCreate((v) => !v)} disabled={contracts.length === 0}>
-              {showCreate ? "إلغاء" : "+ نسخة جديدة"}
+              {showCreate ? t("common.cancel") : t("boq.newRevision")}
             </Button>
           </Can>
         }
       />
 
       {contracts.length === 0 && revisions !== null && (
-        <EmptyState message='يجب إنشاء عقد أولاً من قسم "العقد" قبل إضافة جدول كميات.' />
+        <EmptyState message={t("boq.needsContractFirst")} />
       )}
 
       {showCreate && (
@@ -116,10 +117,10 @@ export function BoqSection() {
         rowKey={(r) => r.id}
         error={error}
         onRetry={load}
-        emptyMessage="لا توجد نسخ من جدول الكميات بعد"
+        emptyMessage={t("boq.emptyRevisions")}
         rowActions={(r) => (
           <button type="button" onClick={() => setSelectedRevisionId(r.id)} className="text-sm text-primary hover:underline">
-            عرض البنود
+            {t("boq.viewItems")}
           </button>
         )}
       />
@@ -140,6 +141,7 @@ function RevisionCreateForm({
   contracts: Contract[];
   onCreated: (revision: BoqRevision) => void;
 }) {
+  const { t } = useTranslation();
   const [contractId, setContractId] = useState(contracts[0]?.id ?? "");
   const [notes, setNotes] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -153,7 +155,7 @@ function RevisionCreateForm({
       const revision = await createRevision(projectId, { contractId, notes: notes || undefined });
       onCreated(revision);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر إنشاء نسخة جديدة");
+      setError(err instanceof ApiError ? err.message : t("boq.genericError"));
     } finally {
       setSubmitting(false);
     }
@@ -180,13 +182,13 @@ function RevisionCreateForm({
           ))}
         </select>
         <input
-          placeholder="ملاحظات (اختياري)"
+          placeholder={t("boq.notesPlaceholder")}
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm sm:col-span-2"
         />
         <Button type="submit" disabled={submitting || !contractId}>
-          {submitting ? "جارٍ الحفظ..." : "إنشاء نسخة"}
+          {submitting ? t("boq.saving") : t("boq.createRevision")}
         </Button>
       </form>
     </Card>
@@ -202,6 +204,7 @@ function RevisionDetail({
   revisionId: string;
   onChanged: () => void;
 }) {
+  const { t, locale } = useTranslation();
   const [revision, setRevision] = useState<BoqRevisionWithItems | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showAddItem, setShowAddItem] = useState(false);
@@ -213,7 +216,7 @@ function RevisionDetail({
     setRevision(null);
     getRevision(projectId, revisionId)
       .then(setRevision)
-      .catch((err) => setError(err instanceof Error ? err.message : "تعذّر تحميل تفاصيل النسخة"));
+      .catch((err) => setError(err instanceof Error ? err.message : t("boq.detail.loadError")));
   }
 
   useEffect(load, [projectId, revisionId]);
@@ -226,7 +229,7 @@ function RevisionDetail({
       load();
       onChanged();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر نشر النسخة");
+      setError(err instanceof ApiError ? err.message : t("boq.detail.publishError"));
       setConfirmingPublish(false);
     } finally {
       setPublishing(false);
@@ -238,7 +241,7 @@ function RevisionDetail({
       await deleteItem(projectId, revisionId, itemId);
       load();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر حذف البند");
+      setError(err instanceof ApiError ? err.message : t("boq.detail.deleteItemError"));
     }
   }
 
@@ -251,39 +254,39 @@ function RevisionDetail({
   const columns: FinancialColumn<BoqItem>[] = [
     {
       key: "description",
-      header: "البند",
+      header: t("boq.detail.columns.description"),
       render: (item) => (
         <span style={{ paddingInlineStart: `${itemDepth(item, byId) * 16}px` }}>
           {item.itemType === "section" ? <strong>{item.description}</strong> : item.description}
         </span>
       ),
     },
-    { key: "code", header: "الرمز", render: (item) => item.code ?? "—" },
-    { key: "unit", header: "الوحدة", render: (item) => item.unit ?? "—" },
-    { key: "quantity", header: "الكمية", align: "end", render: (item) => (item.quantity !== null ? formatQuantity(item.quantity) : "—") },
-    { key: "rate", header: "السعر", align: "end", render: (item) => (item.rate !== null ? formatMoney(item.rate) : "—") },
-    { key: "amount", header: "المبلغ", align: "end", render: (item) => (item.amount !== null ? formatMoney(item.amount) : "—") },
+    { key: "code", header: t("boq.detail.columns.code"), render: (item) => item.code ?? "—" },
+    { key: "unit", header: t("boq.detail.columns.unit"), render: (item) => item.unit ?? "—" },
+    { key: "quantity", header: t("boq.detail.columns.quantity"), align: "end", render: (item) => (item.quantity !== null ? formatQuantity(item.quantity, null, locale) : "—") },
+    { key: "rate", header: t("boq.detail.columns.rate"), align: "end", render: (item) => (item.rate !== null ? formatMoney(item.rate, "SAR", locale) : "—") },
+    { key: "amount", header: t("boq.detail.columns.amount"), align: "end", render: (item) => (item.amount !== null ? formatMoney(item.amount, "SAR", locale) : "—") },
   ];
 
   return (
     <Card className="p-5">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <h2 className="font-semibold text-stone-800">النسخة #{revision.revisionNumber}</h2>
-          <Badge tone={statusTone[revision.status]}>{statusLabel[revision.status]}</Badge>
+          <h2 className="font-semibold text-stone-800">{t("boq.detail.revisionTitle", { number: revision.revisionNumber })}</h2>
+          <Badge tone={statusTone[revision.status]}>{t(`dashboard.financial.boqRevisionStatus.${revision.status}`)}</Badge>
         </div>
         <div className="flex gap-2">
           <Can permission="boq.manage">
             {isDraft && (
               <Button size="sm" variant="secondary" onClick={() => setShowAddItem((v) => !v)}>
-                {showAddItem ? "إلغاء" : "+ بند"}
+                {showAddItem ? t("common.cancel") : t("boq.detail.addItem")}
               </Button>
             )}
           </Can>
           <Can permission="boq.manage">
             {isDraft && (
               <Button size="sm" onClick={() => setConfirmingPublish(true)}>
-                نشر النسخة
+                {t("boq.detail.publishRevision")}
               </Button>
             )}
           </Can>
@@ -305,13 +308,13 @@ function RevisionDetail({
         columns={columns}
         rows={revision.items}
         rowKey={(i) => i.id}
-        emptyMessage="لا توجد بنود في هذه النسخة بعد"
+        emptyMessage={t("boq.detail.emptyItems")}
         rowActions={
           isDraft
             ? (item) => (
                 <Can permission="boq.manage">
                   <button type="button" onClick={() => onDeleteItem(item.id)} className="text-sm text-danger-600 hover:underline">
-                    حذف
+                    {t("common.delete")}
                   </button>
                 </Can>
               )
@@ -321,9 +324,9 @@ function RevisionDetail({
 
       <ConfirmDialog
         open={confirmingPublish}
-        title="نشر نسخة جدول الكميات"
-        message="بعد النشر لا يمكن تعديل أو حذف بنود هذه النسخة. هل تريد المتابعة؟"
-        confirmLabel={publishing ? "جارٍ النشر..." : "نشر"}
+        title={t("boq.detail.confirmPublishTitle")}
+        message={t("boq.detail.confirmPublishMessage")}
+        confirmLabel={publishing ? t("boq.detail.publishing") : t("boq.detail.confirmPublishLabel")}
         destructive
         onConfirm={onPublish}
         onCancel={() => setConfirmingPublish(false)}
@@ -341,6 +344,7 @@ function AddItemForm({
   revisionId: string;
   onAdded: () => void;
 }) {
+  const { t } = useTranslation();
   const [description, setDescription] = useState("");
   const [unit, setUnit] = useState("");
   const [quantity, setQuantity] = useState("");
@@ -365,7 +369,7 @@ function AddItemForm({
       setRate("");
       onAdded();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر إضافة البند");
+      setError(err instanceof ApiError ? err.message : t("boq.addItemForm.genericError"));
     } finally {
       setSubmitting(false);
     }
@@ -380,13 +384,13 @@ function AddItemForm({
       )}
       <input
         required
-        placeholder="الوصف"
+        placeholder={t("boq.addItemForm.descriptionPlaceholder")}
         value={description}
         onChange={(e) => setDescription(e.target.value)}
         className="rounded-md border border-stone-300 px-3 py-2 text-sm sm:col-span-2"
       />
       <input
-        placeholder="الوحدة"
+        placeholder={t("boq.addItemForm.unitPlaceholder")}
         value={unit}
         onChange={(e) => setUnit(e.target.value)}
         className="rounded-md border border-stone-300 px-3 py-2 text-sm"
@@ -395,7 +399,7 @@ function AddItemForm({
         type="number"
         min="0"
         step="0.001"
-        placeholder="الكمية"
+        placeholder={t("boq.addItemForm.quantityPlaceholder")}
         value={quantity}
         onChange={(e) => setQuantity(e.target.value)}
         className="rounded-md border border-stone-300 px-3 py-2 text-sm"
@@ -404,13 +408,13 @@ function AddItemForm({
         type="number"
         min="0"
         step="0.01"
-        placeholder="السعر"
+        placeholder={t("boq.addItemForm.ratePlaceholder")}
         value={rate}
         onChange={(e) => setRate(e.target.value)}
         className="rounded-md border border-stone-300 px-3 py-2 text-sm"
       />
       <Button type="submit" size="sm" disabled={submitting} className="sm:col-span-5">
-        {submitting ? "جارٍ الإضافة..." : "إضافة البند"}
+        {submitting ? t("boq.addItemForm.adding") : t("boq.addItemForm.addItem")}
       </Button>
     </form>
   );

@@ -1,8 +1,10 @@
 import { FormEvent, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { apiFetch, ApiError } from "../api/client";
+import { useTranslation } from "../i18n/I18nProvider";
 
 export function ResetPassword() {
+  const { t } = useTranslation();
   const [params] = useSearchParams();
   const token = params.get("token") ?? "";
   const navigate = useNavigate();
@@ -18,27 +20,27 @@ export function ResetPassword() {
       setDone(true);
       setTimeout(() => navigate("/login"), 1500);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر تحديث كلمة المرور");
+      setError(err instanceof ApiError ? err.message : t("auth.resetPassword.genericError"));
     }
   }
 
   return (
-    <div dir="rtl" className="flex min-h-screen items-center justify-center bg-stone-50 px-6">
+    <div className="flex min-h-screen items-center justify-center bg-stone-50 px-6">
       <div className="w-full max-w-sm rounded-xl border border-stone-200 bg-white p-8 shadow-sm">
-        <h1 className="mb-6 text-xl font-bold text-primary">تعيين كلمة مرور جديدة</h1>
+        <h1 className="mb-6 text-xl font-bold text-primary">{t("auth.resetPassword.title")}</h1>
 
         {done ? (
-          <p className="text-sm text-emerald-600">تم التحديث بنجاح، جاري تحويلك لتسجيل الدخول...</p>
+          <p className="text-sm text-emerald-600">{t("auth.resetPassword.success")}</p>
         ) : !token ? (
           <p className="text-sm text-red-600">
-            الرابط غير صالح.{" "}
-            <Link to="/forgot-password" className="underline">اطلبي رابطاً جديداً</Link>
+            {t("auth.resetPassword.invalidLink")}{" "}
+            <Link to="/forgot-password" className="underline">{t("auth.resetPassword.requestNewLink")}</Link>
           </p>
         ) : (
           <form onSubmit={onSubmit}>
             {error && <div className="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
             <label className="mb-6 block text-sm">
-              كلمة المرور الجديدة
+              {t("auth.resetPassword.newPassword")}
               <input
                 type="password"
                 required
@@ -49,7 +51,7 @@ export function ResetPassword() {
               />
             </label>
             <button type="submit" className="w-full rounded-md bg-primary py-2 font-medium text-white">
-              حفظ كلمة المرور
+              {t("auth.resetPassword.submit")}
             </button>
           </form>
         )}

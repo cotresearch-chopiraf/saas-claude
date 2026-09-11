@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, waitFor, within, fireEvent } from "@testing-library/react";
 import { AuthProvider } from "../../auth/AuthContext";
+import { I18nProvider } from "../../i18n/I18nProvider";
 import { BoqSection } from "./BoqSection";
 import type { BoqRevisionWithItems, Contract } from "../../api/types";
 
@@ -104,9 +105,11 @@ describe("<BoqSection/>", () => {
   it("renders BOQ revisions from the backend", async () => {
     mockApi("owner", [draftRevision]);
     render(
-      <AuthProvider>
-        <BoqSection />
-      </AuthProvider>,
+      <I18nProvider>
+        <AuthProvider>
+          <BoqSection />
+        </AuthProvider>
+      </I18nProvider>,
     );
     await waitFor(() => expect(screen.getByText("#1")).toBeInTheDocument());
     expect(screen.getByText("مسودة")).toBeInTheDocument();
@@ -115,9 +118,11 @@ describe("<BoqSection/>", () => {
   it("renders items of a selected revision, showing the backend-provided amount", async () => {
     mockApi("owner", [draftRevision]);
     render(
-      <AuthProvider>
-        <BoqSection />
-      </AuthProvider>,
+      <I18nProvider>
+        <AuthProvider>
+          <BoqSection />
+        </AuthProvider>
+      </I18nProvider>,
     );
     await waitFor(() => expect(screen.getByText("#1")).toBeInTheDocument());
     fireEvent.click(screen.getByText("عرض البنود"));
@@ -130,9 +135,11 @@ describe("<BoqSection/>", () => {
   it("an owner sees draft mutation controls on a draft revision", async () => {
     mockApi("owner", [draftRevision]);
     render(
-      <AuthProvider>
-        <BoqSection />
-      </AuthProvider>,
+      <I18nProvider>
+        <AuthProvider>
+          <BoqSection />
+        </AuthProvider>
+      </I18nProvider>,
     );
     await waitFor(() => expect(screen.getByText("#1")).toBeInTheDocument());
     fireEvent.click(screen.getByText("عرض البنود"));
@@ -145,9 +152,11 @@ describe("<BoqSection/>", () => {
   it("a member does not see owner-only draft mutation controls", async () => {
     mockApi("member", [draftRevision]);
     render(
-      <AuthProvider>
-        <BoqSection />
-      </AuthProvider>,
+      <I18nProvider>
+        <AuthProvider>
+          <BoqSection />
+        </AuthProvider>
+      </I18nProvider>,
     );
     await waitFor(() => expect(screen.getByText("#1")).toBeInTheDocument());
     fireEvent.click(screen.getByText("عرض البنود"));
@@ -162,9 +171,11 @@ describe("<BoqSection/>", () => {
   it("a published revision does not expose draft mutation controls, even to an owner", async () => {
     mockApi("owner", [publishedRevision]);
     render(
-      <AuthProvider>
-        <BoqSection />
-      </AuthProvider>,
+      <I18nProvider>
+        <AuthProvider>
+          <BoqSection />
+        </AuthProvider>
+      </I18nProvider>,
     );
     await waitFor(() => expect(screen.getByText("#2")).toBeInTheDocument());
     fireEvent.click(screen.getByText("عرض البنود"));
@@ -177,9 +188,11 @@ describe("<BoqSection/>", () => {
   it("publishing a draft revision requires confirmation before calling the API", async () => {
     mockApi("owner", [draftRevision]);
     render(
-      <AuthProvider>
-        <BoqSection />
-      </AuthProvider>,
+      <I18nProvider>
+        <AuthProvider>
+          <BoqSection />
+        </AuthProvider>
+      </I18nProvider>,
     );
     await waitFor(() => expect(screen.getByText("#1")).toBeInTheDocument());
     fireEvent.click(screen.getByText("عرض البنود"));

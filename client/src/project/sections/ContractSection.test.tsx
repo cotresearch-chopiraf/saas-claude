@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { AuthProvider } from "../../auth/AuthContext";
+import { I18nProvider } from "../../i18n/I18nProvider";
 import { ContractSection } from "./ContractSection";
 import type { Contract } from "../../api/types";
 
@@ -57,9 +58,11 @@ describe("<ContractSection/>", () => {
   it("renders contract data using backend-provided values (never recomputed)", async () => {
     mockApi("owner", [fixtureContract]);
     render(
-      <AuthProvider>
-        <ContractSection />
-      </AuthProvider>,
+      <I18nProvider>
+        <AuthProvider>
+          <ContractSection />
+        </AuthProvider>
+      </I18nProvider>,
     );
     await waitFor(() => expect(screen.getByText("C-1001")).toBeInTheDocument());
     expect(screen.getByText("Acme Construction")).toBeInTheDocument();
@@ -73,9 +76,11 @@ describe("<ContractSection/>", () => {
   it("an owner sees the contract mutation control", async () => {
     mockApi("owner", [fixtureContract]);
     render(
-      <AuthProvider>
-        <ContractSection />
-      </AuthProvider>,
+      <I18nProvider>
+        <AuthProvider>
+          <ContractSection />
+        </AuthProvider>
+      </I18nProvider>,
     );
     await waitFor(() => expect(screen.getByText("+ عقد جديد")).toBeInTheDocument());
   });
@@ -83,9 +88,11 @@ describe("<ContractSection/>", () => {
   it("a member does not see the contract mutation control", async () => {
     mockApi("member", [fixtureContract]);
     render(
-      <AuthProvider>
-        <ContractSection />
-      </AuthProvider>,
+      <I18nProvider>
+        <AuthProvider>
+          <ContractSection />
+        </AuthProvider>
+      </I18nProvider>,
     );
     await waitFor(() => expect(apiFetch).toHaveBeenCalled());
     await waitFor(() => expect(screen.getByText("C-1001")).toBeInTheDocument());
@@ -95,9 +102,11 @@ describe("<ContractSection/>", () => {
   it("shows an honest empty state when the project has no contracts yet", async () => {
     mockApi("owner", []);
     render(
-      <AuthProvider>
-        <ContractSection />
-      </AuthProvider>,
+      <I18nProvider>
+        <AuthProvider>
+          <ContractSection />
+        </AuthProvider>
+      </I18nProvider>,
     );
     await waitFor(() => expect(screen.getByText("لا توجد عقود بعد")).toBeInTheDocument());
   });

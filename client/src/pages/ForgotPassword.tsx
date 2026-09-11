@@ -1,8 +1,10 @@
 import { FormEvent, useState } from "react";
 import { Link } from "react-router-dom";
 import { apiFetch } from "../api/client";
+import { useTranslation } from "../i18n/I18nProvider";
 
 export function ForgotPassword() {
+  const { t } = useTranslation();
   const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
 
@@ -13,18 +15,16 @@ export function ForgotPassword() {
   }
 
   return (
-    <div dir="rtl" className="flex min-h-screen items-center justify-center bg-stone-50 px-6">
+    <div className="flex min-h-screen items-center justify-center bg-stone-50 px-6">
       <div className="w-full max-w-sm rounded-xl border border-stone-200 bg-white p-8 shadow-sm">
-        <h1 className="mb-6 text-xl font-bold text-primary">استعادة كلمة المرور</h1>
+        <h1 className="mb-6 text-xl font-bold text-primary">{t("auth.forgotPassword.title")}</h1>
 
         {sent ? (
-          <p className="text-sm text-stone-600">
-            إن كان بريدك الإلكتروني مسجّلاً لدينا، فستصلك رسالة تحتوي على رابط إعادة التعيين.
-          </p>
+          <p className="text-sm text-stone-600">{t("auth.forgotPassword.sentMessage")}</p>
         ) : (
           <form onSubmit={onSubmit}>
             <label className="mb-6 block text-sm">
-              البريد الإلكتروني
+              {t("auth.forgotPassword.email")}
               <input
                 type="email"
                 required
@@ -34,13 +34,13 @@ export function ForgotPassword() {
               />
             </label>
             <button type="submit" className="w-full rounded-md bg-primary py-2 font-medium text-white">
-              إرسال رابط إعادة التعيين
+              {t("auth.forgotPassword.submit")}
             </button>
           </form>
         )}
 
         <p className="mt-4 text-center text-sm text-stone-500">
-          <Link to="/login" className="text-primary underline">العودة لتسجيل الدخول</Link>
+          <Link to="/login" className="text-primary underline">{t("auth.forgotPassword.backToLogin")}</Link>
         </p>
       </div>
     </div>

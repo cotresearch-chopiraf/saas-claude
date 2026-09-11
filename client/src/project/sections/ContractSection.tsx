@@ -11,13 +11,8 @@ import { listContracts, createContract } from "../../api/contracts";
 import { ApiError } from "../../api/client";
 import type { Contract, ContractStatus } from "../../api/types";
 import { useProjectContext } from "../context";
+import { useTranslation } from "../../i18n/I18nProvider";
 
-const statusLabel: Record<ContractStatus, string> = {
-  draft: "مسودة",
-  active: "نشط",
-  completed: "مكتمل",
-  terminated: "منتهٍ",
-};
 const statusTone: Record<ContractStatus, "neutral" | "success" | "info" | "danger"> = {
   draft: "neutral",
   active: "success",
@@ -26,6 +21,7 @@ const statusTone: Record<ContractStatus, "neutral" | "success" | "info" | "dange
 };
 
 export function ContractSection() {
+  const { t, locale } = useTranslation();
   const { projectId } = useProjectContext();
   const [contracts, setContracts] = useState<Contract[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -41,7 +37,7 @@ export function ContractSection() {
         // Keep or default the selection to the main contract, if any.
         setSelectedId((current) => current ?? rows.find((c) => c.contractType === "main")?.id ?? rows[0]?.id ?? null);
       })
-      .catch((err) => setError(err instanceof Error ? err.message : "تعذّر تحميل العقود"));
+      .catch((err) => setError(err instanceof Error ? err.message : t("contract.loadError")));
   }
 
   useEffect(load, [projectId]);
@@ -50,23 +46,23 @@ export function ContractSection() {
   const amendments = selected ? (contracts ?? []).filter((c) => c.parentContractId === selected.id) : [];
 
   const columns: FinancialColumn<Contract>[] = [
-    { key: "contractNumber", header: "رقم العقد", render: (c) => c.contractNumber ?? "—" },
-    { key: "contractType", header: "النوع", render: (c) => (c.contractType === "main" ? "رئيسي" : "تعديل") },
-    { key: "clientName", header: "العميل", render: (c) => c.clientName ?? "—" },
-    { key: "originalValue", header: "القيمة الأصلية", align: "end", render: (c) => formatMoney(c.originalValue, c.currency) },
-    { key: "revisedValue", header: "القيمة الحالية", align: "end", render: (c) => formatMoney(c.revisedValue, c.currency) },
-    { key: "status", header: "الحالة", render: (c) => <Badge tone={statusTone[c.status]}>{statusLabel[c.status]}</Badge> },
-    { key: "startDate", header: "تاريخ البدء", render: (c) => formatDate(c.startDate) },
+    { key: "contractNumber", header: t("contract.columns.number"), render: (c) => c.contractNumber ?? "—" },
+    { key: "contractType", header: t("contract.columns.type"), render: (c) => t(`contract.type.${c.contractType === "main" ? "main" : "amendment"}`) },
+    { key: "clientName", header: t("contract.columns.client"), render: (c) => c.clientName ?? "—" },
+    { key: "originalValue", header: t("contract.columns.originalValue"), align: "end", render: (c) => formatMoney(c.originalValue, c.currency, locale) },
+    { key: "revisedValue", header: t("contract.columns.revisedValue"), align: "end", render: (c) => formatMoney(c.revisedValue, c.currency, locale) },
+    { key: "status", header: t("contract.columns.status"), render: (c) => <Badge tone={statusTone[c.status]}>{t(`contract.status.${c.status}`)}</Badge> },
+    { key: "startDate", header: t("contract.columns.startDate"), render: (c) => formatDate(c.startDate, locale) },
   ];
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="العقد"
+        title={t("contract.title")}
         actions={
           <Can permission="contract.manage">
             <Button size="sm" onClick={() => setShowCreate((v) => !v)}>
-              {showCreate ? "إلغاء" : "+ عقد جديد"}
+              {showCreate ? t("common.cancel") : t("contract.newContract")}
             </Button>
           </Can>
         }
@@ -91,10 +87,10 @@ export function ContractSection() {
         rowKey={(c) => c.id}
         error={error}
         onRetry={load}
-        emptyMessage="لا توجد عقود بعد"
+        emptyMessage={t("contract.emptyMessage")}
         rowActions={(c) => (
           <button type="button" onClick={() => setSelectedId(c.id)} className="text-sm text-primary hover:underline">
-            عرض
+            {t("contract.view")}
           </button>
         )}
       />
@@ -115,32 +111,33 @@ function ContractDetail({
   projectId: string;
   onAmended: (contract: Contract) => void;
 }) {
+  const { t, locale } = useTranslation();
   const [showAmend, setShowAmend] = useState(false);
 
   return (
     <Card className="p-5">
       <div className="mb-4 flex items-center justify-between">
         <h2 className="font-semibold text-stone-800">
-          تفاصيل العقد {contract.contractNumber ? `— ${contract.contractNumber}` : ""}
+          {t("contract.detailsTitle")} {contract.contractNumber ? `— ${contract.contractNumber}` : ""}
         </h2>
         {contract.contractType === "main" && (
           <Can permission="contract.manage">
             <Button size="sm" variant="secondary" onClick={() => setShowAmend((v) => !v)}>
-              {showAmend ? "إلغاء" : "+ تعديل على العقد"}
+              {showAmend ? t("common.cancel") : t("contract.amendContract")}
             </Button>
           </Can>
         )}
       </div>
 
       <dl className="grid grid-cols-1 gap-x-8 gap-y-3 text-sm sm:grid-cols-2">
-        <Field label="القيمة الأصلية" value={formatMoney(contract.originalValue, contract.currency)} />
-        <Field label="القيمة الحالية (المعدَّلة)" value={formatMoney(contract.revisedValue, contract.currency)} />
-        <Field label="نسبة الدفعة المقدَّمة" value={formatPercent(contract.advancePercent === null ? null : Number(contract.advancePercent))} />
-        <Field label="نسبة الاستقطاع (الضمان)" value={formatPercent(contract.retentionPercent === null ? null : Number(contract.retentionPercent))} />
-        <Field label="شروط الدفع" value={contract.paymentTerms ?? "—"} />
-        <Field label="العملة" value={contract.currency} />
-        <Field label="تاريخ البدء" value={formatDate(contract.startDate)} />
-        <Field label="تاريخ الانتهاء" value={formatDate(contract.endDate)} />
+        <Field label={t("contract.fields.originalValue")} value={formatMoney(contract.originalValue, contract.currency, locale)} />
+        <Field label={t("contract.fields.revisedValue")} value={formatMoney(contract.revisedValue, contract.currency, locale)} />
+        <Field label={t("contract.fields.advancePercent")} value={formatPercent(contract.advancePercent === null ? null : Number(contract.advancePercent), 1, locale)} />
+        <Field label={t("contract.fields.retentionPercent")} value={formatPercent(contract.retentionPercent === null ? null : Number(contract.retentionPercent), 1, locale)} />
+        <Field label={t("contract.fields.paymentTerms")} value={contract.paymentTerms ?? "—"} />
+        <Field label={t("contract.fields.currency")} value={contract.currency} />
+        <Field label={t("contract.fields.startDate")} value={formatDate(contract.startDate, locale)} />
+        <Field label={t("contract.fields.endDate")} value={formatDate(contract.endDate, locale)} />
       </dl>
 
       {showAmend && (
@@ -158,13 +155,13 @@ function ContractDetail({
 
       {amendments.length > 0 && (
         <div className="mt-5 border-t border-stone-200 pt-5">
-          <h3 className="mb-2 text-sm font-semibold text-stone-700">التعديلات على هذا العقد</h3>
+          <h3 className="mb-2 text-sm font-semibold text-stone-700">{t("contract.amendmentsTitle")}</h3>
           <ul className="space-y-1 text-sm text-stone-600">
             {amendments.map((a) => (
               <li key={a.id} className="flex items-center justify-between rounded-md border border-stone-100 px-3 py-2">
                 <span>{a.contractNumber ?? a.id.slice(0, 8)}</span>
-                <span>{formatMoney(a.revisedValue, a.currency)}</span>
-                <Badge tone={statusTone[a.status]}>{statusLabel[a.status]}</Badge>
+                <span>{formatMoney(a.revisedValue, a.currency, locale)}</span>
+                <Badge tone={statusTone[a.status]}>{t(`contract.status.${a.status}`)}</Badge>
               </li>
             ))}
           </ul>
@@ -195,6 +192,7 @@ function ContractForm({
   parentContractId?: string;
   onCreated: (contract: Contract) => void;
 }) {
+  const { t } = useTranslation();
   const [contractNumber, setContractNumber] = useState("");
   const [clientName, setClientName] = useState("");
   const [originalValue, setOriginalValue] = useState("");
@@ -223,7 +221,7 @@ function ContractForm({
       });
       onCreated(contract);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر إنشاء العقد");
+      setError(err instanceof ApiError ? err.message : t("contract.genericError"));
     } finally {
       setSubmitting(false);
     }
@@ -238,13 +236,13 @@ function ContractForm({
           </div>
         )}
         <input
-          placeholder="رقم العقد (اختياري)"
+          placeholder={t("contract.form.contractNumberPlaceholder")}
           value={contractNumber}
           onChange={(e) => setContractNumber(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
         />
         <input
-          placeholder="اسم العميل (اختياري)"
+          placeholder={t("contract.form.clientNamePlaceholder")}
           value={clientName}
           onChange={(e) => setClientName(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
@@ -254,13 +252,13 @@ function ContractForm({
           type="number"
           min="0"
           step="0.01"
-          placeholder={parentContractId ? "قيمة التعديل" : "القيمة الأصلية"}
+          placeholder={parentContractId ? t("contract.form.amendmentValuePlaceholder") : t("contract.form.originalValuePlaceholder")}
           value={originalValue}
           onChange={(e) => setOriginalValue(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
         />
         <input
-          placeholder="العملة"
+          placeholder={t("contract.form.currencyPlaceholder")}
           value={currency}
           onChange={(e) => setCurrency(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
@@ -270,7 +268,7 @@ function ContractForm({
           min="0"
           max="100"
           step="0.01"
-          placeholder="نسبة الدفعة المقدَّمة % (اختياري)"
+          placeholder={t("contract.form.advancePercentPlaceholder")}
           value={advancePercent}
           onChange={(e) => setAdvancePercent(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
@@ -280,19 +278,19 @@ function ContractForm({
           min="0"
           max="100"
           step="0.01"
-          placeholder="نسبة الاستقطاع % (اختياري)"
+          placeholder={t("contract.form.retentionPercentPlaceholder")}
           value={retentionPercent}
           onChange={(e) => setRetentionPercent(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
         />
         <input
-          placeholder="شروط الدفع (اختياري)"
+          placeholder={t("contract.form.paymentTermsPlaceholder")}
           value={paymentTerms}
           onChange={(e) => setPaymentTerms(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm sm:col-span-2"
         />
         <Button type="submit" disabled={submitting}>
-          {submitting ? "جارٍ الحفظ..." : parentContractId ? "حفظ التعديل" : "حفظ العقد"}
+          {submitting ? t("contract.form.saving") : parentContractId ? t("contract.form.saveAmendment") : t("contract.form.saveContract")}
         </Button>
       </form>
     </Card>

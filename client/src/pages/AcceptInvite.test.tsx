@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { MemoryRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider, useAuth } from "../auth/AuthContext";
+import { I18nProvider } from "../i18n/I18nProvider";
 import { AcceptInvite } from "./AcceptInvite";
 
 vi.mock("../api/client", async () => {
@@ -25,15 +26,17 @@ function ProtectedProbe() {
 
 function renderApp() {
   return render(
-    <MemoryRouter initialEntries={["/accept-invite?token=abc123"]}>
-      <AuthProvider>
-        <Routes>
-          <Route path="/login" element={<div>LOGIN_PAGE</div>} />
-          <Route path="/accept-invite" element={<AcceptInvite />} />
-          <Route path="/" element={<ProtectedProbe />} />
-        </Routes>
-      </AuthProvider>
-    </MemoryRouter>,
+    <I18nProvider>
+      <MemoryRouter initialEntries={["/accept-invite?token=abc123"]}>
+        <AuthProvider>
+          <Routes>
+            <Route path="/login" element={<div>LOGIN_PAGE</div>} />
+            <Route path="/accept-invite" element={<AcceptInvite />} />
+            <Route path="/" element={<ProtectedProbe />} />
+          </Routes>
+        </AuthProvider>
+      </MemoryRouter>
+    </I18nProvider>,
   );
 }
 

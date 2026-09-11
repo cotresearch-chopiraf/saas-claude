@@ -3,8 +3,10 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { apiFetch, setToken, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import type { User } from "../api/types";
+import { useTranslation } from "../i18n/I18nProvider";
 
 export function AcceptInvite() {
+  const { t } = useTranslation();
   const [params] = useSearchParams();
   const token = params.get("token") ?? "";
   const navigate = useNavigate();
@@ -30,24 +32,24 @@ export function AcceptInvite() {
       await refreshUser();
       navigate("/");
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر قبول الدعوة");
+      setError(err instanceof ApiError ? err.message : t("auth.acceptInvite.genericError"));
     }
   }
 
   return (
-    <div dir="rtl" className="flex min-h-screen items-center justify-center bg-stone-50 px-6">
+    <div className="flex min-h-screen items-center justify-center bg-stone-50 px-6">
       <div className="w-full max-w-sm rounded-xl border border-stone-200 bg-white p-8 shadow-sm">
-        <h1 className="mb-6 text-xl font-bold text-primary">انضمام إلى الفريق</h1>
+        <h1 className="mb-6 text-xl font-bold text-primary">{t("auth.acceptInvite.title")}</h1>
 
         {!token ? (
           <p className="text-sm text-red-600">
-            رابط الدعوة غير صالح. <Link to="/login" className="underline">العودة لتسجيل الدخول</Link>
+            {t("auth.acceptInvite.invalidLink")} <Link to="/login" className="underline">{t("auth.acceptInvite.backToLogin")}</Link>
           </p>
         ) : (
           <form onSubmit={onSubmit}>
             {error && <div className="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
             <label className="mb-3 block text-sm">
-              اسمك
+              {t("auth.acceptInvite.yourName")}
               <input
                 required
                 value={name}
@@ -56,7 +58,7 @@ export function AcceptInvite() {
               />
             </label>
             <label className="mb-6 block text-sm">
-              كلمة المرور
+              {t("auth.acceptInvite.password")}
               <input
                 type="password"
                 required
@@ -67,7 +69,7 @@ export function AcceptInvite() {
               />
             </label>
             <button type="submit" className="w-full rounded-md bg-primary py-2 font-medium text-white">
-              انضمام
+              {t("auth.acceptInvite.submit")}
             </button>
           </form>
         )}
