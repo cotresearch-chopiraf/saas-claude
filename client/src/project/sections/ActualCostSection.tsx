@@ -12,6 +12,7 @@ import { getBudget, createExpense, deleteExpense } from "../../api/costPlan";
 import { ApiError } from "../../api/client";
 import type { BudgetItem, BudgetSummary, Expense } from "../../api/types";
 import { useProjectContext } from "../context";
+import { useTranslation } from "../../i18n/I18nProvider";
 
 // Actual Cost (UI-03B) — the frontend for the existing expenses
 // create/delete routes (server/src/routes/budget.ts), reusing the same
@@ -19,6 +20,7 @@ import { useProjectContext } from "../context";
 // `totals.spent`. No new backend, no new calculation: `totals.spent` is
 // displayed exactly as the backend computes it, never re-summed here.
 export function ActualCostSection() {
+  const { t, locale } = useTranslation();
   const { projectId } = useProjectContext();
   const [summary, setSummary] = useState<BudgetSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -28,14 +30,14 @@ export function ActualCostSection() {
     setSummary(null);
     getBudget(projectId)
       .then(setSummary)
-      .catch((err) => setError(err instanceof Error ? err.message : "تعذّر تحميل التكلفة الفعلية"));
+      .catch((err) => setError(err instanceof Error ? err.message : t("actualCost.loadError")));
   }
   useEffect(load, [projectId]);
 
   if (error && !summary) {
     return (
       <div className="space-y-6">
-        <PageHeader title="التكلفة الفعلية" />
+        <PageHeader title={t("actualCost.title")} />
         <ErrorState message={error} onRetry={load} />
       </div>
     );
@@ -43,7 +45,7 @@ export function ActualCostSection() {
   if (!summary) {
     return (
       <div className="space-y-6">
-        <PageHeader title="التكلفة الفعلية" />
+        <PageHeader title={t("actualCost.title")} />
         <Skeleton rows={6} />
       </div>
     );
@@ -56,18 +58,18 @@ export function ActualCostSection() {
   };
 
   const columns: FinancialColumn<Expense>[] = [
-    { key: "description", header: "الوصف", render: (e) => e.description },
-    { key: "budgetItem", header: "بند الميزانية", render: (e) => budgetItemLabel(e.budgetItemId) },
-    { key: "amount", header: "المبلغ", align: "end", render: (e) => formatMoney(e.amount) },
-    { key: "expenseDate", header: "التاريخ", render: (e) => formatDate(e.expenseDate) },
+    { key: "description", header: t("actualCost.columns.description"), render: (e) => e.description },
+    { key: "budgetItem", header: t("actualCost.columns.budgetItem"), render: (e) => budgetItemLabel(e.budgetItemId) },
+    { key: "amount", header: t("actualCost.columns.amount"), align: "end", render: (e) => formatMoney(e.amount, "SAR", locale) },
+    { key: "expenseDate", header: t("actualCost.columns.expenseDate"), render: (e) => formatDate(e.expenseDate, locale) },
   ];
 
   return (
     <div className="space-y-6">
-      <PageHeader title="التكلفة الفعلية" />
+      <PageHeader title={t("actualCost.title")} />
 
       <div className="grid gap-4 sm:grid-cols-3">
-        <MetricCard label="إجمالي المُنفَق فعلياً" value={formatMoney(summary.totals.spent)} />
+        <MetricCard label={t("actualCost.totalSpent")} value={formatMoney(summary.totals.spent, "SAR", locale)} />
       </div>
 
       {/* Final Pre-Launch Audit — POST/DELETE /budget/expenses are now
@@ -82,7 +84,7 @@ export function ActualCostSection() {
         columns={columns}
         rows={summary.expenses}
         rowKey={(e) => e.id}
-        emptyMessage="لا توجد مصروفات فعلية بعد"
+        emptyMessage={t("actualCost.emptyMessage")}
         rowActions={(e) => <ExpenseRowActions projectId={projectId} expense={e} onChanged={load} />}
       />
     </div>
@@ -98,6 +100,7 @@ function ExpenseForm({
   budgetItems: BudgetItem[];
   onSaved: () => void;
 }) {
+  const { t } = useTranslation();
   const [description, setDescription] = useState("");
   const [amount, setAmount] = useState("");
   const [expenseDate, setExpenseDate] = useState("");
@@ -122,7 +125,7 @@ function ExpenseForm({
       setBudgetItemId("");
       onSaved();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر تسجيل المصروف");
+      setError(err instanceof ApiError ? err.message : t("actualCost.form.genericError"));
     } finally {
       setSubmitting(false);
     }
@@ -138,7 +141,7 @@ function ExpenseForm({
         )}
         <input
           required
-          placeholder="وصف المصروف"
+          placeholder={t("actualCost.form.descriptionPlaceholder")}
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           className="flex-1 rounded-md border border-stone-300 px-3 py-2 text-sm"
@@ -148,7 +151,7 @@ function ExpenseForm({
           type="number"
           min="0"
           step="0.01"
-          placeholder="المبلغ"
+          placeholder={t("actualCost.form.amountPlaceholder")}
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
           className="w-32 rounded-md border border-stone-300 px-3 py-2 text-sm"
@@ -165,7 +168,7 @@ function ExpenseForm({
           onChange={(e) => setBudgetItemId(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
         >
-          <option value="">بدون بند محدد</option>
+          <option value="">{t("actualCost.form.noBudgetItem")}</option>
           {budgetItems.map((i) => (
             <option key={i.id} value={i.id}>
               {i.category}
@@ -173,7 +176,7 @@ function ExpenseForm({
           ))}
         </select>
         <Button type="submit" size="sm" disabled={submitting}>
-          {submitting ? "جارٍ الحفظ..." : "+ تسجيل مصروف"}
+          {submitting ? t("actualCost.form.saving") : t("actualCost.form.recordExpense")}
         </Button>
       </form>
     </Card>
@@ -189,6 +192,7 @@ function ExpenseRowActions({
   expense: Expense;
   onChanged: () => void;
 }) {
+  const { t } = useTranslation();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -199,7 +203,7 @@ function ExpenseRowActions({
       await deleteExpense(projectId, expense.id);
       onChanged();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر حذف المصروف");
+      setError(err instanceof ApiError ? err.message : t("actualCost.deleteError"));
       setBusy(false);
     }
   }
@@ -209,7 +213,7 @@ function ExpenseRowActions({
       <div className="flex justify-end gap-2">
         {error && <span className="text-xs text-danger-600">{error}</span>}
         <button type="button" onClick={onDelete} disabled={busy} className="text-sm text-danger-600 hover:underline">
-          حذف
+          {t("common.delete")}
         </button>
       </div>
     </Can>

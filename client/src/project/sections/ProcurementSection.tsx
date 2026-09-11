@@ -42,16 +42,8 @@ import type {
   Supplier,
 } from "../../api/types";
 import { useProjectContext } from "../context";
+import { useTranslation } from "../../i18n/I18nProvider";
 
-const typeLabel: Record<CommitmentType, string> = { purchase_order: "أمر شراء", subcontract: "عقد باطن" };
-const statusLabel: Record<CommitmentStatus, string> = {
-  draft: "مسودة",
-  pending_approval: "بانتظار الاعتماد",
-  active: "نشط",
-  partially_fulfilled: "منفَّذ جزئياً",
-  closed: "مغلق",
-  cancelled: "ملغى",
-};
 const statusTone: Record<CommitmentStatus, "neutral" | "success" | "warning" | "info" | "danger"> = {
   draft: "warning",
   pending_approval: "info",
@@ -66,6 +58,7 @@ const statusTone: Record<CommitmentStatus, "neutral" | "success" | "warning" | "
 // numbering, line-amount calculation, and every state transition; this
 // screen only displays and reflects what it returns.
 export function ProcurementSection() {
+  const { t, locale } = useTranslation();
   const { projectId } = useProjectContext();
   const [commitments, setCommitments] = useState<Commitment[] | null>(null);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -87,7 +80,7 @@ export function ProcurementSection() {
         setCostCodes(costCodeRows);
         setBoqItems(boqItemRows);
       })
-      .catch((err) => setError(err instanceof Error ? err.message : "تعذّر تحميل المشتريات والالتزامات"));
+      .catch((err) => setError(err instanceof Error ? err.message : t("procurement.loadError")));
   }
   useEffect(load, [projectId]);
 
@@ -99,31 +92,31 @@ export function ProcurementSection() {
   };
 
   const columns: FinancialColumn<Commitment>[] = [
-    { key: "commitmentNumber", header: "الرقم", render: (c) => `#${c.commitmentNumber}` },
-    { key: "type", header: "النوع", render: (c) => typeLabel[c.type] },
-    { key: "supplier", header: "المورد", render: (c) => supplierLabel(c.supplierId) },
-    { key: "description", header: "الوصف", render: (c) => c.description ?? "—" },
-    { key: "status", header: "الحالة", render: (c) => <Badge tone={statusTone[c.status]}>{statusLabel[c.status]}</Badge> },
-    { key: "originalAmount", header: "القيمة الأصلية", align: "end", render: (c) => (c.originalAmount !== null ? formatMoney(c.originalAmount, c.currency) : "—") },
-    { key: "revisedAmount", header: "القيمة المعدَّلة", align: "end", render: (c) => (c.revisedAmount !== null ? formatMoney(c.revisedAmount, c.currency) : "—") },
-    { key: "currency", header: "العملة", render: (c) => c.currency },
+    { key: "commitmentNumber", header: t("procurement.columns.number"), render: (c) => `#${c.commitmentNumber}` },
+    { key: "type", header: t("procurement.columns.type"), render: (c) => t(`procurement.type.${c.type}`) },
+    { key: "supplier", header: t("procurement.columns.supplier"), render: (c) => supplierLabel(c.supplierId) },
+    { key: "description", header: t("procurement.columns.description"), render: (c) => c.description ?? "—" },
+    { key: "status", header: t("procurement.columns.status"), render: (c) => <Badge tone={statusTone[c.status]}>{t(`procurement.status.${c.status}`)}</Badge> },
+    { key: "originalAmount", header: t("procurement.columns.originalAmount"), align: "end", render: (c) => (c.originalAmount !== null ? formatMoney(c.originalAmount, c.currency, locale) : "—") },
+    { key: "revisedAmount", header: t("procurement.columns.revisedAmount"), align: "end", render: (c) => (c.revisedAmount !== null ? formatMoney(c.revisedAmount, c.currency, locale) : "—") },
+    { key: "currency", header: t("procurement.columns.currency"), render: (c) => c.currency },
   ];
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="المشتريات والالتزامات"
+        title={t("procurement.title")}
         actions={
           <Can permission="commitment.manage">
             <Button size="sm" onClick={() => setShowCreate((v) => !v)} disabled={suppliers.length === 0}>
-              {showCreate ? "إلغاء" : "+ التزام جديد"}
+              {showCreate ? t("common.cancel") : t("procurement.newCommitment")}
             </Button>
           </Can>
         }
       />
 
       {suppliers.length === 0 && commitments !== null && (
-        <EmptyState message='يجب إضافة مورد أولاً من قسم "الموردون" قبل إنشاء التزام.' />
+        <EmptyState message={t("procurement.needsSupplierFirst")} />
       )}
 
       {showCreate && (
@@ -147,10 +140,10 @@ export function ProcurementSection() {
         rowKey={(c) => c.id}
         error={error}
         onRetry={load}
-        emptyMessage="لا توجد التزامات (مشتريات) بعد"
+        emptyMessage={t("procurement.emptyMessage")}
         rowActions={(c) => (
           <button type="button" onClick={() => setSelectedId(c.id)} className="text-sm text-primary hover:underline">
-            عرض
+            {t("procurement.view")}
           </button>
         )}
       />
@@ -193,6 +186,7 @@ function CommitmentCreateForm({
   contracts: Contract[];
   onCreated: (commitment: Commitment) => void;
 }) {
+  const { t } = useTranslation();
   const [supplierId, setSupplierId] = useState(suppliers[0]?.id ?? "");
   const [type, setType] = useState<CommitmentType>("purchase_order");
   const [contractId, setContractId] = useState("");
@@ -215,7 +209,7 @@ function CommitmentCreateForm({
       });
       onCreated(commitment);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر إنشاء الالتزام");
+      setError(err instanceof ApiError ? err.message : t("procurement.createForm.genericError"));
     } finally {
       setSubmitting(false);
     }
@@ -246,15 +240,15 @@ function CommitmentCreateForm({
           onChange={(e) => setType(e.target.value as CommitmentType)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
         >
-          <option value="purchase_order">أمر شراء</option>
-          <option value="subcontract">عقد باطن</option>
+          <option value="purchase_order">{t("procurement.type.purchase_order")}</option>
+          <option value="subcontract">{t("procurement.type.subcontract")}</option>
         </select>
         <select
           value={contractId}
           onChange={(e) => setContractId(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
         >
-          <option value="">بدون عقد محدد</option>
+          <option value="">{t("procurement.createForm.noContract")}</option>
           {contracts.map((c) => (
             <option key={c.id} value={c.id}>
               {c.contractNumber ?? c.id.slice(0, 8)}
@@ -262,7 +256,7 @@ function CommitmentCreateForm({
           ))}
         </select>
         <input
-          placeholder="الوصف (اختياري)"
+          placeholder={t("procurement.createForm.descriptionPlaceholder")}
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm sm:col-span-2"
@@ -273,14 +267,14 @@ function CommitmentCreateForm({
             min={0}
             max={100}
             step="0.01"
-            placeholder="نسبة الاحتجاز % (اختياري)"
+            placeholder={t("procurement.createForm.retentionPlaceholder")}
             value={retentionPercent}
             onChange={(e) => setRetentionPercent(e.target.value)}
             className="rounded-md border border-stone-300 px-3 py-2 text-sm"
           />
         )}
         <Button type="submit" disabled={submitting || !supplierId}>
-          {submitting ? "جارٍ الحفظ..." : "إنشاء الالتزام"}
+          {submitting ? t("procurement.createForm.saving") : t("procurement.createForm.create")}
         </Button>
       </form>
     </Card>
@@ -289,24 +283,28 @@ function CommitmentCreateForm({
 
 type PendingAction = "submit" | "approve" | "cancel" | null;
 
-const confirmCopy: Record<Exclude<PendingAction, null>, { title: string; message: string; confirmLabel: string; destructive?: boolean }> = {
-  submit: {
-    title: "إرسال الالتزام للاعتماد",
-    message: "بعد الإرسال لن يمكن إضافة أو حذف بنود هذا الالتزام إلا بعد اعتماده. هل تريد المتابعة؟",
-    confirmLabel: "إرسال",
-  },
-  approve: {
-    title: "اعتماد الالتزام",
-    message: "بعد الاعتماد يصبح هذا الالتزام نشطاً وملزِماً تجاه المورد. هل تريد المتابعة؟",
-    confirmLabel: "اعتماد",
-  },
-  cancel: {
-    title: "إلغاء الالتزام",
-    message: "سيتم إلغاء هذا الالتزام. لا يمكن التراجع عن هذا الإجراء. هل تريد المتابعة؟",
-    confirmLabel: "إلغاء الالتزام",
-    destructive: true,
-  },
-};
+function confirmCopyFor(
+  t: (key: string) => string,
+): Record<Exclude<PendingAction, null>, { title: string; message: string; confirmLabel: string; destructive?: boolean }> {
+  return {
+    submit: {
+      title: t("procurement.confirm.submitTitle"),
+      message: t("procurement.confirm.submitMessage"),
+      confirmLabel: t("procurement.confirm.submitLabel"),
+    },
+    approve: {
+      title: t("procurement.confirm.approveTitle"),
+      message: t("procurement.confirm.approveMessage"),
+      confirmLabel: t("procurement.confirm.approveLabel"),
+    },
+    cancel: {
+      title: t("procurement.confirm.cancelTitle"),
+      message: t("procurement.confirm.cancelMessage"),
+      confirmLabel: t("procurement.confirm.cancelLabel"),
+      destructive: true,
+    },
+  };
+}
 
 function CommitmentDetail({
   projectId,
@@ -325,8 +323,10 @@ function CommitmentDetail({
   boqItems: BoqItem[];
   onChanged: () => void;
 }) {
+  const { t, locale } = useTranslation();
   const { user } = useAuth();
   const canManage = hasPermission(user?.role, "commitment.manage");
+  const confirmCopy = confirmCopyFor(t);
   const [commitment, setCommitment] = useState<CommitmentWithLines | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showAddLine, setShowAddLine] = useState(false);
@@ -344,7 +344,7 @@ function CommitmentDetail({
         setCommitment(row);
         setRetentionInput(row.retentionPercent ?? "");
       })
-      .catch((err) => setError(err instanceof ApiError ? err.message : "تعذّر تحميل تفاصيل الالتزام"));
+      .catch((err) => setError(err instanceof ApiError ? err.message : t("procurement.detail.loadError")));
   }
   useEffect(load, [projectId, commitmentId]);
 
@@ -357,7 +357,7 @@ function CommitmentDetail({
       });
       load();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر حفظ نسبة الاحتجاز");
+      setError(err instanceof ApiError ? err.message : t("procurement.detail.retentionSaveError"));
     } finally {
       setRetentionSaving(false);
     }
@@ -374,7 +374,7 @@ function CommitmentDetail({
       load();
       onChanged();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر تنفيذ الإجراء");
+      setError(err instanceof ApiError ? err.message : t("procurement.detail.actionError"));
       setPendingAction(null);
     } finally {
       setActingBusy(false);
@@ -386,7 +386,7 @@ function CommitmentDetail({
       await deleteCommitmentLine(projectId, commitmentId, lineId);
       load();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر حذف البند");
+      setError(err instanceof ApiError ? err.message : t("procurement.detail.deleteLineError"));
     }
   }
 
@@ -413,47 +413,47 @@ function CommitmentDetail({
   const canAmend = commitment.status === "active" || commitment.status === "partially_fulfilled";
 
   const lineColumns: FinancialColumn<CommitmentLine>[] = [
-    { key: "description", header: "الوصف", render: (l) => l.description },
-    { key: "quantity", header: "الكمية", align: "end", render: (l) => (l.quantity !== null ? formatQuantity(l.quantity) : "—") },
-    { key: "rate", header: "السعر", align: "end", render: (l) => (l.rate !== null ? formatMoney(l.rate, commitment.currency) : "—") },
-    { key: "amount", header: "المبلغ", align: "end", render: (l) => formatMoney(l.amount, commitment.currency) },
-    { key: "costCode", header: "بند التكلفة", render: (l) => costCodeLabel(l.costCodeId) },
-    { key: "boqItem", header: "بند جدول الكميات", render: (l) => boqItemLabel(l.boqItemId) },
+    { key: "description", header: t("procurement.detail.lineColumns.description"), render: (l) => l.description },
+    { key: "quantity", header: t("procurement.detail.lineColumns.quantity"), align: "end", render: (l) => (l.quantity !== null ? formatQuantity(l.quantity, null, locale) : "—") },
+    { key: "rate", header: t("procurement.detail.lineColumns.rate"), align: "end", render: (l) => (l.rate !== null ? formatMoney(l.rate, commitment.currency, locale) : "—") },
+    { key: "amount", header: t("procurement.detail.lineColumns.amount"), align: "end", render: (l) => formatMoney(l.amount, commitment.currency, locale) },
+    { key: "costCode", header: t("procurement.detail.lineColumns.costCode"), render: (l) => costCodeLabel(l.costCodeId) },
+    { key: "boqItem", header: t("procurement.detail.lineColumns.boqItem"), render: (l) => boqItemLabel(l.boqItemId) },
   ];
 
   return (
     <Card className="p-5">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <h2 className="font-semibold text-stone-800">التزام #{commitment.commitmentNumber}</h2>
-          <Badge tone={statusTone[commitment.status]}>{statusLabel[commitment.status]}</Badge>
-          <span className="text-sm text-stone-500">{typeLabel[commitment.type]}</span>
+          <h2 className="font-semibold text-stone-800">{t("procurement.detail.title", { number: commitment.commitmentNumber })}</h2>
+          <Badge tone={statusTone[commitment.status]}>{t(`procurement.status.${commitment.status}`)}</Badge>
+          <span className="text-sm text-stone-500">{t(`procurement.type.${commitment.type}`)}</span>
         </div>
         <Can permission="commitment.manage">
           <div className="flex flex-wrap gap-2">
             {isDraft && (
               <Button size="sm" variant="secondary" onClick={() => setShowAddLine((v) => !v)}>
-                {showAddLine ? "إلغاء" : "+ بند"}
+                {showAddLine ? t("common.cancel") : t("procurement.detail.addLine")}
               </Button>
             )}
             {isDraft && (
               <Button size="sm" onClick={() => setPendingAction("submit")}>
-                إرسال للاعتماد
+                {t("procurement.detail.submitForApproval")}
               </Button>
             )}
             {isPendingApproval && (
               <Button size="sm" onClick={() => setPendingAction("approve")}>
-                اعتماد
+                {t("procurement.detail.approve")}
               </Button>
             )}
             {(isDraft || isPendingApproval) && (
               <Button size="sm" variant="danger" onClick={() => setPendingAction("cancel")}>
-                إلغاء الالتزام
+                {t("procurement.detail.cancelCommitment")}
               </Button>
             )}
             {canAmend && (
               <Button size="sm" variant="secondary" onClick={() => setShowAmend((v) => !v)}>
-                {showAmend ? "إلغاء" : "+ تعديل (أمر تغيير)"}
+                {showAmend ? t("common.cancel") : t("procurement.detail.amend")}
               </Button>
             )}
           </div>
@@ -467,7 +467,7 @@ function CommitmentDetail({
             to={`/projects/${projectId}/subcontract-ipcs/${commitment.id}`}
             className="text-sm text-primary hover:underline"
           >
-            شهادات الدفع للمقاول الباطن
+            {t("procurement.detail.subcontractIpcsLink")}
           </Link>
         )}
       </div>
@@ -479,19 +479,19 @@ function CommitmentDetail({
       )}
 
       <dl className="mb-5 grid grid-cols-1 gap-x-8 gap-y-3 text-sm sm:grid-cols-2">
-        <Field label="المورد" value={supplierName} />
-        <Field label="العقد" value={contractLabel} />
-        <Field label="الوصف" value={commitment.description ?? "—"} />
-        <Field label="العملة" value={commitment.currency} />
-        <Field label="القيمة الأصلية" value={commitment.originalAmount !== null ? formatMoney(commitment.originalAmount, commitment.currency) : "—"} />
-        <Field label="القيمة المعدَّلة" value={commitment.revisedAmount !== null ? formatMoney(commitment.revisedAmount, commitment.currency) : "—"} />
-        <Field label="تاريخ الإرسال للاعتماد" value={formatDateTime(commitment.submittedAt)} />
-        <Field label="تاريخ الاعتماد" value={formatDateTime(commitment.approvedAt)} />
-        {commitment.cancelledAt && <Field label="تاريخ الإلغاء" value={formatDateTime(commitment.cancelledAt)} />}
+        <Field label={t("procurement.detail.fields.supplier")} value={supplierName} />
+        <Field label={t("procurement.detail.fields.contract")} value={contractLabel} />
+        <Field label={t("procurement.detail.fields.description")} value={commitment.description ?? "—"} />
+        <Field label={t("procurement.detail.fields.currency")} value={commitment.currency} />
+        <Field label={t("procurement.detail.fields.originalAmount")} value={commitment.originalAmount !== null ? formatMoney(commitment.originalAmount, commitment.currency, locale) : "—"} />
+        <Field label={t("procurement.detail.fields.revisedAmount")} value={commitment.revisedAmount !== null ? formatMoney(commitment.revisedAmount, commitment.currency, locale) : "—"} />
+        <Field label={t("procurement.detail.fields.submittedAt")} value={formatDateTime(commitment.submittedAt, locale)} />
+        <Field label={t("procurement.detail.fields.approvedAt")} value={formatDateTime(commitment.approvedAt, locale)} />
+        {commitment.cancelledAt && <Field label={t("procurement.detail.fields.cancelledAt")} value={formatDateTime(commitment.cancelledAt, locale)} />}
         {commitment.type === "subcontract" &&
           (isDraft && canManage ? (
             <div className="flex items-center justify-between gap-2 border-b border-stone-100 pb-2">
-              <dt className="text-stone-500">نسبة الاحتجاز %</dt>
+              <dt className="text-stone-500">{t("procurement.detail.fields.retentionPercent")}</dt>
               <dd className="flex items-center gap-2">
                 <input
                   type="number"
@@ -503,12 +503,12 @@ function CommitmentDetail({
                   className="w-20 rounded-md border border-stone-300 px-2 py-1 text-xs"
                 />
                 <Button size="sm" onClick={onSaveRetention} disabled={retentionSaving}>
-                  {retentionSaving ? "جارٍ الحفظ..." : "حفظ"}
+                  {retentionSaving ? t("common.saving") : t("common.save")}
                 </Button>
               </dd>
             </div>
           ) : (
-            <Field label="نسبة الاحتجاز" value={commitment.retentionPercent !== null ? `${commitment.retentionPercent}%` : "—"} />
+            <Field label={t("procurement.detail.fields.retentionPercentReadonly")} value={commitment.retentionPercent !== null ? `${commitment.retentionPercent}%` : "—"} />
           ))}
       </dl>
 
@@ -518,7 +518,7 @@ function CommitmentDetail({
             <CommitmentLineForm
               costCodes={costCodes}
               boqItems={boqItems}
-              submitLabel="إضافة البند"
+              submitLabel={t("procurement.detail.addItemLabel")}
               onSubmit={async (input) => {
                 await addCommitmentLine(projectId, commitmentId, input);
                 setShowAddLine(false);
@@ -550,13 +550,13 @@ function CommitmentDetail({
         columns={lineColumns}
         rows={commitment.lines}
         rowKey={(l) => l.id}
-        emptyMessage="لا توجد بنود في هذا الالتزام بعد"
+        emptyMessage={t("procurement.detail.emptyLines")}
         rowActions={
           isDraft
             ? (line) => (
                 <Can permission="commitment.manage">
                   <button type="button" onClick={() => onDeleteLine(line.id)} className="text-sm text-danger-600 hover:underline">
-                    حذف
+                    {t("common.delete")}
                   </button>
                 </Can>
               )
@@ -568,7 +568,7 @@ function CommitmentDetail({
         open={pendingAction !== null}
         title={pendingAction ? confirmCopy[pendingAction].title : ""}
         message={pendingAction ? confirmCopy[pendingAction].message : ""}
-        confirmLabel={actingBusy ? "جارٍ التنفيذ..." : pendingAction ? confirmCopy[pendingAction].confirmLabel : ""}
+        confirmLabel={actingBusy ? t("procurement.confirm.executing") : pendingAction ? confirmCopy[pendingAction].confirmLabel : ""}
         destructive={pendingAction ? confirmCopy[pendingAction].destructive : undefined}
         onConfirm={onConfirmAction}
         onCancel={() => setPendingAction(null)}
@@ -624,11 +624,12 @@ function LineFields({
   costCodes: CostCode[];
   boqItems: BoqItem[];
 }) {
+  const { t } = useTranslation();
   return (
     <>
       <input
         required
-        placeholder="الوصف"
+        placeholder={t("procurement.lineFields.descriptionPlaceholder")}
         value={description}
         onChange={(e) => setDescription(e.target.value)}
         className="rounded-md border border-stone-300 px-3 py-2 text-sm sm:col-span-2"
@@ -637,7 +638,7 @@ function LineFields({
         type="number"
         min="0"
         step="0.001"
-        placeholder="الكمية"
+        placeholder={t("procurement.lineFields.quantityPlaceholder")}
         value={quantity}
         onChange={(e) => setQuantity(e.target.value)}
         className="rounded-md border border-stone-300 px-3 py-2 text-sm"
@@ -646,7 +647,7 @@ function LineFields({
         type="number"
         min="0"
         step="0.01"
-        placeholder="السعر"
+        placeholder={t("procurement.lineFields.ratePlaceholder")}
         value={rate}
         onChange={(e) => setRate(e.target.value)}
         className="rounded-md border border-stone-300 px-3 py-2 text-sm"
@@ -656,7 +657,7 @@ function LineFields({
         onChange={(e) => setCostCodeId(e.target.value)}
         className="rounded-md border border-stone-300 px-3 py-2 text-sm"
       >
-        <option value="">بدون بند تكلفة</option>
+        <option value="">{t("procurement.lineFields.noCostCode")}</option>
         {costCodes.map((c) => (
           <option key={c.id} value={c.id}>
             {c.code} — {c.name}
@@ -668,7 +669,7 @@ function LineFields({
         onChange={(e) => setBoqItemId(e.target.value)}
         className="rounded-md border border-stone-300 px-3 py-2 text-sm"
       >
-        <option value="">بدون بند جدول كميات</option>
+        <option value="">{t("procurement.lineFields.noBoqItem")}</option>
         {boqItems.map((i) => (
           <option key={i.id} value={i.id}>
             {i.code ? `${i.code} — ${i.description}` : i.description}
@@ -690,6 +691,7 @@ function CommitmentLineForm({
   submitLabel: string;
   onSubmit: (input: LineFormValues) => Promise<void>;
 }) {
+  const { t } = useTranslation();
   const [description, setDescription] = useState("");
   const [quantity, setQuantity] = useState("");
   const [rate, setRate] = useState("");
@@ -711,7 +713,7 @@ function CommitmentLineForm({
         boqItemId: boqItemId || undefined,
       });
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر حفظ البند");
+      setError(err instanceof ApiError ? err.message : t("procurement.lineForm.genericError"));
     } finally {
       setSubmitting(false);
     }
@@ -739,7 +741,7 @@ function CommitmentLineForm({
         boqItems={boqItems}
       />
       <Button type="submit" size="sm" disabled={submitting} className="sm:col-span-5">
-        {submitting ? "جارٍ الحفظ..." : submitLabel}
+        {submitting ? t("procurement.lineForm.saving") : submitLabel}
       </Button>
     </form>
   );
@@ -758,6 +760,7 @@ function AmendLineForm({
   boqItems: BoqItem[];
   onAmend: (input: LineFormValues) => Promise<void>;
 }) {
+  const { t } = useTranslation();
   const [description, setDescription] = useState("");
   const [quantity, setQuantity] = useState("");
   const [rate, setRate] = useState("");
@@ -780,7 +783,7 @@ function AmendLineForm({
       });
       setConfirming(false);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر حفظ التعديل");
+      setError(err instanceof ApiError ? err.message : t("procurement.amendForm.genericError"));
       setConfirming(false);
     } finally {
       setSubmitting(false);
@@ -809,14 +812,14 @@ function AmendLineForm({
         boqItems={boqItems}
       />
       <Button type="button" size="sm" disabled={!description} onClick={() => setConfirming(true)} className="sm:col-span-5">
-        إضافة تعديل
+        {t("procurement.amendForm.addAmendment")}
       </Button>
 
       <ConfirmDialog
         open={confirming}
-        title="إضافة تعديل على الالتزام"
-        message="سيتم إضافة هذا البند وإعادة احتساب القيمة المعدَّلة لهذا الالتزام من إجمالي البنود الفعلي على الخادم. هل تريد المتابعة؟"
-        confirmLabel={submitting ? "جارٍ الحفظ..." : "تأكيد التعديل"}
+        title={t("procurement.amendForm.confirmTitle")}
+        message={t("procurement.amendForm.confirmMessage")}
+        confirmLabel={submitting ? t("procurement.amendForm.saving") : t("procurement.amendForm.confirmLabel")}
         onConfirm={onConfirmAmend}
         onCancel={() => setConfirming(false)}
       />

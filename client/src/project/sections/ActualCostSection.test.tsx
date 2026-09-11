@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { AuthProvider } from "../../auth/AuthContext";
+import { I18nProvider } from "../../i18n/I18nProvider";
 import { ActualCostSection } from "./ActualCostSection";
 import type { BudgetSummary } from "../../api/types";
 
@@ -47,9 +48,11 @@ function mockApi(role: "owner" | "member", summary: BudgetSummary) {
 
 function renderSection() {
   return render(
-    <AuthProvider>
-      <ActualCostSection />
-    </AuthProvider>,
+    <I18nProvider>
+      <AuthProvider>
+        <ActualCostSection />
+      </AuthProvider>
+    </I18nProvider>,
   );
 }
 

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { AuthProvider } from "../../auth/AuthContext";
+import { I18nProvider } from "../../i18n/I18nProvider";
 import { ProcurementSection } from "./ProcurementSection";
 import type { Commitment, CommitmentWithLines, Supplier } from "../../api/types";
 
@@ -115,9 +116,11 @@ function mockApi(role: "owner" | "member", commitments: Commitment[]) {
 
 function renderSection() {
   return render(
-    <AuthProvider>
-      <ProcurementSection />
-    </AuthProvider>,
+    <I18nProvider>
+      <AuthProvider>
+        <ProcurementSection />
+      </AuthProvider>
+    </I18nProvider>,
   );
 }
 
