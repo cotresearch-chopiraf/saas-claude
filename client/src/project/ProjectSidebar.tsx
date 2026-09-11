@@ -1,7 +1,9 @@
 import { NavLink } from "react-router-dom";
 import { projectSectionGroups, projectSections, legacySection } from "./sections";
+import { useTranslation } from "../i18n/I18nProvider";
 
 function NavItems({ projectId, onNavigate }: { projectId: string; onNavigate?: () => void }) {
+  const { t } = useTranslation();
   return (
     <nav className="space-y-5">
       {projectSectionGroups.map((group) => {
@@ -9,7 +11,9 @@ function NavItems({ projectId, onNavigate }: { projectId: string; onNavigate?: (
         if (items.length === 0) return null;
         return (
           <div key={group}>
-            <p className="px-3 text-xs font-semibold uppercase tracking-wide text-stone-400">{group}</p>
+            <p className="px-3 text-xs font-semibold uppercase tracking-wide text-stone-400">
+              {t(`project.groups.${group}`)}
+            </p>
             <div className="mt-1 space-y-0.5">
               {items.map((item) => (
                 <NavLink
@@ -22,7 +26,7 @@ function NavItems({ projectId, onNavigate }: { projectId: string; onNavigate?: (
                     }`
                   }
                 >
-                  {item.label}
+                  {t(`project.sections.${item.key}`)}
                 </NavLink>
               ))}
             </div>
@@ -38,7 +42,7 @@ function NavItems({ projectId, onNavigate }: { projectId: string; onNavigate?: (
             `block rounded-md px-3 py-1.5 text-xs ${isActive ? "bg-stone-200 text-stone-700" : "text-stone-400 hover:text-stone-600"}`
           }
         >
-          {legacySection.label}
+          {t(`project.${legacySection.labelKey}`)}
         </NavLink>
       </div>
     </nav>

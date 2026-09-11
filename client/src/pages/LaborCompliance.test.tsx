@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { AuthProvider } from "../auth/AuthContext";
+import { I18nProvider } from "../i18n/I18nProvider";
 import { LaborCompliance } from "./LaborCompliance";
 import type { ComplianceDashboard, CompliancePeriod, NitaqatComplianceRecord, GosiComplianceRecord, ComplianceException } from "../api/types";
 
@@ -108,11 +109,13 @@ function mockApi(overrides: { dashboard?: ComplianceDashboard; periods?: Complia
 
 function renderPage() {
   return render(
+    <I18nProvider>
     <MemoryRouter>
       <AuthProvider>
         <LaborCompliance />
       </AuthProvider>
-    </MemoryRouter>,
+    </MemoryRouter>
+    </I18nProvider>,
   );
 }
 

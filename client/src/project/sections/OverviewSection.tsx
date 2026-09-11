@@ -22,6 +22,7 @@ import { listIpcs } from "../../api/ipcs";
 import { listMeasurements } from "../../api/measurements";
 import { listActivity } from "../../api/auditEvents";
 import { useProjectContext } from "../context";
+import { useTranslation } from "../../i18n/I18nProvider";
 import type {
   ActivityEvent,
   BoqRevision,
@@ -71,11 +72,6 @@ import type {
 // Budget Alerts call) — fewer requests, one loading/error state.
 // ─────────────────────────────────────────────────────────────────────────
 
-const statusLabel: Record<Project["status"], string> = {
-  active: "نشط",
-  on_hold: "متوقف مؤقتاً",
-  completed: "مكتمل",
-};
 const statusTone: Record<Project["status"], "success" | "warning" | "neutral"> = {
   active: "success",
   on_hold: "warning",
@@ -99,7 +95,11 @@ const commitmentStatusLabel: Record<CommitmentStatus, string> = {
   cancelled: "ملغى",
 };
 
-const alertSeverityLabel: Record<BudgetAlert["severity"], string> = { info: "معلومات", warning: "تحذير", critical: "حرج" };
+const alertSeverityKey: Record<BudgetAlert["severity"], string> = {
+  info: "severityInfo",
+  warning: "severityWarning",
+  critical: "severityCritical",
+};
 
 interface OverviewData {
   contracts: Contract[];
@@ -123,6 +123,7 @@ function today(): string {
 
 export function OverviewSection() {
   const { project, projectId } = useProjectContext();
+  const { t, locale } = useTranslation();
   const [data, setData] = useState<OverviewData | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -176,7 +177,7 @@ export function OverviewSection() {
             activity: activityPage.events,
           }),
       )
-      .catch((err) => setError(err instanceof Error ? err.message : "تعذّر تحميل نظرة عامة المشروع"));
+      .catch((err) => setError(err instanceof Error ? err.message : t("dashboard.loadErrorFallback")));
   }
   useEffect(load, [projectId]);
 
@@ -254,6 +255,8 @@ export function OverviewSection() {
   const projectActivity = data.activity.filter((e) => knownEntityIds.has(e.entityId)).slice(0, 8);
 
   const needsAttention = buildNeedsAttention({
+    t,
+    locale,
     projectId,
     activeAlerts,
     overdueTasks,
@@ -265,6 +268,8 @@ export function OverviewSection() {
   });
 
   const health = computeHealth({
+    t,
+    locale,
     activeAlerts,
     overdueTasks,
     scheduleHasData: scheduleTasks.length > 0,
@@ -286,7 +291,14 @@ export function OverviewSection() {
   // divider instead of splitting columns.
   return (
     <div className="flex flex-col gap-5 lg:gap-6">
-      <IdentityStrip project={project} contract={mainContract} avgProgress={avgProgress} activity={data.activity} />
+      <IdentityStrip
+        project={project}
+        contract={mainContract}
+        avgProgress={avgProgress}
+        activity={data.activity}
+        health={health}
+        topAttention={needsAttention[0]}
+      />
 
       <Zone
         tier="primary"
@@ -351,10 +363,11 @@ export function OverviewSection() {
 }
 
 function HeaderSkeleton({ project }: { project: Project | null }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center justify-between">
       <div>
-        <h1 className="text-xl font-bold text-stone-900">مركز القيادة التنفيذي</h1>
+        <h1 className="text-xl font-bold text-stone-900">{t("dashboard.headerSkeletonTitle")}</h1>
         {project && <p className="mt-1 text-sm text-stone-500">{project.name}</p>}
       </div>
     </div>
@@ -554,31 +567,77 @@ function Zone({
 // anywhere else yet: status, contract value, schedule-based progress, and
 // when this project was last touched (the most recent real activity event
 // on it, falling back to the project's own creation date).
+// Executive Verdict: a single-glance overall read on the project, derived
+// from the already-computed health array (worst tone wins — one critical
+// indicator makes the whole verdict critical, regardless of how many
+// others are healthy) — not a new calculation, just a summary of six
+// facts already shown individually in the Health zone below.
+function deriveVerdict(health: HealthIndicator[]): "healthy" | "watch" | "critical" {
+  if (health.some((h) => h.tone === "critical")) return "critical";
+  if (health.some((h) => h.tone === "watch")) return "watch";
+  return "healthy";
+}
+const verdictTone: Record<"healthy" | "watch" | "critical", "success" | "warning" | "danger"> = {
+  healthy: "success",
+  watch: "warning",
+  critical: "danger",
+};
+const verdictPillClass: Record<"success" | "warning" | "danger", string> = {
+  success: "bg-success-100 text-success-700",
+  warning: "bg-warning-100 text-warning-700",
+  danger: "bg-danger-100 text-danger-700",
+};
+
 function IdentityStrip({
   project,
   contract,
   avgProgress,
   activity,
+  health,
+  topAttention,
 }: {
   project: Project;
   contract: Contract | null;
   avgProgress: number | null;
   activity: ActivityEvent[];
+  health: HealthIndicator[];
+  topAttention?: AttentionItem;
 }) {
+  const { t, locale } = useTranslation();
   const lastActivityAt = activity[0]?.createdAt ?? project.createdAt;
   const statusDot: Record<Project["status"], string> = { active: "bg-success-500", on_hold: "bg-warning-500", completed: "bg-stone-400" };
+  const verdict = deriveVerdict(health);
   return (
-    <div className="flex flex-wrap items-center gap-x-8 gap-y-3 rounded-lg border border-stone-200/80 bg-white px-4 py-3 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_1px_8px_rgba(15,23,42,0.03)]">
-      <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${statusTone[project.status] === "success" ? "bg-success-100 text-success-700" : statusTone[project.status] === "warning" ? "bg-warning-100 text-warning-700" : "bg-stone-100 text-stone-600"}`}>
-        <span className={`h-1.5 w-1.5 rounded-full ${statusDot[project.status]}`} aria-hidden="true" />
-        {statusLabel[project.status]}
-      </span>
-      <HeroStat label="قيمة العقد" value={contract ? formatMoney(contract.revisedValue, contract.currency) : "—"} />
-      <HeroStat label="نسبة الإنجاز" value={avgProgress !== null ? formatPercent(avgProgress) : "لا توجد بيانات"} hint="من الجدول الزمني" />
-      <div className="mr-auto flex items-center gap-1.5 text-xs text-stone-400">
-        <IconClock width={14} height={14} />
-        آخر تحديث: {formatDateTime(lastActivityAt)}
+    <div className="flex flex-col gap-3 rounded-lg border border-stone-200/80 bg-white px-4 py-3 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_1px_8px_rgba(15,23,42,0.03)]">
+      <div className="flex flex-wrap items-center gap-x-8 gap-y-3">
+        <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${statusTone[project.status] === "success" ? "bg-success-100 text-success-700" : statusTone[project.status] === "warning" ? "bg-warning-100 text-warning-700" : "bg-stone-100 text-stone-600"}`}>
+          <span className={`h-1.5 w-1.5 rounded-full ${statusDot[project.status]}`} aria-hidden="true" />
+          {t(`dashboard.status.${project.status}`)}
+        </span>
+        <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${verdictPillClass[verdictTone[verdict]]}`}>
+          {t(`dashboard.verdict.${verdict}`)}
+        </span>
+        <HeroStat label={t("dashboard.identity.contractValue")} value={contract ? formatMoney(contract.revisedValue, contract.currency, locale) : "—"} />
+        <HeroStat
+          label={t("dashboard.identity.progress")}
+          value={avgProgress !== null ? formatPercent(avgProgress, 1, locale) : t("dashboard.identity.noData")}
+          hint={t("dashboard.identity.fromSchedule")}
+        />
+        <div className="ms-auto flex items-center gap-1.5 text-xs text-stone-400">
+          <IconClock width={14} height={14} />
+          {t("dashboard.identity.lastUpdated")} {formatDateTime(lastActivityAt, locale)}
+        </div>
       </div>
+      {topAttention && (
+        <Link
+          to={topAttention.href}
+          className={`flex items-center gap-2 rounded-md border-s-4 bg-stone-50/60 px-3 py-2 text-sm transition hover:bg-stone-100 ${attentionAccent[topAttention.severity]}`}
+        >
+          {attentionIcon[topAttention.severity]({ width: 16, height: 16, className: attentionAccent[topAttention.severity].split(" ")[1] })}
+          <span className="text-stone-700">{topAttention.text}</span>
+          {topAttention.metric && <span className="text-xs font-bold text-stone-600">{topAttention.metric}</span>}
+        </Link>
+      )}
     </div>
   );
 }
@@ -618,6 +677,8 @@ interface HealthIndicator {
 }
 
 function computeHealth(input: {
+  t: (key: string, vars?: Record<string, string | number>) => string;
+  locale: string;
   activeAlerts: BudgetAlert[];
   overdueTasks: ProjectTask[];
   scheduleHasData: boolean;
@@ -626,6 +687,7 @@ function computeHealth(input: {
   measurementsAwaitingApproval: Measurement[];
   measurementsHaveData: boolean;
 }): HealthIndicator[] {
+  const { t, locale } = input;
   const costTone: HealthTone = input.activeAlerts.some((a) => a.severity === "critical")
     ? "critical"
     : input.activeAlerts.length > 0
@@ -647,59 +709,76 @@ function computeHealth(input: {
   return [
     {
       key: "cost",
-      label: "التكلفة",
+      label: t("dashboard.health.cost"),
       tone: costTone,
-      statusText: costTone === "critical" ? "تنبيهات حرجة" : costTone === "watch" ? "تحتاج مراقبة" : "على المسار الصحيح",
-      metric: `${input.activeAlerts.length} تنبيه نشط`,
+      statusText:
+        costTone === "critical"
+          ? t("dashboard.health.costCritical")
+          : costTone === "watch"
+            ? t("dashboard.health.costWatch")
+            : t("dashboard.health.costHealthy"),
+      metric: t("dashboard.health.activeAlertsCount", { count: input.activeAlerts.length }),
       href: "cost-plan",
     },
     {
       key: "schedule",
-      label: "الجدول الزمني",
+      label: t("dashboard.health.schedule"),
       tone: scheduleTone,
-      statusText: !input.scheduleHasData ? "لا توجد بيانات" : scheduleTone === "critical" ? "متأخر" : "ضمن الجدول",
-      metric: input.scheduleHasData ? `${input.overdueTasks.length} مهمة متأخرة` : "—",
+      statusText: !input.scheduleHasData
+        ? t("dashboard.health.scheduleNoData")
+        : scheduleTone === "critical"
+          ? t("dashboard.health.scheduleCritical")
+          : t("dashboard.health.scheduleHealthy"),
+      metric: input.scheduleHasData ? t("dashboard.health.overdueTasksCount", { count: input.overdueTasks.length }) : "—",
       href: "schedule",
     },
     {
       key: "cashflow",
-      label: "التدفق النقدي",
+      label: t("dashboard.health.cashflow"),
       tone: cashTone,
-      statusText: cashTone === "healthy" ? "سليم" : "يحتاج متابعة",
-      metric: formatMoney(input.cashFlowNet),
+      statusText: cashTone === "healthy" ? t("dashboard.health.cashHealthy") : t("dashboard.health.cashWatch"),
+      metric: formatMoney(input.cashFlowNet, "SAR", locale),
       href: "cash-flow",
     },
     {
       key: "procurement",
-      label: "المشتريات",
+      label: t("dashboard.health.procurement"),
       tone: procurementTone,
-      statusText: procurementTone === "healthy" ? "لا إجراء مطلوب" : "بانتظار اعتماد",
-      metric: `${input.pendingCommitments.length} التزام معلَّق`,
+      statusText:
+        procurementTone === "healthy" ? t("dashboard.health.procurementHealthy") : t("dashboard.health.procurementWatch"),
+      metric: t("dashboard.health.pendingCommitmentsCount", { count: input.pendingCommitments.length }),
       href: "procurement",
     },
     {
       key: "progress",
-      label: "الإنجاز",
+      label: t("dashboard.health.progress"),
       tone: progressTone,
-      statusText: !input.measurementsHaveData ? "لا توجد بيانات" : progressTone === "watch" ? "بانتظار اعتماد" : "محدَّث",
-      metric: input.measurementsHaveData ? `${input.measurementsAwaitingApproval.length} قياس معلَّق` : "—",
+      statusText: !input.measurementsHaveData
+        ? t("dashboard.health.progressNoData")
+        : progressTone === "watch"
+          ? t("dashboard.health.progressWatch")
+          : t("dashboard.health.progressHealthy"),
+      metric: input.measurementsHaveData
+        ? t("dashboard.health.pendingMeasurementsCount", { count: input.measurementsAwaitingApproval.length })
+        : "—",
       href: "progress",
     },
     {
       key: "compliance",
-      label: "الامتثال",
+      label: t("dashboard.health.compliance"),
       tone: "neutral",
-      statusText: "على مستوى الشركة",
-      metric: "نطاقات وGOSI",
+      statusText: t("dashboard.health.complianceStatus"),
+      metric: t("dashboard.health.complianceMetric"),
       href: "__company_compliance__",
     },
   ];
 }
 
 function HealthGrid({ health, projectId }: { health: HealthIndicator[]; projectId: string }) {
+  const { t } = useTranslation();
   return (
     <>
-      <SectionHeader icon={IconShield} tier="primary" title="صحة المشروع" />
+      <SectionHeader icon={IconShield} tier="primary" title={t("dashboard.health.title")} />
       {/* Capped at 2 columns, not 3 — this zone now lives in a permanently
           partial-width column (not full page width like before), so a 3rd
           column leaves too little room for longer labels ("المشتريات"). */}
@@ -712,7 +791,7 @@ function HealthGrid({ health, projectId }: { health: HealthIndicator[]; projectI
               to={h.href === "__company_compliance__" ? "/labor-compliance" : `/projects/${projectId}/${h.href}`}
               className="group relative overflow-hidden rounded-lg border border-stone-200 p-3.5 transition hover:-translate-y-0.5 hover:border-stone-300 hover:shadow-md"
             >
-              <span className={`absolute inset-y-0 right-0 w-1 ${healthDotColor[h.tone]}`} aria-hidden="true" />
+              <span className={`absolute inset-y-0 end-0 w-1 ${healthDotColor[h.tone]}`} aria-hidden="true" />
               <div className="flex items-center gap-2">
                 <IconBadge icon={Icon} tone={healthBadgeTone[h.tone]} />
                 <span className="text-sm font-semibold text-stone-800">{h.label}</span>
@@ -743,6 +822,7 @@ function FinancialWaterfallCard({
   projectId: string;
   revision: BoqRevision | null;
 }) {
+  const { t, locale } = useTranslation();
   const m = forecast.methods.commitment_aware;
   const overBudget = m.variance < 0;
   // Contract -> Budget -> Actual + Commitments -> Forecast, as a vertical
@@ -753,18 +833,23 @@ function FinancialWaterfallCard({
   // only.
   const rows: { label: string; value: number; href: string }[][] = [
     [
-      { label: "قيمة العقد", value: contract ? Number(contract.revisedValue) : m.costPlan, href: "contract" },
-      { label: "الميزانية المعتمدة", value: m.costPlan, href: "cost-plan" },
+      { label: t("dashboard.financial.contractValue"), value: contract ? Number(contract.revisedValue) : m.costPlan, href: "contract" },
+      { label: t("dashboard.financial.approvedBudget"), value: m.costPlan, href: "cost-plan" },
     ],
     [
-      { label: "التكلفة الفعلية", value: m.actualCost, href: "actual-cost" },
-      { label: "الالتزامات", value: m.committedCost, href: "procurement" },
+      { label: t("dashboard.financial.actualCost"), value: m.actualCost, href: "actual-cost" },
+      { label: t("dashboard.financial.commitments"), value: m.committedCost, href: "procurement" },
     ],
   ];
 
   return (
     <>
-      <SectionHeader icon={IconMoney} tier="primary" title="المركز المالي" meta={`بتاريخ ${formatDate(forecast.asOfDate)}`} />
+      <SectionHeader
+        icon={IconMoney}
+        tier="primary"
+        title={t("dashboard.financial.title")}
+        meta={t("dashboard.financial.asOf", { date: formatDate(forecast.asOfDate, locale) })}
+      />
       <div className="space-y-1">
         {rows.map((group, gi) => (
           <div key={gi} className={gi > 0 ? "border-t border-stone-100 pt-1" : ""}>
@@ -775,7 +860,7 @@ function FinancialWaterfallCard({
                 className="flex items-center justify-between gap-3 rounded-md px-2 py-2 text-sm transition hover:bg-stone-50"
               >
                 <span className="text-stone-500">{r.label}</span>
-                <span className="font-bold text-stone-900">{formatMoney(r.value, forecast.currency)}</span>
+                <span className="font-bold text-stone-900">{formatMoney(r.value, forecast.currency, locale)}</span>
               </Link>
             ))}
           </div>
@@ -786,25 +871,26 @@ function FinancialWaterfallCard({
           to={`/projects/${projectId}/forecast`}
           className="flex items-center justify-between gap-3 rounded-md px-2 py-1.5 transition hover:bg-stone-50"
         >
-          <span className="text-sm text-stone-500">التوقع عند الإنجاز</span>
-          <span className="text-lg font-extrabold text-stone-900">{formatMoney(m.eac, forecast.currency)}</span>
+          <span className="text-sm text-stone-500">{t("dashboard.financial.forecastAtCompletion")}</span>
+          <span className="text-lg font-extrabold text-stone-900">{formatMoney(m.eac, forecast.currency, locale)}</span>
         </Link>
         <div className={`mt-2 flex items-center justify-between gap-3 rounded-lg border p-3.5 ${overBudget ? "border-danger-200 bg-danger-50" : "border-success-200 bg-success-50"}`}>
           <span className={`flex items-center gap-2 text-sm font-semibold ${overBudget ? "text-danger-700" : "text-success-700"}`}>
             {overBudget ? <IconAlertTriangle width={18} height={18} /> : <IconTrend width={18} height={18} />}
-            الانحراف المتوقع{overBudget ? " — تجاوز متوقع للميزانية" : ""}
+            {t("dashboard.financial.expectedVariance")}
+            {overBudget ? t("dashboard.financial.overBudgetSuffix") : ""}
           </span>
           <span className={`text-xl font-extrabold ${overBudget ? "text-danger-700" : "text-success-700"}`}>
-            {formatMoney(m.variance, forecast.currency)} ({formatPercent(m.variancePercent)})
+            {formatMoney(m.variance, forecast.currency, locale)} ({formatPercent(m.variancePercent, 1, locale)})
           </span>
         </div>
       </div>
       {revision && (
         <p className="mt-3 border-t border-stone-100 pt-2.5 text-xs text-stone-400">
-          جدول الكميات — النسخة #{revision.revisionNumber}{" "}
-          <Badge tone={boqRevisionStatusTone[revision.status]}>{boqRevisionStatusLabel[revision.status]}</Badge>{" "}
+          {t("dashboard.financial.boqRevision", { number: revision.revisionNumber })}{" "}
+          <Badge tone={boqRevisionStatusTone[revision.status]}>{t(`dashboard.financial.boqRevisionStatus.${revision.status}`)}</Badge>{" "}
           <Link to={`/projects/${projectId}/boq`} className="text-primary hover:underline">
-            فتح جدول الكميات
+            {t("dashboard.financial.openBoq")}
           </Link>
         </p>
       )}
@@ -818,6 +904,7 @@ function FinancialWaterfallCard({
 // gauge/bar above summarize the *relationship*, but the underlying money
 // figures stay visible right below, never dropped.
 function CostVsProgressCard({ budget, avgProgress }: { budget: BudgetSummary; avgProgress: number | null }) {
+  const { t, locale } = useTranslation();
   const costConsumption = budget.totals.planned > 0 ? (budget.totals.spent / budget.totals.planned) * 100 : null;
   // Same subtraction the old `warn` flag already made — surfaced as a plain-
   // language headline with the actual point gap instead of only a boolean,
@@ -830,16 +917,16 @@ function CostVsProgressCard({ budget, avgProgress }: { budget: BudgetSummary; av
 
   const headline =
     gap === null
-      ? "لا تتوفر بيانات إنجاز من الجدول الزمني بعد."
+      ? t("dashboard.costProgress.noProgressData")
       : gap > 5
-        ? `استهلاك التكلفة يسبق الإنجاز الفعلي بفارق ${formatPercent(gap, 0)}`
+        ? t("dashboard.costProgress.costAheadOfProgress", { gap: formatPercent(gap, 0, locale) })
         : gap < -5
-          ? `الإنجاز الفعلي يسبق استهلاك التكلفة بفارق ${formatPercent(Math.abs(gap), 0)}`
-          : "استهلاك التكلفة متوافق مع الإنجاز الفعلي للمشروع";
+          ? t("dashboard.costProgress.progressAheadOfCost", { gap: formatPercent(Math.abs(gap), 0, locale) })
+          : t("dashboard.costProgress.aligned");
 
   return (
     <>
-      <SectionHeader icon={IconBars} tier="primary" title="الإنجاز الفعلي مقابل استهلاك التكلفة" />
+      <SectionHeader icon={IconBars} tier="primary" title={t("dashboard.costProgress.title")} />
       <p
         className={`mb-5 flex items-center gap-2 text-base font-bold ${
           warn ? "text-warning-700" : gap !== null ? "text-success-700" : "text-stone-400"
@@ -849,17 +936,17 @@ function CostVsProgressCard({ budget, avgProgress }: { budget: BudgetSummary; av
         {headline}
       </p>
       <div className="flex flex-col items-center gap-8 sm:flex-row sm:items-stretch sm:justify-center">
-        <RadialGauge value={avgProgress} label="الإنجاز الفعلي" color="#2563eb" />
-        <RadialGauge value={costConsumption} label="استهلاك التكلفة" color={warn ? "#dc2626" : "#16a34a"} />
+        <RadialGauge value={avgProgress} label={t("dashboard.costProgress.actualProgress")} color="#2563eb" locale={locale} />
+        <RadialGauge value={costConsumption} label={t("dashboard.costProgress.costConsumption")} color={warn ? "#dc2626" : "#16a34a"} locale={locale} />
       </div>
       {/* Capped at 2 columns (not 3) — this zone shares its row with Needs
           Attention now, so it never has true full-page width to spare. */}
       <div className="mt-6 grid grid-cols-2 gap-3 border-t border-stone-100 pt-4">
-        <MetricCard label="إجمالي المخطَّط" value={formatMoney(budget.totals.planned)} />
-        <MetricCard label="إجمالي المُنفَق" value={formatMoney(budget.totals.spent)} />
+        <MetricCard label={t("dashboard.costProgress.totalPlanned")} value={formatMoney(budget.totals.planned, "SAR", locale)} />
+        <MetricCard label={t("dashboard.costProgress.totalSpent")} value={formatMoney(budget.totals.spent, "SAR", locale)} />
         <MetricCard
-          label={overBudget ? "تجاوز الميزانية" : "المتبقي"}
-          value={formatMoney(budget.totals.remaining)}
+          label={overBudget ? t("dashboard.costProgress.overBudget") : t("dashboard.costProgress.remaining")}
+          value={formatMoney(budget.totals.remaining, "SAR", locale)}
           tone={overBudget ? "danger" : "default"}
         />
       </div>
@@ -869,7 +956,7 @@ function CostVsProgressCard({ budget, avgProgress }: { budget: BudgetSummary; av
 
 // A single real percentage (never a fabricated time series) rendered as an
 // SVG radial gauge — the one genuine chart on this page, used twice above.
-function RadialGauge({ value, label, color }: { value: number | null; label: string; color: string }) {
+function RadialGauge({ value, label, color, locale }: { value: number | null; label: string; color: string; locale: string }) {
   const size = 132;
   const stroke = 11;
   const r = (size - stroke) / 2;
@@ -896,7 +983,7 @@ function RadialGauge({ value, label, color }: { value: number | null; label: str
           )}
         </svg>
         <div className="absolute inset-0 flex items-center justify-center">
-          <span className="text-2xl font-extrabold text-stone-900">{value !== null ? formatPercent(value, 0) : "—"}</span>
+          <span className="text-2xl font-extrabold text-stone-900">{value !== null ? formatPercent(value, 0, locale) : "—"}</span>
         </div>
       </div>
       <span className="text-sm font-semibold text-stone-600">{label}</span>
@@ -914,6 +1001,8 @@ interface AttentionItem {
 }
 
 function buildNeedsAttention(input: {
+  t: (key: string, vars?: Record<string, string | number>) => string;
+  locale: string;
   projectId: string;
   activeAlerts: BudgetAlert[];
   overdueTasks: ProjectTask[];
@@ -923,14 +1012,15 @@ function buildNeedsAttention(input: {
   measurementsAwaitingApproval: Measurement[];
   forecastMethod: ForecastResult["methods"]["commitment_aware"];
 }): AttentionItem[] {
+  const { t, locale } = input;
   const items: AttentionItem[] = [];
   const p = input.projectId;
 
   if (input.forecastMethod.variance < 0) {
     items.push({
       severity: "critical",
-      text: "التوقعات تتجاوز الميزانية المعتمدة",
-      metric: formatMoney(Math.abs(input.forecastMethod.variance)),
+      text: t("dashboard.needsAttention.forecastOverBudget"),
+      metric: formatMoney(Math.abs(input.forecastMethod.variance), "SAR", locale),
       href: `/projects/${p}/forecast`,
     });
   }
@@ -938,42 +1028,42 @@ function buildNeedsAttention(input: {
     items.push({
       severity: a.severity === "critical" ? "critical" : a.severity === "warning" ? "attention" : "info",
       text: a.title,
-      metric: alertSeverityLabel[a.severity],
+      metric: t(`dashboard.needsAttention.${alertSeverityKey[a.severity]}`),
       href: `/budget-alerts?projectId=${p}`,
     });
   }
   if (input.criticalPunch.length > 0) {
     items.push({
       severity: "critical",
-      text: `${input.criticalPunch.length} ملاحظة حرجة مفتوحة في قائمة الملاحظات`,
+      text: t("dashboard.needsAttention.criticalPunchCount", { count: input.criticalPunch.length }),
       href: `/projects/${p}/punch-list`,
     });
   }
   if (input.overdueTasks.length > 0) {
     items.push({
       severity: "attention",
-      text: `${input.overdueTasks.length} مهمة متأخرة عن الجدول الزمني`,
+      text: t("dashboard.needsAttention.overdueTasksCount", { count: input.overdueTasks.length }),
       href: `/projects/${p}/schedule`,
     });
   }
   if (input.ipcsAwaitingCertification.length > 0) {
     items.push({
       severity: "attention",
-      text: `${input.ipcsAwaitingCertification.length} شهادة دفع (IPC) بانتظار التصديق`,
+      text: t("dashboard.needsAttention.ipcAwaitingCertCount", { count: input.ipcsAwaitingCertification.length }),
       href: `/projects/${p}/ipc`,
     });
   }
   if (input.pendingCommitments.length > 0) {
     items.push({
       severity: "attention",
-      text: `${input.pendingCommitments.length} التزام شراء بانتظار الاعتماد`,
+      text: t("dashboard.needsAttention.pendingCommitmentsCount", { count: input.pendingCommitments.length }),
       href: `/projects/${p}/procurement`,
     });
   }
   if (input.measurementsAwaitingApproval.length > 0) {
     items.push({
       severity: "info",
-      text: `${input.measurementsAwaitingApproval.length} قياس إنجاز بانتظار الاعتماد`,
+      text: t("dashboard.needsAttention.measurementsAwaitingCount", { count: input.measurementsAwaitingApproval.length }),
       href: `/projects/${p}/progress`,
     });
   }
@@ -988,13 +1078,18 @@ const attentionIcon: Record<AttentionSeverity, (p: IconProps) => JSX.Element> = 
   info: IconInfo,
 };
 const attentionAccent: Record<AttentionSeverity, string> = {
-  critical: "border-r-danger-500 text-danger-600",
-  attention: "border-r-warning-500 text-warning-600",
-  info: "border-r-info-500 text-info-600",
+  critical: "border-s-danger-500 text-danger-600",
+  attention: "border-s-warning-500 text-warning-600",
+  info: "border-s-info-500 text-info-600",
 };
-const attentionCountLabel: Record<AttentionSeverity, string> = { critical: "حرج", attention: "تنبيه", info: "معلومات" };
+const attentionCountKey: Record<AttentionSeverity, string> = {
+  critical: "critical",
+  attention: "attention",
+  info: "info",
+};
 
 function NeedsAttentionCard({ items }: { items: AttentionItem[] }) {
+  const { t } = useTranslation();
   const counts = {
     critical: items.filter((i) => i.severity === "critical").length,
     attention: items.filter((i) => i.severity === "attention").length,
@@ -1007,12 +1102,12 @@ function NeedsAttentionCard({ items }: { items: AttentionItem[] }) {
         icon={IconAlertTriangle}
         tone={counts.critical > 0 ? "danger" : counts.attention > 0 ? "warning" : "success"}
         tier="primary"
-        title="يحتاج إلى انتباه"
+        title={t("dashboard.needsAttention.title")}
         action={
           <div className="flex items-center gap-1.5">
             {(["critical", "attention", "info"] as const).map((sev) => (
               <span key={sev} className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${badgeTone[healthBadgeTone[sev === "critical" ? "critical" : sev === "attention" ? "watch" : "neutral"]]}`}>
-                {counts[sev]} {attentionCountLabel[sev]}
+                {counts[sev]} {t(`dashboard.needsAttention.${attentionCountKey[sev]}`)}
               </span>
             ))}
           </div>
@@ -1021,7 +1116,7 @@ function NeedsAttentionCard({ items }: { items: AttentionItem[] }) {
       {items.length === 0 ? (
         <p className="flex items-center gap-2 text-sm text-stone-400">
           <IconTrend width={16} height={16} />
-          لا توجد حالياً بنود تحتاج إلى انتباه.
+          {t("dashboard.needsAttention.empty")}
         </p>
       ) : (
         <ul className="space-y-2">
@@ -1031,7 +1126,7 @@ function NeedsAttentionCard({ items }: { items: AttentionItem[] }) {
               <li key={i}>
                 <Link
                   to={item.href}
-                  className={`flex items-center justify-between gap-3 rounded-md border-r-4 bg-stone-50/60 px-3 py-2.5 text-sm transition hover:bg-stone-100 ${attentionAccent[item.severity]}`}
+                  className={`flex items-center justify-between gap-3 rounded-md border-s-4 bg-stone-50/60 px-3 py-2.5 text-sm transition hover:bg-stone-100 ${attentionAccent[item.severity]}`}
                 >
                   <span className="flex items-center gap-2.5 text-stone-700">
                     <Icon width={16} height={16} className={attentionAccent[item.severity].split(" ")[1]} />
@@ -1064,33 +1159,34 @@ function ProgressScheduleCard({
   avgProgress: number | null;
   measurementsAwaitingApproval: Measurement[];
 }) {
+  const { t, locale } = useTranslation();
   return (
     <>
       <SectionHeader
         icon={IconCalendar}
         tier="secondary"
-        title="الإنجاز والجدول الزمني"
+        title={t("dashboard.progressSchedule.title")}
         action={
           <Link to={`/projects/${projectId}/schedule`} className="text-sm font-medium text-primary hover:underline">
-            فتح الجدول الزمني
+            {t("dashboard.progressSchedule.openSchedule")}
           </Link>
         }
       />
       {tasks.length === 0 ? (
-        <p className="text-sm text-stone-400">لا توجد بيانات جدولة بعد.</p>
+        <p className="text-sm text-stone-400">{t("dashboard.progressSchedule.noData")}</p>
       ) : (
         // Capped at 2 columns (not 3) — this zone shares its row with Cash
         // Flow now, so it never has true full-page width to spare.
         <div className="grid grid-cols-2 gap-4">
-          <MetricCard label="الإنجاز العام" value={avgProgress !== null ? formatPercent(avgProgress) : "—"} />
+          <MetricCard label={t("dashboard.progressSchedule.overallProgress")} value={avgProgress !== null ? formatPercent(avgProgress, 1, locale) : "—"} />
           <MetricCard
-            label="حالة الجدول"
-            value={overdueTasks.length > 0 ? `${overdueTasks.length} متأخرة` : "على المسار الصحيح"}
+            label={t("dashboard.progressSchedule.scheduleStatus")}
+            value={overdueTasks.length > 0 ? t("dashboard.progressSchedule.tasksOverdueCount", { count: overdueTasks.length }) : t("dashboard.progressSchedule.onTrack")}
             tone={overdueTasks.length > 0 ? "warning" : "success"}
           />
           <MetricCard
-            label="المعلم القادم"
-            value={nextMilestone ? formatDate(nextMilestone.endDate) : "—"}
+            label={t("dashboard.progressSchedule.nextMilestone")}
+            value={nextMilestone ? formatDate(nextMilestone.endDate, locale) : "—"}
             hint={nextMilestone?.name}
           />
         </div>
@@ -1098,7 +1194,7 @@ function ProgressScheduleCard({
       {measurementsAwaitingApproval.length > 0 && (
         <p className="mt-3 text-xs text-stone-500">
           <Link to={`/projects/${projectId}/progress`} className="text-primary hover:underline">
-            {measurementsAwaitingApproval.length} قياس إنجاز بانتظار الاعتماد
+            {t("dashboard.progressSchedule.measurementsAwaitingCount", { count: measurementsAwaitingApproval.length })}
           </Link>
         </p>
       )}
@@ -1108,25 +1204,26 @@ function ProgressScheduleCard({
 
 // ── LEVEL 7 — Cash Flow ──────────────────────────────────────────────────
 function CashFlowCard({ cashFlow, projectId }: { cashFlow: CashFlowResult; projectId: string }) {
+  const { t, locale } = useTranslation();
   return (
     <>
       <SectionHeader
         icon={IconWallet}
         tier="secondary"
-        title="التدفق النقدي"
+        title={t("dashboard.cashFlow.title")}
         action={
           <Link to={`/projects/${projectId}/cash-flow`} className="text-sm font-medium text-primary hover:underline">
-            التفاصيل الكاملة
+            {t("dashboard.cashFlow.fullDetails")}
           </Link>
         }
       />
       <div className="grid grid-cols-2 gap-3">
-        <MetricCard label="المُحصَّل فعلياً" value={formatMoney(cashFlow.historical.cashReceived, cashFlow.currency)} />
-        <MetricCard label="التكلفة المتكبَّدة" value={formatMoney(cashFlow.historical.incurredCost, cashFlow.currency)} />
-        <MetricCard label="مستحقات متوقعة" value={formatMoney(cashFlow.projected.receivables, cashFlow.currency)} />
+        <MetricCard label={t("dashboard.cashFlow.collected")} value={formatMoney(cashFlow.historical.cashReceived, cashFlow.currency, locale)} />
+        <MetricCard label={t("dashboard.cashFlow.incurredCost")} value={formatMoney(cashFlow.historical.incurredCost, cashFlow.currency, locale)} />
+        <MetricCard label={t("dashboard.cashFlow.expectedReceivables")} value={formatMoney(cashFlow.projected.receivables, cashFlow.currency, locale)} />
         <MetricCard
-          label="صافي المتوقع"
-          value={formatMoney(cashFlow.projected.net, cashFlow.currency)}
+          label={t("dashboard.cashFlow.projectedNet")}
+          value={formatMoney(cashFlow.projected.net, cashFlow.currency, locale)}
           tone={cashFlow.projected.net < 0 ? "danger" : "success"}
         />
       </div>
@@ -1150,22 +1247,23 @@ function ProcurementCard({
   pendingCount: number;
   currency: string;
 }) {
+  const { t, locale } = useTranslation();
   return (
     <>
       <SectionHeader
         icon={IconPackage}
         tier="secondary"
-        title="المشتريات والالتزامات"
+        title={t("dashboard.procurement.title")}
         action={
           <Link to={`/projects/${projectId}/procurement`} className="text-sm font-medium text-primary hover:underline">
-            فتح المشتريات
+            {t("dashboard.procurement.open")}
           </Link>
         }
       />
-      <MetricCard label="إجمالي الالتزامات" value={formatMoney(totalCommitted, currency)} />
+      <MetricCard label={t("dashboard.procurement.totalCommitted")} value={formatMoney(totalCommitted, currency, locale)} />
       <div className="mt-3 grid grid-cols-2 gap-3">
-        <MetricCard label="نشطة / منفَّذة" value={formatMoney(approvedCommitted, currency)} tone="success" />
-        <MetricCard label={`بانتظار الاعتماد (${pendingCount})`} value={formatMoney(pendingCommitted, currency)} tone="warning" />
+        <MetricCard label={t("dashboard.procurement.activeExecuted")} value={formatMoney(approvedCommitted, currency, locale)} tone="success" />
+        <MetricCard label={t("dashboard.procurement.pendingApprovalCount", { count: pendingCount })} value={formatMoney(pendingCommitted, currency, locale)} tone="warning" />
       </div>
     </>
   );
@@ -1194,38 +1292,39 @@ function CommercialExecutionCard({
   currency: string;
   laborCost: ProjectLaborCost;
 }) {
+  const { t, locale } = useTranslation();
   return (
     <>
-      <SectionHeader icon={IconClipboard} tier="secondary" title="التنفيذ التجاري" meta="شهادات الدفع وتكلفة العمالة" />
+      <SectionHeader icon={IconClipboard} tier="secondary" title={t("dashboard.commercial.title")} meta={t("dashboard.commercial.subtitle")} />
       <div>
         <div className="mb-2 flex items-center justify-between">
-          <h3 className="text-xs font-semibold text-stone-500">شهادات الدفع (IPC)</h3>
+          <h3 className="text-xs font-semibold text-stone-500">{t("dashboard.commercial.ipcTitle")}</h3>
           <Link to={`/projects/${projectId}/ipc`} className="text-xs font-medium text-primary hover:underline">
-            فتح الشهادات
+            {t("dashboard.commercial.openCertificates")}
           </Link>
         </div>
-        <MetricCard label={`القيمة المصدَّقة (${certifiedCount})`} value={formatMoney(certifiedTotal, currency)} tone="success" />
+        <MetricCard label={t("dashboard.commercial.certifiedValueCount", { count: certifiedCount })} value={formatMoney(certifiedTotal, currency, locale)} tone="success" />
         <div className="mt-3 grid grid-cols-2 gap-3">
-          <MetricCard label="بانتظار التصديق" value={String(awaitingCertification)} tone={awaitingCertification > 0 ? "warning" : "default"} />
-          <MetricCard label="بانتظار الاعتماد" value={String(awaitingApproval)} tone={awaitingApproval > 0 ? "warning" : "default"} />
+          <MetricCard label={t("dashboard.commercial.awaitingCertification")} value={String(awaitingCertification)} tone={awaitingCertification > 0 ? "warning" : "default"} />
+          <MetricCard label={t("dashboard.commercial.awaitingApproval")} value={String(awaitingApproval)} tone={awaitingApproval > 0 ? "warning" : "default"} />
         </div>
       </div>
       <div className="mt-4 border-t border-stone-100 pt-4">
         <div className="mb-2 flex items-center justify-between">
-          <h3 className="text-xs font-semibold text-stone-500">تكلفة العمالة الموزَّعة</h3>
-          {laborCost.allocationCount > 0 && laborCost.posted ? <Badge tone="success">مرحّلة بالكامل</Badge> : null}
+          <h3 className="text-xs font-semibold text-stone-500">{t("dashboard.commercial.laborTitle")}</h3>
+          {laborCost.allocationCount > 0 && laborCost.posted ? <Badge tone="success">{t("dashboard.commercial.fullyPosted")}</Badge> : null}
         </div>
         {laborCost.allocationCount === 0 ? (
-          <p className="text-sm text-stone-400">لا توجد تكلفة عمالة موزعة</p>
+          <p className="text-sm text-stone-400">{t("dashboard.commercial.noLaborCost")}</p>
         ) : (
           <div className="grid grid-cols-2 gap-3">
-            <MetricCard label="إجمالي الموزَّع" value={formatMoney(laborCost.allocatedTotal)} />
-            <MetricCard label="عدد التوزيعات" value={String(laborCost.allocationCount)} />
+            <MetricCard label={t("dashboard.commercial.totalAllocated")} value={formatMoney(laborCost.allocatedTotal, "SAR", locale)} />
+            <MetricCard label={t("dashboard.commercial.allocationCount")} value={String(laborCost.allocationCount)} />
           </div>
         )}
         <div className="mt-3 text-end">
           <Link to="/payroll" className="text-xs font-medium text-primary hover:underline">
-            عرض تفاصيل توزيع الرواتب
+            {t("dashboard.commercial.viewPayrollDetails")}
           </Link>
         </div>
       </div>
@@ -1234,25 +1333,36 @@ function CommercialExecutionCard({
 }
 
 // ── LEVEL 10 — Recent Activity ───────────────────────────────────────────
-const activityVerb: Record<string, string> = {
-  "ipc.certified": "تم تصديق شهادة الدفع",
-  "ipc.approved": "تم اعتماد شهادة الدفع",
-  "ipc.submitted": "تم إرسال شهادة الدفع للاعتماد",
-  "ipc.rejected": "تم رفض شهادة الدفع",
-  "commitment.approved": "تم اعتماد التزام الشراء",
-  "commitment.submitted": "تم إرسال التزام الشراء للاعتماد",
-  "commitment.termsUpdated": "تم تعديل شروط التزام الشراء",
-  "measurement.approved": "تم اعتماد قياس الإنجاز",
-  "measurement.submitted": "تم إرسال قياس الإنجاز للاعتماد",
-  "boq_revision.published": "تم نشر نسخة جدول الكميات",
-};
+// The action codes below (e.g. "ipc.certified") are the canonical
+// audit_events identifiers, not display text — they double as the dot-path
+// suffix under dashboard.activity.verbs.* in every locale dictionary. An
+// action code outside this known set (never emitted today, but not
+// impossible for a future event type) falls back to the raw code rather
+// than a translation lookup, matching the previous `?? e.action` fallback.
+const KNOWN_ACTIVITY_VERBS = new Set([
+  "ipc.certified",
+  "ipc.approved",
+  "ipc.submitted",
+  "ipc.rejected",
+  "commitment.approved",
+  "commitment.submitted",
+  "commitment.termsUpdated",
+  "measurement.approved",
+  "measurement.submitted",
+  "boq_revision.published",
+]);
+
+function activityVerbLabel(t: (key: string) => string, action: string): string {
+  return KNOWN_ACTIVITY_VERBS.has(action) ? t(`dashboard.activity.verbs.${action}`) : action;
+}
 
 function ActivityFeedCard({ events }: { events: ActivityEvent[] }) {
+  const { t, locale } = useTranslation();
   return (
     <Panel tier="tertiary">
-      <SectionHeader icon={IconActivity} tier="tertiary" title="آخر النشاطات" />
+      <SectionHeader icon={IconActivity} tier="tertiary" title={t("dashboard.activity.title")} />
       {events.length === 0 ? (
-        <p className="text-sm text-stone-400">لا توجد نشاطات مسجَّلة لهذا المشروع بعد.</p>
+        <p className="text-sm text-stone-400">{t("dashboard.activity.empty")}</p>
       ) : (
         <ul className="space-y-1">
           {events.map((e, i) => (
@@ -1262,9 +1372,9 @@ function ActivityFeedCard({ events }: { events: ActivityEvent[] }) {
                   <span className="h-1.5 w-1.5 rounded-full bg-primary" />
                   {i < events.length - 1 && <span className="absolute top-2.5 h-6 w-px bg-stone-200" aria-hidden="true" />}
                 </span>
-                {activityVerb[e.action] ?? e.action}
+                {activityVerbLabel(t, e.action)}
               </span>
-              <span className="shrink-0 text-xs text-stone-400">{formatDateTime(e.createdAt)}</span>
+              <span className="shrink-0 text-xs text-stone-400">{formatDateTime(e.createdAt, locale)}</span>
             </li>
           ))}
         </ul>
@@ -1278,28 +1388,29 @@ function ActivityFeedCard({ events }: { events: ActivityEvent[] }) {
 // gated create flow — this never duplicates a Can-wrapped create button
 // itself, it only links to the screen that owns it.
 function QuickActionsCard({ projectId }: { projectId: string }) {
+  const { t } = useTranslation();
   // Document upload has no owner-only gate anywhere in this codebase
   // (create/read are member-open, same posture as Tasks/Daily Logs), so
   // it renders unconditionally — every other action below mirrors an
   // existing owner-only permission from auth/permissions.ts exactly.
-  const gatedActions: { label: string; href: string; permission: Parameters<typeof Can>[0]["permission"] }[] = [
-    { label: "بند جدول كميات", href: "boq", permission: "boq.manage" },
-    { label: "التزام شراء", href: "procurement", permission: "commitment.manage" },
-    { label: "مصروف", href: "actual-cost", permission: "budget.manage" },
-    { label: "شهادة دفع", href: "ipc", permission: "ipc.manage" },
+  const gatedActions: { labelKey: string; href: string; permission: Parameters<typeof Can>[0]["permission"] }[] = [
+    { labelKey: "boqItem", href: "boq", permission: "boq.manage" },
+    { labelKey: "commitment", href: "procurement", permission: "commitment.manage" },
+    { labelKey: "expense", href: "actual-cost", permission: "budget.manage" },
+    { labelKey: "ipc", href: "ipc", permission: "ipc.manage" },
   ];
   // A bare compact action bar, not a Card — Quick Actions is the lowest-
   // priority section on the page and shouldn't carry the same card
   // treatment as an executive zone. Just a top divider + a row of buttons.
   return (
     <div className="flex flex-wrap items-center gap-2 border-t border-stone-200 pt-4">
-      <span className="text-xs font-semibold text-stone-400">إجراءات سريعة</span>
+      <span className="text-xs font-semibold text-stone-400">{t("dashboard.quickActions.title")}</span>
       {gatedActions.map((a) => (
         <Can key={a.href} permission={a.permission}>
           <Link to={`/projects/${projectId}/${a.href}`}>
             <Button variant="secondary" size="sm" className="flex items-center gap-1.5">
               <IconPlus width={14} height={14} />
-              {a.label}
+              {t(`dashboard.quickActions.${a.labelKey}`)}
             </Button>
           </Link>
         </Can>
@@ -1307,7 +1418,7 @@ function QuickActionsCard({ projectId }: { projectId: string }) {
       <Link to={`/projects/${projectId}/documents`}>
         <Button variant="secondary" size="sm" className="flex items-center gap-1.5">
           <IconPlus width={14} height={14} />
-          رفع مستند
+          {t("dashboard.quickActions.uploadDocument")}
         </Button>
       </Link>
     </div>
@@ -1317,12 +1428,8 @@ function QuickActionsCard({ projectId }: { projectId: string }) {
 // ── BOQ revision status — folded into the Financial Control panel's
 // footnote (see FinancialWaterfallCard) instead of its own zone, since
 // it's a "what was agreed" fact in the same family as Contract/Budget.
-// Labels/tones kept as their own constants, unchanged.
-const boqRevisionStatusLabel: Record<BoqRevision["status"], string> = {
-  draft: "مسودة",
-  published: "منشورة",
-  superseded: "مُستبدَلة",
-};
+// Tone kept as its own constant, unchanged; the label itself now comes
+// from dashboard.financial.boqRevisionStatus.* (see translations/*.ts).
 const boqRevisionStatusTone: Record<BoqRevision["status"], "neutral" | "success" | "warning"> = {
   draft: "warning",
   published: "success",

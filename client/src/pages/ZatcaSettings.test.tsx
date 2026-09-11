@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { AuthProvider } from "../auth/AuthContext";
+import { I18nProvider } from "../i18n/I18nProvider";
 import { ZatcaSettings } from "./ZatcaSettings";
 import type { ZatcaConfig, ZatcaEgsUnit, ZatcaOnboardingStatusSummary } from "../api/types";
 
@@ -89,11 +90,13 @@ function mockApi(opts: MockOptions = {}) {
 
 function renderPage() {
   return render(
+    <I18nProvider>
     <MemoryRouter>
       <AuthProvider>
         <ZatcaSettings />
       </AuthProvider>
-    </MemoryRouter>,
+    </MemoryRouter>
+    </I18nProvider>,
   );
 }
 

@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { AuthProvider } from "../../auth/AuthContext";
+import { I18nProvider } from "../../i18n/I18nProvider";
 import { OverviewSection } from "./OverviewSection";
 import type {
   ActivityEvent,
@@ -449,11 +450,13 @@ function mockApi(
 
 function renderSection() {
   return render(
-    <MemoryRouter>
-      <AuthProvider>
-        <OverviewSection />
-      </AuthProvider>
-    </MemoryRouter>,
+    <I18nProvider>
+      <MemoryRouter>
+        <AuthProvider>
+          <OverviewSection />
+        </AuthProvider>
+      </MemoryRouter>
+    </I18nProvider>,
   );
 }
 
@@ -599,7 +602,11 @@ describe("<OverviewSection/> (Executive Command Center)", () => {
       measurements: [fixtureMeasurementSubmitted],
     });
     renderSection();
-    await waitFor(() => expect(screen.getByText("استهلاك الميزانية وصل إلى 105%")).toBeInTheDocument());
+    // The top-priority item legitimately appears twice by design: once as
+    // the Identity strip's inline "Executive Verdict" highlight, and once
+    // in the full Needs Attention list below — both read the same real
+    // AttentionItem, not two different figures.
+    await waitFor(() => expect(screen.getAllByText("استهلاك الميزانية وصل إلى 105%").length).toBeGreaterThanOrEqual(2));
     expect(screen.getByText(/مهمة متأخرة عن الجدول الزمني/)).toBeInTheDocument();
     expect(screen.getByText(/ملاحظة حرجة مفتوحة/)).toBeInTheDocument();
     expect(screen.getByText(/شهادة دفع \(IPC\) بانتظار التصديق/)).toBeInTheDocument();

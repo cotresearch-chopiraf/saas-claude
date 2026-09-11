@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { AuthProvider } from "../auth/AuthContext";
+import { I18nProvider } from "../i18n/I18nProvider";
 import { Suppliers } from "./Suppliers";
 import type { Supplier } from "../api/types";
 
@@ -45,11 +46,13 @@ function mockApi(role: "owner" | "member", suppliers: Supplier[]) {
 
 function renderSuppliers() {
   return render(
+    <I18nProvider>
     <MemoryRouter>
       <AuthProvider>
         <Suppliers />
       </AuthProvider>
-    </MemoryRouter>,
+    </MemoryRouter>
+    </I18nProvider>,
   );
 }
 

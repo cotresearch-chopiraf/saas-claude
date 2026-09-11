@@ -14,7 +14,9 @@
 export interface ProjectSection {
   key: string;
   path: string;
-  label: string;
+  // Dot-path suffix under the i18n `project.sections.*` / `project.groups.*`
+  // trees (see client/src/i18n/translations/*.ts) — not display text itself,
+  // so the sidebar always renders in the user's current language.
   group: string;
   // Reserved for a later phase to gate a section on a permission (e.g. an
   // owner-only section) — unused by any section today, since every
@@ -33,32 +35,33 @@ export interface ProjectSection {
 // instruments). This is a label/grouping change ONLY — every key, path,
 // and the section list itself is otherwise unchanged; no route, no
 // permission, no financial calculation is touched.
-export const projectSectionGroups = ["نظرة عامة", "التجاري", "ضبط التكلفة", "التنفيذ", "المستندات التجارية"] as const;
+export const projectSectionGroups = ["overview", "commercial", "costControl", "execution", "commercialDocuments"] as const;
 
 export const projectSections: ProjectSection[] = [
-  { key: "overview", path: "overview", label: "نظرة عامة", group: "نظرة عامة" },
-  { key: "contract", path: "contract", label: "العقد", group: "التجاري" },
-  { key: "boq", path: "boq", label: "جدول الكميات", group: "التجاري" },
-  { key: "cost-plan", path: "cost-plan", label: "خطة التكلفة", group: "التجاري" },
-  { key: "actual-cost", path: "actual-cost", label: "التكلفة الفعلية", group: "ضبط التكلفة" },
-  { key: "procurement", path: "procurement", label: "المشتريات والالتزامات", group: "ضبط التكلفة" },
-  { key: "forecast", path: "forecast", label: "التوقعات المالية", group: "ضبط التكلفة" },
-  { key: "cash-flow", path: "cash-flow", label: "التدفق النقدي", group: "ضبط التكلفة" },
-  { key: "progress", path: "progress", label: "القياسات", group: "التنفيذ" },
+  { key: "overview", path: "overview", group: "overview" },
+  { key: "contract", path: "contract", group: "commercial" },
+  { key: "boq", path: "boq", group: "commercial" },
+  { key: "cost-plan", path: "cost-plan", group: "commercial" },
+  { key: "actual-cost", path: "actual-cost", group: "costControl" },
+  { key: "procurement", path: "procurement", group: "costControl" },
+  { key: "forecast", path: "forecast", group: "costControl" },
+  { key: "cash-flow", path: "cash-flow", group: "costControl" },
+  { key: "progress", path: "progress", group: "execution" },
   // MIDAD Phase C1 — Gantt Scheduling Foundation. Deliberately not
   // conflated with "progress" above (Measurement/IPC physical-quantity
   // progress is a different concept from schedule task progress) — the two
   // stay separate section entries, simply grouped together visually under
-  // "التنفيذ" since both are field/execution concerns a PM checks together.
-  { key: "schedule", path: "schedule", label: "الجدول الزمني", group: "التنفيذ" },
-  { key: "operations", path: "operations", label: "المهام والسجل اليومي", group: "التنفيذ" },
+  // "execution" since both are field/execution concerns a PM checks
+  // together.
+  { key: "schedule", path: "schedule", group: "execution" },
+  { key: "operations", path: "operations", group: "execution" },
   // MIDAD Phase C2 — Punch Lists / Site Deficiencies. Alongside operations/
   // schedule — a punch item is site observation/deficiency tracking, the
   // same field-execution class.
-  { key: "punch-list", path: "punch-list", label: "قائمة الملاحظات", group: "التنفيذ" },
-  { key: "ipc", path: "ipc", label: "شهادات الدفع (IPC)", group: "المستندات التجارية" },
-  { key: "invoices", path: "invoices", label: "الفواتير", group: "المستندات التجارية" },
-  { key: "documents", path: "documents", label: "المستندات", group: "المستندات التجارية" },
+  { key: "punch-list", path: "punch-list", group: "execution" },
+  { key: "ipc", path: "ipc", group: "commercialDocuments" },
+  { key: "invoices", path: "invoices", group: "commercialDocuments" },
+  { key: "documents", path: "documents", group: "commercialDocuments" },
 ];
 
 // Deliberately outside projectSections/projectSectionGroups: this is the
@@ -67,4 +70,5 @@ export const projectSections: ProjectSection[] = [
 // is lost — but visually separated in the sidebar (see ProjectSidebar.tsx)
 // and never presented as the canonical Cost Plan, so it can never be
 // mistaken for the "cost-plan" placeholder above once that becomes real.
-export const legacySection = { key: "legacy-budget", path: "legacy-budget", label: "الميزانية والمصروفات (النموذج السابق)" };
+// `labelKey` is looked up under `project.legacyBudget` in the i18n dict.
+export const legacySection = { key: "legacy-budget", path: "legacy-budget", labelKey: "legacyBudget" };

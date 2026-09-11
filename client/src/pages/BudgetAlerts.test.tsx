@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { AuthProvider } from "../auth/AuthContext";
+import { I18nProvider } from "../i18n/I18nProvider";
 import { BudgetAlerts } from "./BudgetAlerts";
 import type { BudgetAlert, Project } from "../api/types";
 
@@ -91,11 +92,13 @@ function mockApi(overrides: { alerts?: BudgetAlert[]; role?: "owner" | "member" 
 
 function renderPage() {
   return render(
+    <I18nProvider>
     <MemoryRouter>
       <AuthProvider>
         <BudgetAlerts />
       </AuthProvider>
-    </MemoryRouter>,
+    </MemoryRouter>
+    </I18nProvider>,
   );
 }
 

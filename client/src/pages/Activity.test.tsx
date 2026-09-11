@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { AuthProvider } from "../auth/AuthContext";
+import { I18nProvider } from "../i18n/I18nProvider";
 import { Activity } from "./Activity";
 import type { ActivityEvent, ActivityPage } from "../api/types";
 
@@ -64,11 +65,13 @@ function mockApi(page: ActivityPage | ApiError) {
 
 function renderActivity() {
   return render(
+    <I18nProvider>
     <MemoryRouter>
       <AuthProvider>
         <Activity />
       </AuthProvider>
-    </MemoryRouter>,
+    </MemoryRouter>
+    </I18nProvider>,
   );
 }
 
@@ -159,8 +162,13 @@ describe("<Activity/>", () => {
 
   it("renders inside the RTL layout shared by every other page", async () => {
     mockApi({ events: [newerEvent], limit: 20, offset: 0, hasMore: false });
-    const { container } = renderActivity();
+    renderActivity();
     await waitFor(() => expect(screen.getByText("customer.created")).toBeInTheDocument());
-    expect(container.querySelector('[dir="rtl"]')).toBeTruthy();
+    // RTL is now applied once at the document root by I18nProvider (see
+    // client/src/i18n/I18nProvider.tsx), synced from the current locale —
+    // not hardcoded dir="rtl" on each page's own wrapper — so the default
+    // Arabic locale is asserted at document.documentElement instead of a
+    // descendant selector inside this page's own render container.
+    expect(document.documentElement.dir).toBe("rtl");
   });
 });

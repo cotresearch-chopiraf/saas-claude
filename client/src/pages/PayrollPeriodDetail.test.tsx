@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { AuthProvider } from "../auth/AuthContext";
+import { I18nProvider } from "../i18n/I18nProvider";
 import { PayrollPeriodDetail } from "./PayrollPeriodDetail";
 import type { Employee, LaborAllocation, LaborCostPosting, PayrollPeriodWithRecords, PayrollRecord } from "../api/types";
 
@@ -130,13 +131,15 @@ function mockApi(
 
 function renderDetail() {
   return render(
+    <I18nProvider>
     <MemoryRouter initialEntries={["/payroll/period-1"]}>
       <AuthProvider>
         <Routes>
           <Route path="/payroll/:id" element={<PayrollPeriodDetail />} />
         </Routes>
       </AuthProvider>
-    </MemoryRouter>,
+    </MemoryRouter>
+    </I18nProvider>,
   );
 }
 

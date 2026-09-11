@@ -3,6 +3,8 @@ import { NavLink, Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { NotificationBell } from "./NotificationBell";
 import { Modal } from "../ui/Modal";
+import { useTranslation } from "../i18n/I18nProvider";
+import { LanguageSwitcher } from "../i18n/LanguageSwitcher";
 
 // MIDAD Phase F — global App Shell, redesigned from a single flat
 // horizontal nav (13 links with equal visual weight, in the order features
@@ -15,10 +17,10 @@ import { Modal } from "../ui/Modal";
 
 interface NavItem {
   to: string;
-  label: string;
+  itemKey: string;
 }
 interface NavGroup {
-  label: string;
+  groupKey: string;
   icon: (props: SVGProps<SVGSVGElement>) => JSX.Element;
   items: NavItem[];
 }
@@ -80,48 +82,48 @@ function IconAdmin(props: SVGProps<SVGSVGElement>) {
 }
 
 const navGroups: NavGroup[] = [
-  { label: "نظرة عامة", icon: IconOverview, items: [{ to: "/", label: "المشاريع" }] },
+  { groupKey: "overview", icon: IconOverview, items: [{ to: "/", itemKey: "projects" }] },
   {
-    label: "تجاري",
+    groupKey: "commercial",
     icon: IconCommercial,
     items: [
-      { to: "/quotes", label: "عروض الأسعار" },
-      { to: "/invoices", label: "الفواتير" },
+      { to: "/quotes", itemKey: "quotes" },
+      { to: "/invoices", itemKey: "invoices" },
     ],
   },
   {
-    label: "القوى العاملة",
+    groupKey: "workforce",
     icon: IconWorkforce,
     items: [
-      { to: "/employees", label: "الموظفون" },
-      { to: "/payroll", label: "الرواتب" },
+      { to: "/employees", itemKey: "employees" },
+      { to: "/payroll", itemKey: "payroll" },
     ],
   },
   {
-    label: "الامتثال",
+    groupKey: "compliance",
     icon: IconCompliance,
     items: [
-      { to: "/labor-compliance", label: "نطاقات و GOSI" },
-      { to: "/compliance", label: "الامتثال الضريبي" },
-      { to: "/zatca", label: "الفوترة الإلكترونية (ZATCA)" },
+      { to: "/labor-compliance", itemKey: "laborCompliance" },
+      { to: "/compliance", itemKey: "taxCompliance" },
+      { to: "/zatca", itemKey: "zatca" },
     ],
   },
   {
-    label: "الرؤى",
+    groupKey: "insights",
     icon: IconInsights,
     items: [
-      { to: "/budget-alerts", label: "تنبيهات الميزانية" },
-      { to: "/activity", label: "سجل النشاط" },
+      { to: "/budget-alerts", itemKey: "budgetAlerts" },
+      { to: "/activity", itemKey: "activityLog" },
     ],
   },
   {
-    label: "الإدارة",
+    groupKey: "admin",
     icon: IconAdmin,
     items: [
-      { to: "/customers", label: "العملاء" },
-      { to: "/suppliers", label: "الموردون" },
-      { to: "/team", label: "الفريق" },
-      { to: "/settings", label: "الإعدادات" },
+      { to: "/customers", itemKey: "customers" },
+      { to: "/suppliers", itemKey: "suppliers" },
+      { to: "/team", itemKey: "team" },
+      { to: "/settings", itemKey: "settings" },
     ],
   },
 ];
@@ -132,28 +134,32 @@ function linkClass(isActive: boolean, collapsed: boolean) {
 }
 
 function SidebarNav({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: () => void }) {
+  const { t } = useTranslation();
   return (
     <nav className="space-y-4">
       {navGroups.map((group) => (
-        <div key={group.label}>
-          {!collapsed && <p className="px-3 text-xs font-semibold uppercase tracking-wide text-stone-400">{group.label}</p>}
+        <div key={group.groupKey}>
+          {!collapsed && (
+            <p className="px-3 text-xs font-semibold uppercase tracking-wide text-stone-400">
+              {t(`nav.groups.${group.groupKey}`)}
+            </p>
+          )}
           <div className={collapsed ? "mt-1 space-y-1" : "mt-1 space-y-0.5"}>
-            {group.items.map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.to === "/"}
-                onClick={onNavigate}
-                title={collapsed ? item.label : undefined}
-                className={({ isActive }) => linkClass(isActive, collapsed)}
-              >
-                {collapsed ? (
-                  <group.icon />
-                ) : (
-                  item.label
-                )}
-              </NavLink>
-            ))}
+            {group.items.map((item) => {
+              const label = t(`nav.items.${item.itemKey}`);
+              return (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  end={item.to === "/"}
+                  onClick={onNavigate}
+                  title={collapsed ? label : undefined}
+                  className={({ isActive }) => linkClass(isActive, collapsed)}
+                >
+                  {collapsed ? <group.icon /> : label}
+                </NavLink>
+              );
+            })}
           </div>
         </div>
       ))}
@@ -169,6 +175,7 @@ function SidebarNav({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?
 // width.
 export function Layout({ children, fullWidth = false }: { children: ReactNode; fullWidth?: boolean }) {
   const { user, company, logout } = useAuth();
+  const { t, direction } = useTranslation();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -185,7 +192,7 @@ export function Layout({ children, fullWidth = false }: { children: ReactNode; f
   // therefore always rendered; only ITS CONTENTS are conditioned on
   // `user`, never whether `children` itself is nested inside it.
   return (
-    <div className="min-h-screen bg-stone-50" dir="rtl">
+    <div className="min-h-screen bg-stone-50">
       <div className="flex">
         {user && (
           <aside
@@ -202,11 +209,11 @@ export function Layout({ children, fullWidth = false }: { children: ReactNode; f
               <button
                 type="button"
                 onClick={() => setCollapsed((v) => !v)}
-                aria-label={collapsed ? "توسيع القائمة الجانبية" : "طي القائمة الجانبية"}
-                title={collapsed ? "توسيع القائمة" : "طي القائمة"}
+                aria-label={collapsed ? t("nav.expandMenu") : t("nav.collapseMenu")}
+                title={collapsed ? t("nav.expandMenuShort") : t("nav.collapseMenuShort")}
                 className="rounded-md p-1.5 text-stone-400 hover:bg-stone-100 hover:text-stone-600"
               >
-                <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true" style={{ transform: direction === "ltr" ? "scaleX(-1)" : undefined }}>
                   <path d={collapsed ? "M7 5l5 5-5 5" : "M13 5l-5 5 5 5"} stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
               </button>
@@ -223,7 +230,7 @@ export function Layout({ children, fullWidth = false }: { children: ReactNode; f
                   <button
                     type="button"
                     onClick={() => setMobileOpen(true)}
-                    aria-label="فتح قائمة التنقل"
+                    aria-label={t("nav.openNavMenu")}
                     className="rounded-md border border-stone-300 p-2 text-stone-600"
                   >
                     <svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden="true">
@@ -236,10 +243,11 @@ export function Layout({ children, fullWidth = false }: { children: ReactNode; f
                 </div>
                 <div className="hidden md:block" />
                 <div className="flex items-center gap-4 text-sm text-stone-600">
+                  <LanguageSwitcher />
                   <NotificationBell />
                   <span className="hidden sm:inline">{user.name}</span>
                   <button onClick={logout} className="text-stone-400 hover:text-stone-700">
-                    تسجيل الخروج
+                    {t("nav.logout")}
                   </button>
                 </div>
               </div>
@@ -250,7 +258,7 @@ export function Layout({ children, fullWidth = false }: { children: ReactNode; f
       </div>
 
       {user && (
-        <Modal open={mobileOpen} onClose={() => setMobileOpen(false)} align="end" className="w-72 max-w-[85vw]" title="التنقل">
+        <Modal open={mobileOpen} onClose={() => setMobileOpen(false)} align="end" className="w-72 max-w-[85vw]" title={t("nav.navigationTitle")}>
           <SidebarNav collapsed={false} onNavigate={() => setMobileOpen(false)} />
         </Modal>
       )}

@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "../auth/AuthContext";
+import { I18nProvider } from "../i18n/I18nProvider";
 import { CustomerDetail } from "./CustomerDetail";
 import type { CustomerWithProjects } from "../api/types";
 
@@ -51,13 +52,15 @@ function mockApi(customer: CustomerWithProjects) {
 
 function renderDetail(id: string) {
   return render(
+    <I18nProvider>
     <MemoryRouter initialEntries={[`/customers/${id}`]}>
       <AuthProvider>
         <Routes>
           <Route path="/customers/:id" element={<CustomerDetail />} />
         </Routes>
       </AuthProvider>
-    </MemoryRouter>,
+    </MemoryRouter>
+    </I18nProvider>,
   );
 }
 
