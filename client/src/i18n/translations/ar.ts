@@ -1016,6 +1016,24 @@ const ar = {
   languageSwitcher: {
     label: "اللغة",
   },
+  customerDetail: {
+    loadError: "تعذّر تحميل بيانات العميل",
+    backToCustomers: "العودة إلى العملاء",
+    status: {
+      active: "نشط",
+      inactive: "غير نشط",
+    },
+    fields: {
+      taxId: "الرقم الضريبي",
+      email: "البريد الإلكتروني",
+      phone: "الهاتف",
+      address: "العنوان",
+      addedDate: "تاريخ الإضافة",
+    },
+    notes: "ملاحظات",
+    relatedProjects: "المشاريع المرتبطة",
+    noProjects: "لا توجد مشاريع مرتبطة بهذا العميل بعد.",
+  },
   dashboard: {
     loadErrorFallback: "تعذّر تحميل نظرة عامة المشروع",
     headerSkeletonTitle: "مركز القيادة التنفيذي",

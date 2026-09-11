@@ -1017,6 +1017,24 @@ const en = {
   languageSwitcher: {
     label: "Language",
   },
+  customerDetail: {
+    loadError: "Couldn't load the customer's data",
+    backToCustomers: "Back to Customers",
+    status: {
+      active: "Active",
+      inactive: "Inactive",
+    },
+    fields: {
+      taxId: "Tax ID",
+      email: "Email",
+      phone: "Phone",
+      address: "Address",
+      addedDate: "Date added",
+    },
+    notes: "Notes",
+    relatedProjects: "Related projects",
+    noProjects: "No projects linked to this customer yet.",
+  },
   dashboard: {
     loadErrorFallback: "Couldn't load the project overview",
     headerSkeletonTitle: "Executive command center",

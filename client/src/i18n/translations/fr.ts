@@ -1017,6 +1017,24 @@ const fr = {
   languageSwitcher: {
     label: "Langue",
   },
+  customerDetail: {
+    loadError: "Impossible de charger les données du client",
+    backToCustomers: "Retour aux clients",
+    status: {
+      active: "Actif",
+      inactive: "Inactif",
+    },
+    fields: {
+      taxId: "Numéro fiscal",
+      email: "E-mail",
+      phone: "Téléphone",
+      address: "Adresse",
+      addedDate: "Date d'ajout",
+    },
+    notes: "Notes",
+    relatedProjects: "Projets associés",
+    noProjects: "Aucun projet associé à ce client pour l'instant.",
+  },
   dashboard: {
     loadErrorFallback: "Impossible de charger l'aperçu du projet",
     headerSkeletonTitle: "Centre de pilotage exécutif",
