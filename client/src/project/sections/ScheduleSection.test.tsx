@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
 import { AuthProvider } from "../../auth/AuthContext";
+import { I18nProvider } from "../../i18n/I18nProvider";
 import { ScheduleSection } from "./ScheduleSection";
 import type { ProjectSchedule, ProjectTask, ProjectTaskDependency } from "../../api/types";
 
@@ -60,9 +61,11 @@ function mockAuthAndApi(role: "owner" | "member", scheduleHandler: (path: string
 
 function renderSection() {
   return render(
-    <AuthProvider>
-      <ScheduleSection />
-    </AuthProvider>,
+    <I18nProvider>
+      <AuthProvider>
+        <ScheduleSection />
+      </AuthProvider>
+    </I18nProvider>,
   );
 }
 

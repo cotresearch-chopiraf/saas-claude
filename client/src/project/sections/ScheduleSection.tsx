@@ -20,6 +20,7 @@ import {
 } from "../../api/projectSchedule";
 import type { ProjectSchedule, ProjectTask, ProjectTaskDependency, ProjectTaskStatus, ProjectTaskType } from "../../api/types";
 import { useProjectContext } from "../context";
+import { useTranslation } from "../../i18n/I18nProvider";
 import {
   buildScheduleRows,
   computeTimelineRange,
@@ -38,21 +39,15 @@ import {
 // on this screen — task.progressPercent is scheduling data only, never
 // derived from and never feeding budget/actual-cost/IPC.
 
-const statusLabel: Record<ProjectTaskStatus, string> = {
-  not_started: "لم تبدأ",
-  in_progress: "قيد التنفيذ",
-  completed: "مكتملة",
-  on_hold: "متوقفة",
-};
 const statusTone: Record<ProjectTaskStatus, "neutral" | "info" | "success" | "warning"> = {
   not_started: "neutral",
   in_progress: "info",
   completed: "success",
   on_hold: "warning",
 };
-const zoomLabel: Record<ZoomLevel, string> = { day: "يوم", week: "أسبوع", month: "شهر" };
 
 export function ScheduleSection() {
+  const { t } = useTranslation();
   const { projectId } = useProjectContext();
   const [schedule, setSchedule] = useState<ProjectSchedule | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -69,7 +64,7 @@ export function ScheduleSection() {
     setSchedule(null);
     getProjectSchedule(projectId)
       .then(setSchedule)
-      .catch((err) => setError(err instanceof ApiError ? err.message : "تعذّر تحميل الجدول الزمني"));
+      .catch((err) => setError(err instanceof ApiError ? err.message : t("schedule.loadError")));
   }
   useEffect(load, [projectId]);
 
@@ -100,7 +95,7 @@ export function ScheduleSection() {
   if (error) {
     return (
       <div className="space-y-6">
-        <PageHeader title="الجدول الزمني" />
+        <PageHeader title={t("schedule.title")} />
         <ErrorState message={error} onRetry={load} />
       </div>
     );
@@ -108,7 +103,7 @@ export function ScheduleSection() {
   if (schedule === null) {
     return (
       <div className="space-y-6">
-        <PageHeader title="الجدول الزمني" />
+        <PageHeader title={t("schedule.title")} />
         <Skeleton rows={5} />
       </div>
     );
@@ -117,7 +112,7 @@ export function ScheduleSection() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="الجدول الزمني"
+        title={t("schedule.title")}
         actions={
           <Button
             size="sm"
@@ -126,7 +121,7 @@ export function ScheduleSection() {
               setShowCreate((v) => !v);
             }}
           >
-            {showCreate ? "إلغاء" : "+ مهمة جديدة"}
+            {showCreate ? t("common.cancel") : t("schedule.newTask")}
           </Button>
         }
       />
@@ -149,12 +144,12 @@ export function ScheduleSection() {
       )}
 
       {schedule.tasks.length === 0 ? (
-        <EmptyState message="لا توجد مهام أو معالم في الجدول الزمني بعد" />
+        <EmptyState message={t("schedule.emptyMessage")} />
       ) : (
         <>
           <div className="flex flex-wrap items-center gap-3">
             <input
-              placeholder="بحث بالاسم"
+              placeholder={t("schedule.searchPlaceholder")}
               value={nameFilter}
               onChange={(e) => setNameFilter(e.target.value)}
               className="rounded-md border border-stone-300 px-3 py-1.5 text-sm"
@@ -164,10 +159,10 @@ export function ScheduleSection() {
               onChange={(e) => setStatusFilter(e.target.value as ProjectTaskStatus | "all")}
               className="rounded-md border border-stone-300 px-3 py-1.5 text-sm"
             >
-              <option value="all">كل الحالات</option>
-              {(Object.keys(statusLabel) as ProjectTaskStatus[]).map((value) => (
+              <option value="all">{t("schedule.allStatuses")}</option>
+              {(["not_started", "in_progress", "completed", "on_hold"] as ProjectTaskStatus[]).map((value) => (
                 <option key={value} value={value}>
-                  {statusLabel[value]}
+                  {t(`schedule.status.${value}`)}
                 </option>
               ))}
             </select>
@@ -179,14 +174,14 @@ export function ScheduleSection() {
                   onClick={() => setZoom(z)}
                   className={`rounded px-2 py-1 text-xs ${zoom === z ? "bg-primary text-white" : "text-stone-600 hover:bg-stone-100"}`}
                 >
-                  {zoomLabel[z]}
+                  {t(`schedule.zoom.${z}`)}
                 </button>
               ))}
             </div>
           </div>
 
           {filteredRows.length === 0 ? (
-            <EmptyState message="لا توجد مهام مطابقة لعوامل التصفية الحالية" />
+            <EmptyState message={t("schedule.noFilterResults")} />
           ) : (
             <Card className="overflow-hidden p-0">
               <GanttChart
@@ -213,16 +208,16 @@ export function ScheduleSection() {
 
       <ConfirmDialog
         open={pendingDeleteTask !== null}
-        title="حذف المهمة"
-        message={`هل تريد حذف "${pendingDeleteTask?.name ?? ""}"؟ سيتم حذف أي روابط مرتبطة بها. لا يمكن التراجع عن هذا الإجراء.`}
+        title={t("schedule.deleteTaskConfirm.title")}
+        message={t("schedule.deleteTaskConfirm.message", { name: pendingDeleteTask?.name ?? "" })}
         destructive
         onConfirm={confirmDeleteTask}
         onCancel={() => setPendingDeleteTask(null)}
       />
       <ConfirmDialog
         open={pendingDeleteDependency !== null}
-        title="حذف الربط"
-        message="هل تريد حذف هذا الربط بين المهمتين؟ لن يؤثر ذلك على المهمتين أنفسهما."
+        title={t("schedule.deleteDependencyConfirm.title")}
+        message={t("schedule.deleteDependencyConfirm.message")}
         destructive
         onConfirm={confirmDeleteDependency}
         onCancel={() => setPendingDeleteDependency(null)}
@@ -249,6 +244,7 @@ function GanttChart({
   onEdit: (task: ProjectTask) => void;
   onDelete: (task: ProjectTask) => void;
 }) {
+  const { t } = useTranslation();
   const range = useMemo(() => computeTimelineRange(rows.map((r) => r.task)), [rows]);
   const monthMarkers = useMemo(() => computeMonthMarkers(range), [range]);
   const pxPerDay = ZOOM_PX_PER_DAY[zoom];
@@ -263,7 +259,7 @@ function GanttChart({
           ProjectSidebar.tsx's own comment documents. */}
       <div className="w-64 shrink-0 border-e border-stone-200">
         <div className="flex items-center border-b border-stone-200 bg-stone-50 px-3 text-xs font-semibold text-stone-500" style={{ height: HEADER_HEIGHT }}>
-          المهمة
+          {t("schedule.gantt.taskColumnHeader")}
         </div>
         {rows.map((row) => (
           <div
@@ -277,14 +273,14 @@ function GanttChart({
                 {row.task.taskType === "milestone" && <span className="me-1 text-amber-500">◆</span>}
                 {row.task.name}
               </p>
-              <Badge tone={statusTone[row.task.status]}>{statusLabel[row.task.status]}</Badge>
+              <Badge tone={statusTone[row.task.status]}>{t(`schedule.status.${row.task.status}`)}</Badge>
             </div>
             <div className="flex shrink-0 items-center gap-2">
               <button type="button" onClick={() => onEdit(row.task)} className="text-xs text-primary hover:underline">
-                تعديل
+                {t("schedule.gantt.edit")}
               </button>
               <Can permission="projectTask.delete">
-                <button type="button" onClick={() => onDelete(row.task)} className="text-stone-300 hover:text-danger-600" aria-label="حذف">
+                <button type="button" onClick={() => onDelete(row.task)} className="text-stone-300 hover:text-danger-600" aria-label={t("schedule.gantt.deleteTask")}>
                   ✕
                 </button>
               </Can>
@@ -319,7 +315,7 @@ function GanttChart({
               <div
                 className="pointer-events-none absolute top-0 z-10 w-px bg-danger-500"
                 style={{ left: todayOffsetDays * pxPerDay, height: rows.length * ROW_HEIGHT }}
-                title="اليوم"
+                title={t("schedule.gantt.today")}
               />
             )}
             {rows.map((row) => {
@@ -371,6 +367,7 @@ function TaskForm({
   onSaved: () => void;
   onCancel: () => void;
 }) {
+  const { t } = useTranslation();
   const [name, setName] = useState(editingTask?.name ?? "");
   const [taskType, setTaskType] = useState<ProjectTaskType>(editingTask?.taskType ?? "task");
   const [parentTaskId, setParentTaskId] = useState<string>(editingTask?.parentTaskId ?? "");
@@ -416,7 +413,7 @@ function TaskForm({
       }
       onSaved();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر حفظ المهمة");
+      setError(err instanceof ApiError ? err.message : t("schedule.taskForm.genericError"));
     } finally {
       setSubmitting(false);
     }
@@ -432,7 +429,7 @@ function TaskForm({
         )}
         <input
           required
-          placeholder="اسم المهمة"
+          placeholder={t("schedule.taskForm.namePlaceholder")}
           value={name}
           onChange={(e) => setName(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm sm:col-span-2"
@@ -442,8 +439,8 @@ function TaskForm({
           onChange={(e) => onTaskTypeChange(e.target.value as ProjectTaskType)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
         >
-          <option value="task">مهمة</option>
-          <option value="milestone">معلم</option>
+          <option value="task">{t("schedule.taskForm.typeTask")}</option>
+          <option value="milestone">{t("schedule.taskForm.typeMilestone")}</option>
         </select>
 
         <select
@@ -451,15 +448,15 @@ function TaskForm({
           onChange={(e) => setParentTaskId(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm sm:col-span-3"
         >
-          <option value="">بدون مهمة أب</option>
-          {parentOptions.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.name}
+          <option value="">{t("schedule.taskForm.noParentTask")}</option>
+          {parentOptions.map((opt) => (
+            <option key={opt.id} value={opt.id}>
+              {opt.name}
             </option>
           ))}
         </select>
 
-        <label className="text-xs text-stone-500 sm:col-span-3 sm:-mb-2">تاريخ البداية</label>
+        <label className="text-xs text-stone-500 sm:col-span-3 sm:-mb-2">{t("schedule.taskForm.startDateLabel")}</label>
         <input
           required
           type="date"
@@ -469,7 +466,7 @@ function TaskForm({
         />
         {taskType === "task" && (
           <>
-            <label className="text-xs text-stone-500 sm:col-span-3 sm:-mb-2">تاريخ النهاية</label>
+            <label className="text-xs text-stone-500 sm:col-span-3 sm:-mb-2">{t("schedule.taskForm.endDateLabel")}</label>
             <input
               required
               type="date"
@@ -484,7 +481,7 @@ function TaskForm({
           type="number"
           min="0"
           max="100"
-          placeholder="نسبة الإنجاز %"
+          placeholder={t("schedule.taskForm.progressPlaceholder")}
           value={progressPercent}
           onChange={(e) => setProgressPercent(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
@@ -494,19 +491,19 @@ function TaskForm({
           onChange={(e) => setStatus(e.target.value as ProjectTaskStatus)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
         >
-          {(Object.keys(statusLabel) as ProjectTaskStatus[]).map((value) => (
+          {(["not_started", "in_progress", "completed", "on_hold"] as ProjectTaskStatus[]).map((value) => (
             <option key={value} value={value}>
-              {statusLabel[value]}
+              {t(`schedule.status.${value}`)}
             </option>
           ))}
         </select>
 
         <div className="flex items-center gap-2 sm:col-span-3">
           <Button type="submit" size="sm" disabled={submitting}>
-            {submitting ? "جارٍ الحفظ..." : editingTask ? "حفظ التعديلات" : "حفظ المهمة"}
+            {submitting ? t("schedule.taskForm.saving") : editingTask ? t("schedule.taskForm.saveEdits") : t("schedule.taskForm.saveNew")}
           </Button>
           <Button type="button" variant="secondary" size="sm" onClick={onCancel}>
-            إلغاء
+            {t("common.cancel")}
           </Button>
         </div>
       </form>
@@ -527,11 +524,12 @@ function DependenciesPanel({
   onChanged: () => void;
   onDeleteRequested: (dependency: ProjectTaskDependency) => void;
 }) {
+  const { t } = useTranslation();
   const [predecessorTaskId, setPredecessorTaskId] = useState("");
   const [successorTaskId, setSuccessorTaskId] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const nameById = useMemo(() => new Map(tasks.map((t) => [t.id, t.name])), [tasks]);
+  const nameById = useMemo(() => new Map(tasks.map((task) => [task.id, task.name])), [tasks]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -544,7 +542,7 @@ function DependenciesPanel({
       setSuccessorTaskId("");
       onChanged();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر إنشاء الربط");
+      setError(err instanceof ApiError ? err.message : t("schedule.dependencies.genericError"));
     } finally {
       setSubmitting(false);
     }
@@ -552,8 +550,8 @@ function DependenciesPanel({
 
   return (
     <Card className="p-5">
-      <h2 className="mb-1 font-semibold text-stone-800">الروابط بين المهام</h2>
-      <p className="mb-3 text-xs text-stone-500">المهمة التالية تبدأ بعد انتهاء المهمة السابقة.</p>
+      <h2 className="mb-1 font-semibold text-stone-800">{t("schedule.dependencies.heading")}</h2>
+      <p className="mb-3 text-xs text-stone-500">{t("schedule.dependencies.subtitle")}</p>
 
       {error && (
         <div className="mb-3">
@@ -562,7 +560,7 @@ function DependenciesPanel({
       )}
 
       {dependencies.length === 0 ? (
-        <EmptyState message="لا توجد روابط بين المهام بعد" />
+        <EmptyState message={t("schedule.dependencies.emptyMessage")} />
       ) : (
         <ul className="mb-4 space-y-1">
           {dependencies.map((dep) => (
@@ -571,7 +569,7 @@ function DependenciesPanel({
                 {nameById.get(dep.predecessorTaskId) ?? "—"} ← {nameById.get(dep.successorTaskId) ?? "—"}
               </span>
               <Can permission="projectTask.delete">
-                <button type="button" onClick={() => onDeleteRequested(dep)} className="text-stone-300 hover:text-danger-600" aria-label="حذف الربط">
+                <button type="button" onClick={() => onDeleteRequested(dep)} className="text-stone-300 hover:text-danger-600" aria-label={t("schedule.dependencies.deleteAriaLabel")}>
                   ✕
                 </button>
               </Can>
@@ -582,24 +580,24 @@ function DependenciesPanel({
 
       <form onSubmit={onSubmit} className="flex flex-wrap items-center gap-2">
         <select value={predecessorTaskId} onChange={(e) => setPredecessorTaskId(e.target.value)} className="rounded-md border border-stone-300 px-3 py-2 text-sm">
-          <option value="">المهمة السابقة</option>
-          {tasks.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.name}
+          <option value="">{t("schedule.dependencies.predecessorPlaceholder")}</option>
+          {tasks.map((task) => (
+            <option key={task.id} value={task.id}>
+              {task.name}
             </option>
           ))}
         </select>
         <span className="text-stone-400">←</span>
         <select value={successorTaskId} onChange={(e) => setSuccessorTaskId(e.target.value)} className="rounded-md border border-stone-300 px-3 py-2 text-sm">
-          <option value="">المهمة التالية</option>
-          {tasks.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.name}
+          <option value="">{t("schedule.dependencies.successorPlaceholder")}</option>
+          {tasks.map((task) => (
+            <option key={task.id} value={task.id}>
+              {task.name}
             </option>
           ))}
         </select>
         <Button type="submit" size="sm" disabled={submitting || !predecessorTaskId || !successorTaskId}>
-          + ربط
+          {t("schedule.dependencies.addLink")}
         </Button>
       </form>
     </Card>
