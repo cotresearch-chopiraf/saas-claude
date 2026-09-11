@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { AuthProvider } from "../../auth/AuthContext";
+import { I18nProvider } from "../../i18n/I18nProvider";
 import { DocumentsSection } from "./DocumentsSection";
 import type { ProjectDocument } from "../../api/types";
 
@@ -69,9 +70,11 @@ function mockApi(documents: ProjectDocument[] = [fixtureDocA]) {
 
 function renderSection() {
   return render(
-    <AuthProvider>
-      <DocumentsSection />
-    </AuthProvider>,
+    <I18nProvider>
+      <AuthProvider>
+        <DocumentsSection />
+      </AuthProvider>
+    </I18nProvider>,
   );
 }
 

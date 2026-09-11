@@ -9,6 +9,7 @@ import { listProjectDocuments, uploadProjectDocument, downloadProjectDocument, s
 import { ApiError } from "../../api/client";
 import type { ProjectDocument } from "../../api/types";
 import { useProjectContext } from "../context";
+import { useTranslation } from "../../i18n/I18nProvider";
 
 // Client-side mirror of server/src/routes/documents.ts's ALLOWED_MIME_TYPES
 // — advisory only, for immediate feedback before a request is even sent.
@@ -36,6 +37,7 @@ const ACCEPT_ATTR = ".pdf,.png,.jpg,.jpeg,.webp,.doc,.docx,.xls,.xlsx";
 // delete (the storage service has no delete capability at all). Nothing
 // here is a financial figure — file size is a byte count, not money.
 export function DocumentsSection() {
+  const { t, locale } = useTranslation();
   const { projectId } = useProjectContext();
   const [documents, setDocuments] = useState<ProjectDocument[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -53,7 +55,7 @@ export function DocumentsSection() {
     setDocuments(null);
     listProjectDocuments(projectId)
       .then(setDocuments)
-      .catch((err) => setError(err instanceof Error ? err.message : "تعذّر تحميل مستندات المشروع"));
+      .catch((err) => setError(err instanceof Error ? err.message : t("documentsPage.loadError")));
   }
   useEffect(load, [projectId]);
 
@@ -67,11 +69,11 @@ export function DocumentsSection() {
       return;
     }
     if (!ALLOWED_MIME_TYPES.has(file.type)) {
-      setValidationError("نوع الملف غير مسموح به. الأنواع المسموحة: PDF، صور (PNG, JPEG, WEBP)، مستندات Word أو Excel");
+      setValidationError(t("documentsPage.invalidType"));
       return;
     }
     if (file.size > MAX_DOCUMENT_SIZE) {
-      setValidationError("حجم الملف يتجاوز الحد الأقصى المسموح به (10 ميجابايت)");
+      setValidationError(t("documentsPage.tooLarge"));
       return;
     }
     setValidationError(null);
@@ -85,12 +87,12 @@ export function DocumentsSection() {
     setUploadError(null);
     try {
       await uploadProjectDocument(projectId, selectedFile);
-      setNotice("تم رفع الملف بنجاح");
+      setNotice(t("documentsPage.uploadSuccess"));
       setSelectedFile(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
       load();
     } catch (err) {
-      setUploadError(err instanceof ApiError ? err.message : "تعذّر رفع الملف");
+      setUploadError(err instanceof ApiError ? err.message : t("documentsPage.uploadError"));
     } finally {
       setUploading(false);
     }
@@ -109,7 +111,7 @@ export function DocumentsSection() {
       const updated = await setDocumentClientVisibility(projectId, doc.id, !doc.clientVisible);
       setDocuments((prev) => prev?.map((d) => (d.id === updated.id ? updated : d)) ?? prev);
     } catch (err) {
-      setVisibilityError(err instanceof ApiError ? err.message : "تعذّر تحديث ظهور المستند للعميل");
+      setVisibilityError(err instanceof ApiError ? err.message : t("documentsPage.visibilityError"));
     } finally {
       setTogglingId(null);
     }
@@ -118,20 +120,20 @@ export function DocumentsSection() {
   const columns: FinancialColumn<ProjectDocument>[] = [
     {
       key: "fileName",
-      header: "اسم الملف",
+      header: t("documentsPage.columns.fileName"),
       render: (d) => (
         <span className="block max-w-xs truncate" title={d.fileName}>
           {d.fileName}
         </span>
       ),
     },
-    { key: "mimeType", header: "النوع", render: (d) => d.mimeType },
-    { key: "size", header: "الحجم", align: "end", render: (d) => formatFileSize(d.size) },
-    { key: "uploadedAt", header: "تاريخ الرفع", render: (d) => formatDate(d.uploadedAt) },
-    { key: "uploadedByName", header: "بواسطة", render: (d) => d.uploadedByName ?? "—" },
+    { key: "mimeType", header: t("documentsPage.columns.type"), render: (d) => d.mimeType },
+    { key: "size", header: t("documentsPage.columns.size"), align: "end", render: (d) => formatFileSize(d.size, locale) },
+    { key: "uploadedAt", header: t("documentsPage.columns.uploadedAt"), render: (d) => formatDate(d.uploadedAt, locale) },
+    { key: "uploadedByName", header: t("documentsPage.columns.uploadedBy"), render: (d) => d.uploadedByName ?? "—" },
     {
       key: "clientVisible",
-      header: "مرئي للعميل",
+      header: t("documentsPage.columns.clientVisible"),
       render: (d) => (
         <label className="flex items-center gap-2">
           <input
@@ -147,13 +149,11 @@ export function DocumentsSection() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="المستندات" subtitle="مرفقات وأدلة هذا المشروع تحديداً." />
+      <PageHeader title={t("documentsPage.title")} subtitle={t("documentsPage.subtitle")} />
 
       <Card className="p-5">
-        <h2 className="mb-3 font-semibold text-stone-800">رفع مستند جديد</h2>
-        <p className="mb-3 text-xs text-stone-500">
-          الأنواع المسموحة: PDF، صور (PNG, JPEG, WEBP)، مستندات Word أو Excel — الحد الأقصى للحجم: 10 ميجابايت
-        </p>
+        <h2 className="mb-3 font-semibold text-stone-800">{t("documentsPage.uploadCard.title")}</h2>
+        <p className="mb-3 text-xs text-stone-500">{t("documentsPage.uploadCard.allowedTypes")}</p>
 
         <div className="flex flex-wrap items-center gap-3">
           <input
@@ -161,16 +161,16 @@ export function DocumentsSection() {
             type="file"
             accept={ACCEPT_ATTR}
             onChange={onFileChange}
-            className="text-sm text-stone-600 file:mr-3 file:rounded-md file:border-0 file:bg-stone-100 file:px-3 file:py-1.5 file:text-sm file:text-stone-700"
+            className="text-sm text-stone-600 file:me-3 file:rounded-md file:border-0 file:bg-stone-100 file:px-3 file:py-1.5 file:text-sm file:text-stone-700"
           />
           <Button size="sm" onClick={onUpload} disabled={!selectedFile || !!validationError || uploading}>
-            {uploading ? "جارٍ الرفع..." : "رفع"}
+            {uploading ? t("documentsPage.uploadCard.uploading") : t("documentsPage.uploadCard.upload")}
           </Button>
         </div>
 
         {selectedFile && !validationError && (
           <p className="mt-2 text-xs text-stone-500">
-            الملف المحدد: {selectedFile.name} ({formatFileSize(selectedFile.size)})
+            {t("documentsPage.uploadCard.selectedFile", { name: selectedFile.name, size: formatFileSize(selectedFile.size, locale) })}
           </p>
         )}
         {validationError && <p className="mt-2 text-xs text-danger-600">{validationError}</p>}
@@ -194,14 +194,14 @@ export function DocumentsSection() {
         rowKey={(d) => d.id}
         error={documents === null ? error : null}
         onRetry={load}
-        emptyMessage="لا توجد مستندات لهذا المشروع بعد"
+        emptyMessage={t("documentsPage.emptyMessage")}
         rowActions={(d) => (
           <button
             type="button"
             onClick={() => downloadProjectDocument(projectId, d.id, d.fileName)}
             className="text-sm text-primary hover:underline"
           >
-            تنزيل
+            {t("documentsPage.download")}
           </button>
         )}
       />
