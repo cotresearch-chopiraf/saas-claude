@@ -12,8 +12,8 @@ import { formatDate } from "../lib/format";
 import { listCustomers, createCustomer, updateCustomer } from "../api/customers";
 import { ApiError } from "../api/client";
 import type { Customer, CustomerStatus } from "../api/types";
+import { useTranslation } from "../i18n/I18nProvider";
 
-const statusLabel: Record<CustomerStatus, string> = { active: "نشط", inactive: "غير نشط" };
 const statusTone: Record<CustomerStatus, "success" | "neutral"> = { active: "success", inactive: "neutral" };
 
 // MIDAD Phase A' — the Customer domain UI, deliberately minimal (mirrors
@@ -21,6 +21,7 @@ const statusTone: Record<CustomerStatus, "success" | "neutral"> = { active: "suc
 // Global nav page (not project-scoped), consuming the existing, verified
 // server/src/routes/customers.ts.
 export function Customers() {
+  const { t, locale } = useTranslation();
   const [customers, setCustomers] = useState<Customer[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
@@ -30,29 +31,29 @@ export function Customers() {
     setCustomers(null);
     listCustomers()
       .then(setCustomers)
-      .catch((err) => setError(err instanceof Error ? err.message : "تعذّر تحميل قائمة العملاء"));
+      .catch((err) => setError(err instanceof Error ? err.message : t("customersPage.loadError")));
   }
   useEffect(load, []);
 
   const columns: FinancialColumn<Customer>[] = [
-    { key: "name", header: "الاسم", render: (c) => c.name },
-    { key: "contactName", header: "جهة الاتصال", render: (c) => c.contactName ?? "—" },
-    { key: "taxId", header: "الرقم الضريبي", render: (c) => c.taxId ?? "—" },
-    { key: "email", header: "البريد الإلكتروني", render: (c) => c.email ?? "—" },
-    { key: "phone", header: "الهاتف", render: (c) => c.phone ?? "—" },
-    { key: "status", header: "الحالة", render: (c) => <Badge tone={statusTone[c.status]}>{statusLabel[c.status]}</Badge> },
-    { key: "createdAt", header: "تاريخ الإضافة", render: (c) => formatDate(c.createdAt) },
+    { key: "name", header: t("customersPage.columns.name"), render: (c) => c.name },
+    { key: "contactName", header: t("customersPage.columns.contactName"), render: (c) => c.contactName ?? "—" },
+    { key: "taxId", header: t("customersPage.columns.taxId"), render: (c) => c.taxId ?? "—" },
+    { key: "email", header: t("customersPage.columns.email"), render: (c) => c.email ?? "—" },
+    { key: "phone", header: t("customersPage.columns.phone"), render: (c) => c.phone ?? "—" },
+    { key: "status", header: t("customersPage.columns.status"), render: (c) => <Badge tone={statusTone[c.status]}>{t(`customerDetail.status.${c.status}`)}</Badge> },
+    { key: "createdAt", header: t("customersPage.columns.createdAt"), render: (c) => formatDate(c.createdAt, locale) },
   ];
 
   return (
     <Layout>
       <PageHeader
-        title="العملاء"
-        subtitle="ملف موحّد لكل عميل ومشاريعه المرتبطة."
+        title={t("customersPage.title")}
+        subtitle={t("customersPage.subtitle")}
         actions={
           <Can permission="customer.manage">
             <Button size="sm" onClick={() => setShowCreate((v) => !v)}>
-              {showCreate ? "إلغاء" : "+ عميل جديد"}
+              {showCreate ? t("common.cancel") : t("customersPage.newCustomer")}
             </Button>
           </Can>
         }
@@ -77,11 +78,11 @@ export function Customers() {
         rowKey={(c) => c.id}
         error={error}
         onRetry={load}
-        emptyMessage="لا يوجد عملاء بعد"
+        emptyMessage={t("customersPage.emptyMessage")}
         rowActions={(c) => (
           <div className="flex justify-end gap-3">
             <Link to={`/customers/${c.id}`} className="text-sm text-primary hover:underline">
-              عرض
+              {t("customersPage.view")}
             </Link>
             <Can permission="customer.manage">
               <CustomerRowActions customer={c} onChanged={load} />
@@ -94,6 +95,7 @@ export function Customers() {
 }
 
 function CustomerForm({ onCreated }: { onCreated: (customer: Customer) => void }) {
+  const { t } = useTranslation();
   const [name, setName] = useState("");
   const [contactName, setContactName] = useState("");
   const [taxId, setTaxId] = useState("");
@@ -118,7 +120,7 @@ function CustomerForm({ onCreated }: { onCreated: (customer: Customer) => void }
       });
       onCreated(customer);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر إضافة العميل");
+      setError(err instanceof ApiError ? err.message : t("customersPage.form.genericError"));
     } finally {
       setSubmitting(false);
     }
@@ -134,44 +136,44 @@ function CustomerForm({ onCreated }: { onCreated: (customer: Customer) => void }
         )}
         <input
           required
-          placeholder="اسم العميل"
+          placeholder={t("customersPage.form.namePlaceholder")}
           value={name}
           onChange={(e) => setName(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
         />
         <input
-          placeholder="جهة الاتصال (اختياري)"
+          placeholder={t("customersPage.form.contactNamePlaceholder")}
           value={contactName}
           onChange={(e) => setContactName(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
         />
         <input
-          placeholder="الرقم الضريبي (اختياري)"
+          placeholder={t("customersPage.form.taxIdPlaceholder")}
           value={taxId}
           onChange={(e) => setTaxId(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
         />
         <input
           type="email"
-          placeholder="البريد الإلكتروني (اختياري)"
+          placeholder={t("customersPage.form.emailPlaceholder")}
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
         />
         <input
-          placeholder="الهاتف (اختياري)"
+          placeholder={t("customersPage.form.phonePlaceholder")}
           value={phone}
           onChange={(e) => setPhone(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
         />
         <input
-          placeholder="العنوان (اختياري)"
+          placeholder={t("customersPage.form.addressPlaceholder")}
           value={address}
           onChange={(e) => setAddress(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
         />
         <Button type="submit" disabled={submitting}>
-          {submitting ? "جارٍ الحفظ..." : "حفظ العميل"}
+          {submitting ? t("customersPage.form.saving") : t("customersPage.form.save")}
         </Button>
       </form>
     </Card>
@@ -179,6 +181,7 @@ function CustomerForm({ onCreated }: { onCreated: (customer: Customer) => void }
 }
 
 function CustomerRowActions({ customer, onChanged }: { customer: Customer; onChanged: () => void }) {
+  const { t } = useTranslation();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(customer.name);
   const [contactName, setContactName] = useState(customer.contactName ?? "");
@@ -200,7 +203,7 @@ function CustomerRowActions({ customer, onChanged }: { customer: Customer; onCha
       setEditing(false);
       onChanged();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر حفظ التعديل");
+      setError(err instanceof ApiError ? err.message : t("customersPage.rowActions.saveError"));
     } finally {
       setBusy(false);
     }
@@ -213,7 +216,7 @@ function CustomerRowActions({ customer, onChanged }: { customer: Customer; onCha
       await updateCustomer(customer.id, { status: customer.status === "active" ? "inactive" : "active" });
       onChanged();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر تغيير حالة العميل");
+      setError(err instanceof ApiError ? err.message : t("customersPage.rowActions.statusError"));
       setBusy(false);
     }
   }
@@ -231,26 +234,26 @@ function CustomerRowActions({ customer, onChanged }: { customer: Customer; onCha
           <input
             value={contactName}
             onChange={(e) => setContactName(e.target.value)}
-            placeholder="جهة الاتصال"
+            placeholder={t("customersPage.rowActions.contactNamePlaceholder")}
             className="w-24 rounded-md border border-stone-300 px-2 py-1 text-xs"
           />
           <input
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            placeholder="البريد الإلكتروني"
+            placeholder={t("customersPage.rowActions.emailPlaceholder")}
             className="w-32 rounded-md border border-stone-300 px-2 py-1 text-xs"
           />
           <input
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
-            placeholder="الهاتف"
+            placeholder={t("customersPage.rowActions.phonePlaceholder")}
             className="w-24 rounded-md border border-stone-300 px-2 py-1 text-xs"
           />
           <Button size="sm" onClick={onSave} disabled={busy}>
-            حفظ
+            {t("common.save")}
           </Button>
           <Button size="sm" variant="secondary" onClick={() => setEditing(false)} disabled={busy}>
-            إلغاء
+            {t("common.cancel")}
           </Button>
         </div>
       </div>
@@ -261,10 +264,10 @@ function CustomerRowActions({ customer, onChanged }: { customer: Customer; onCha
     <div className="flex justify-end gap-3">
       {error && <span className="text-xs text-danger-600">{error}</span>}
       <button type="button" onClick={() => setEditing(true)} className="text-sm text-primary hover:underline">
-        تعديل
+        {t("customersPage.rowActions.edit")}
       </button>
       <button type="button" onClick={onToggleStatus} disabled={busy} className="text-sm text-stone-500 hover:underline">
-        {customer.status === "active" ? "إلغاء التنشيط" : "إعادة التنشيط"}
+        {customer.status === "active" ? t("customersPage.rowActions.deactivate") : t("customersPage.rowActions.reactivate")}
       </button>
     </div>
   );
