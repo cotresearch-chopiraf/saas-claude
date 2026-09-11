@@ -11,9 +11,8 @@ import { formatDate } from "../lib/format";
 import { listSuppliers, createSupplier, updateSupplier } from "../api/suppliers";
 import { ApiError } from "../api/client";
 import type { Supplier, SupplierStatus, SupplierType } from "../api/types";
+import { useTranslation } from "../i18n/I18nProvider";
 
-const typeLabel: Record<SupplierType, string> = { supplier: "مورد", subcontractor: "مقاول من الباطن" };
-const statusLabel: Record<SupplierStatus, string> = { active: "نشط", inactive: "غير نشط" };
 const statusTone: Record<SupplierStatus, "success" | "neutral"> = { active: "success", inactive: "neutral" };
 
 // Global nav page (not project-scoped) — the Supplier domain UI, per the
@@ -22,6 +21,7 @@ const statusTone: Record<SupplierStatus, "success" | "neutral"> = { active: "suc
 // server/src/routes/suppliers.ts exactly. No calculation of any kind
 // applies to this domain — every field is plain stored master data.
 export function Suppliers() {
+  const { t, locale } = useTranslation();
   const [suppliers, setSuppliers] = useState<Supplier[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
@@ -31,28 +31,28 @@ export function Suppliers() {
     setSuppliers(null);
     listSuppliers()
       .then(setSuppliers)
-      .catch((err) => setError(err instanceof Error ? err.message : "تعذّر تحميل قائمة الموردين"));
+      .catch((err) => setError(err instanceof Error ? err.message : t("suppliersPage.loadError")));
   }
   useEffect(load, []);
 
   const columns: FinancialColumn<Supplier>[] = [
-    { key: "name", header: "الاسم", render: (s) => s.name },
-    { key: "type", header: "النوع", render: (s) => typeLabel[s.type] },
-    { key: "taxId", header: "الرقم الضريبي", render: (s) => s.taxId ?? "—" },
-    { key: "email", header: "البريد الإلكتروني", render: (s) => s.email ?? "—" },
-    { key: "phone", header: "الهاتف", render: (s) => s.phone ?? "—" },
-    { key: "status", header: "الحالة", render: (s) => <Badge tone={statusTone[s.status]}>{statusLabel[s.status]}</Badge> },
-    { key: "createdAt", header: "تاريخ الإضافة", render: (s) => formatDate(s.createdAt) },
+    { key: "name", header: t("suppliersPage.columns.name"), render: (s) => s.name },
+    { key: "type", header: t("suppliersPage.columns.type"), render: (s) => t(`suppliersPage.type.${s.type}`) },
+    { key: "taxId", header: t("suppliersPage.columns.taxId"), render: (s) => s.taxId ?? "—" },
+    { key: "email", header: t("suppliersPage.columns.email"), render: (s) => s.email ?? "—" },
+    { key: "phone", header: t("suppliersPage.columns.phone"), render: (s) => s.phone ?? "—" },
+    { key: "status", header: t("suppliersPage.columns.status"), render: (s) => <Badge tone={statusTone[s.status]}>{t(`suppliersPage.status.${s.status}`)}</Badge> },
+    { key: "createdAt", header: t("suppliersPage.columns.createdAt"), render: (s) => formatDate(s.createdAt, locale) },
   ];
 
   return (
     <Layout>
       <PageHeader
-        title="الموردون"
+        title={t("suppliersPage.title")}
         actions={
           <Can permission="supplier.manage">
             <Button size="sm" onClick={() => setShowCreate((v) => !v)}>
-              {showCreate ? "إلغاء" : "+ مورد جديد"}
+              {showCreate ? t("common.cancel") : t("suppliersPage.newSupplier")}
             </Button>
           </Can>
         }
@@ -77,7 +77,7 @@ export function Suppliers() {
         rowKey={(s) => s.id}
         error={error}
         onRetry={load}
-        emptyMessage="لا يوجد موردون بعد"
+        emptyMessage={t("suppliersPage.emptyMessage")}
         rowActions={(s) => (
           <Can permission="supplier.manage">
             <SupplierRowActions supplier={s} onChanged={load} />
@@ -89,6 +89,7 @@ export function Suppliers() {
 }
 
 function SupplierForm({ onCreated }: { onCreated: (supplier: Supplier) => void }) {
+  const { t } = useTranslation();
   const [name, setName] = useState("");
   const [type, setType] = useState<SupplierType>("supplier");
   const [taxId, setTaxId] = useState("");
@@ -113,7 +114,7 @@ function SupplierForm({ onCreated }: { onCreated: (supplier: Supplier) => void }
       });
       onCreated(supplier);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر إضافة المورد");
+      setError(err instanceof ApiError ? err.message : t("suppliersPage.form.genericError"));
     } finally {
       setSubmitting(false);
     }
@@ -129,7 +130,7 @@ function SupplierForm({ onCreated }: { onCreated: (supplier: Supplier) => void }
         )}
         <input
           required
-          placeholder="اسم المورد"
+          placeholder={t("suppliersPage.form.namePlaceholder")}
           value={name}
           onChange={(e) => setName(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
@@ -139,36 +140,36 @@ function SupplierForm({ onCreated }: { onCreated: (supplier: Supplier) => void }
           onChange={(e) => setType(e.target.value as SupplierType)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
         >
-          <option value="supplier">مورد</option>
-          <option value="subcontractor">مقاول من الباطن</option>
+          <option value="supplier">{t("suppliersPage.type.supplier")}</option>
+          <option value="subcontractor">{t("suppliersPage.type.subcontractor")}</option>
         </select>
         <input
-          placeholder="الرقم الضريبي (اختياري)"
+          placeholder={t("suppliersPage.form.taxIdPlaceholder")}
           value={taxId}
           onChange={(e) => setTaxId(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
         />
         <input
           type="email"
-          placeholder="البريد الإلكتروني (اختياري)"
+          placeholder={t("suppliersPage.form.emailPlaceholder")}
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
         />
         <input
-          placeholder="الهاتف (اختياري)"
+          placeholder={t("suppliersPage.form.phonePlaceholder")}
           value={phone}
           onChange={(e) => setPhone(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
         />
         <input
-          placeholder="العنوان (اختياري)"
+          placeholder={t("suppliersPage.form.addressPlaceholder")}
           value={address}
           onChange={(e) => setAddress(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
         />
         <Button type="submit" disabled={submitting}>
-          {submitting ? "جارٍ الحفظ..." : "حفظ المورد"}
+          {submitting ? t("suppliersPage.form.saving") : t("suppliersPage.form.save")}
         </Button>
       </form>
     </Card>
@@ -176,6 +177,7 @@ function SupplierForm({ onCreated }: { onCreated: (supplier: Supplier) => void }
 }
 
 function SupplierRowActions({ supplier, onChanged }: { supplier: Supplier; onChanged: () => void }) {
+  const { t } = useTranslation();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(supplier.name);
   const [taxId, setTaxId] = useState(supplier.taxId ?? "");
@@ -197,7 +199,7 @@ function SupplierRowActions({ supplier, onChanged }: { supplier: Supplier; onCha
       setEditing(false);
       onChanged();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر حفظ التعديل");
+      setError(err instanceof ApiError ? err.message : t("suppliersPage.rowActions.saveError"));
     } finally {
       setBusy(false);
     }
@@ -210,7 +212,7 @@ function SupplierRowActions({ supplier, onChanged }: { supplier: Supplier; onCha
       await updateSupplier(supplier.id, { status: supplier.status === "active" ? "inactive" : "active" });
       onChanged();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر تغيير حالة المورد");
+      setError(err instanceof ApiError ? err.message : t("suppliersPage.rowActions.statusError"));
       setBusy(false);
     }
   }
@@ -228,26 +230,26 @@ function SupplierRowActions({ supplier, onChanged }: { supplier: Supplier; onCha
           <input
             value={taxId}
             onChange={(e) => setTaxId(e.target.value)}
-            placeholder="الرقم الضريبي"
+            placeholder={t("suppliersPage.rowActions.taxIdPlaceholder")}
             className="w-24 rounded-md border border-stone-300 px-2 py-1 text-xs"
           />
           <input
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            placeholder="البريد الإلكتروني"
+            placeholder={t("suppliersPage.rowActions.emailPlaceholder")}
             className="w-32 rounded-md border border-stone-300 px-2 py-1 text-xs"
           />
           <input
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
-            placeholder="الهاتف"
+            placeholder={t("suppliersPage.rowActions.phonePlaceholder")}
             className="w-24 rounded-md border border-stone-300 px-2 py-1 text-xs"
           />
           <Button size="sm" onClick={onSave} disabled={busy}>
-            حفظ
+            {t("common.save")}
           </Button>
           <Button size="sm" variant="secondary" onClick={() => setEditing(false)} disabled={busy}>
-            إلغاء
+            {t("common.cancel")}
           </Button>
         </div>
       </div>
@@ -258,10 +260,10 @@ function SupplierRowActions({ supplier, onChanged }: { supplier: Supplier; onCha
     <div className="flex justify-end gap-3">
       {error && <span className="text-xs text-danger-600">{error}</span>}
       <button type="button" onClick={() => setEditing(true)} className="text-sm text-primary hover:underline">
-        تعديل
+        {t("suppliersPage.rowActions.edit")}
       </button>
       <button type="button" onClick={onToggleStatus} disabled={busy} className="text-sm text-stone-500 hover:underline">
-        {supplier.status === "active" ? "إلغاء التنشيط" : "إعادة التنشيط"}
+        {supplier.status === "active" ? t("suppliersPage.rowActions.deactivate") : t("suppliersPage.rowActions.reactivate")}
       </button>
     </div>
   );
