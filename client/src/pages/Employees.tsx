@@ -12,8 +12,8 @@ import { formatDate } from "../lib/format";
 import { listEmployees, createEmployee, updateEmployee } from "../api/employees";
 import { ApiError } from "../api/client";
 import type { Employee, EmployeeStatus } from "../api/types";
+import { useTranslation } from "../i18n/I18nProvider";
 
-const statusLabel: Record<EmployeeStatus, string> = { active: "نشط", inactive: "غير نشط" };
 const statusTone: Record<EmployeeStatus, "success" | "neutral"> = { active: "success", inactive: "neutral" };
 
 // MIDAD Phase A2 — the Employee (Workforce) domain UI, deliberately
@@ -24,6 +24,7 @@ const statusTone: Record<EmployeeStatus, "success" | "neutral"> = { active: "suc
 // is master data only: no payroll, no allocation, no posting — see
 // employees.ts's own file comment for the exact boundary.
 export function Employees() {
+  const { t, locale } = useTranslation();
   const [employees, setEmployees] = useState<Employee[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
@@ -35,7 +36,7 @@ export function Employees() {
     setEmployees(null);
     listEmployees()
       .then(setEmployees)
-      .catch((err) => setError(err instanceof Error ? err.message : "تعذّر تحميل قائمة الموظفين"));
+      .catch((err) => setError(err instanceof Error ? err.message : t("employeesPage.loadError")));
   }
   useEffect(load, []);
 
@@ -54,31 +55,31 @@ export function Employees() {
   const inactiveCount = employees?.filter((e) => e.status === "inactive").length ?? 0;
 
   const columns: FinancialColumn<Employee>[] = [
-    { key: "name", header: "الموظف", render: (e) => e.name },
-    { key: "employeeNumber", header: "رقم الموظف", render: (e) => e.employeeNumber },
-    { key: "jobTitle", header: "المسمى الوظيفي", render: (e) => e.jobTitle ?? "—" },
-    { key: "status", header: "الحالة", render: (e) => <Badge tone={statusTone[e.status]}>{statusLabel[e.status]}</Badge> },
-    { key: "hireDate", header: "تاريخ التعيين", render: (e) => formatDate(e.hireDate) },
+    { key: "name", header: t("employeesPage.columns.name"), render: (e) => e.name },
+    { key: "employeeNumber", header: t("employeesPage.columns.employeeNumber"), render: (e) => e.employeeNumber },
+    { key: "jobTitle", header: t("employeesPage.columns.jobTitle"), render: (e) => e.jobTitle ?? "—" },
+    { key: "status", header: t("employeesPage.columns.status"), render: (e) => <Badge tone={statusTone[e.status]}>{t(`customerDetail.status.${e.status}`)}</Badge> },
+    { key: "hireDate", header: t("employeesPage.columns.hireDate"), render: (e) => formatDate(e.hireDate, locale) },
   ];
 
   return (
     <Layout>
       <PageHeader
-        title="الموظفون"
-        subtitle="دليل القوى العاملة الخاص بالشركة."
+        title={t("employeesPage.title")}
+        subtitle={t("employeesPage.subtitle")}
         actions={
           <Can permission="workforce.manage">
             <Button size="sm" onClick={() => setShowCreate((v) => !v)}>
-              {showCreate ? "إلغاء" : "+ إضافة موظف"}
+              {showCreate ? t("common.cancel") : t("employeesPage.addEmployee")}
             </Button>
           </Can>
         }
       />
 
       <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <MetricCard label="إجمالي الموظفين" value={String(total)} />
-        <MetricCard label="نشط" value={String(activeCount)} tone="success" />
-        <MetricCard label="غير نشط" value={String(inactiveCount)} />
+        <MetricCard label={t("employeesPage.metrics.total")} value={String(total)} />
+        <MetricCard label={t("employeesPage.metrics.active")} value={String(activeCount)} tone="success" />
+        <MetricCard label={t("employeesPage.metrics.inactive")} value={String(inactiveCount)} />
       </div>
 
       {showCreate && (
@@ -97,7 +98,7 @@ export function Employees() {
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <input
           type="text"
-          placeholder="البحث بالاسم أو رقم الموظف"
+          placeholder={t("employeesPage.searchPlaceholder")}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="w-full max-w-xs rounded-md border border-stone-300 px-3 py-2 text-sm"
@@ -114,7 +115,7 @@ export function Employees() {
                   : "border-stone-300 text-stone-500 hover:bg-stone-50"
               }`}
             >
-              {s === "all" ? "الكل" : statusLabel[s]}
+              {s === "all" ? t("employeesPage.filterAll") : t(`customerDetail.status.${s}`)}
             </button>
           ))}
         </div>
@@ -126,7 +127,7 @@ export function Employees() {
         rowKey={(e) => e.id}
         error={error}
         onRetry={load}
-        emptyMessage={employees && employees.length > 0 ? "لا نتائج مطابقة للبحث" : "لا يوجد موظفون بعد"}
+        emptyMessage={employees && employees.length > 0 ? t("employeesPage.noSearchResults") : t("employeesPage.emptyMessage")}
         rowActions={(e) => (
           <Can permission="workforce.manage">
             <EmployeeRowActions employee={e} onChanged={load} />
@@ -138,6 +139,7 @@ export function Employees() {
 }
 
 function EmployeeForm({ onCreated }: { onCreated: (employee: Employee) => void }) {
+  const { t } = useTranslation();
   const [name, setName] = useState("");
   const [employeeNumber, setEmployeeNumber] = useState("");
   const [jobTitle, setJobTitle] = useState("");
@@ -162,7 +164,7 @@ function EmployeeForm({ onCreated }: { onCreated: (employee: Employee) => void }
       });
       onCreated(employee);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر إضافة الموظف");
+      setError(err instanceof ApiError ? err.message : t("employeesPage.form.genericError"));
     } finally {
       setSubmitting(false);
     }
@@ -178,7 +180,7 @@ function EmployeeForm({ onCreated }: { onCreated: (employee: Employee) => void }
         )}
         <input
           required
-          placeholder="الاسم الكامل"
+          placeholder={t("employeesPage.form.namePlaceholder")}
           value={name}
           onChange={(e) => setName(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
@@ -186,41 +188,41 @@ function EmployeeForm({ onCreated }: { onCreated: (employee: Employee) => void }
         <div>
           <input
             required
-            placeholder="رقم الموظف"
+            placeholder={t("employeesPage.form.employeeNumberPlaceholder")}
             value={employeeNumber}
             onChange={(e) => setEmployeeNumber(e.target.value)}
             className="w-full rounded-md border border-stone-300 px-3 py-2 text-sm"
           />
-          <p className="mt-1 text-xs text-stone-400">يُستخدم لتحديد الموظف في سجلات القوى العاملة والرواتب.</p>
+          <p className="mt-1 text-xs text-stone-400">{t("employeesPage.form.employeeNumberHint")}</p>
         </div>
         <input
-          placeholder="المسمى الوظيفي (اختياري)"
+          placeholder={t("employeesPage.form.jobTitlePlaceholder")}
           value={jobTitle}
           onChange={(e) => setJobTitle(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
         />
         <input
           type="date"
-          placeholder="تاريخ التعيين"
+          placeholder={t("employeesPage.form.hireDatePlaceholder")}
           value={hireDate}
           onChange={(e) => setHireDate(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
         />
         <input
           type="email"
-          placeholder="البريد الإلكتروني (اختياري)"
+          placeholder={t("employeesPage.form.emailPlaceholder")}
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
         />
         <input
-          placeholder="الهاتف (اختياري)"
+          placeholder={t("employeesPage.form.phonePlaceholder")}
           value={phone}
           onChange={(e) => setPhone(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
         />
         <Button type="submit" disabled={submitting}>
-          {submitting ? "جارٍ الحفظ..." : "حفظ الموظف"}
+          {submitting ? t("employeesPage.form.saving") : t("employeesPage.form.save")}
         </Button>
       </form>
     </Card>
@@ -228,6 +230,7 @@ function EmployeeForm({ onCreated }: { onCreated: (employee: Employee) => void }
 }
 
 function EmployeeRowActions({ employee, onChanged }: { employee: Employee; onChanged: () => void }) {
+  const { t } = useTranslation();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(employee.name);
   const [jobTitle, setJobTitle] = useState(employee.jobTitle ?? "");
@@ -249,7 +252,7 @@ function EmployeeRowActions({ employee, onChanged }: { employee: Employee; onCha
       setEditing(false);
       onChanged();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر حفظ التعديل");
+      setError(err instanceof ApiError ? err.message : t("employeesPage.rowActions.saveError"));
     } finally {
       setBusy(false);
     }
@@ -262,7 +265,7 @@ function EmployeeRowActions({ employee, onChanged }: { employee: Employee; onCha
       await updateEmployee(employee.id, { status: employee.status === "active" ? "inactive" : "active" });
       onChanged();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر تغيير حالة الموظف");
+      setError(err instanceof ApiError ? err.message : t("employeesPage.rowActions.statusError"));
       setBusy(false);
     }
   }
@@ -280,26 +283,26 @@ function EmployeeRowActions({ employee, onChanged }: { employee: Employee; onCha
           <input
             value={jobTitle}
             onChange={(e) => setJobTitle(e.target.value)}
-            placeholder="المسمى الوظيفي"
+            placeholder={t("employeesPage.rowActions.jobTitlePlaceholder")}
             className="w-28 rounded-md border border-stone-300 px-2 py-1 text-xs"
           />
           <input
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            placeholder="البريد الإلكتروني"
+            placeholder={t("employeesPage.rowActions.emailPlaceholder")}
             className="w-32 rounded-md border border-stone-300 px-2 py-1 text-xs"
           />
           <input
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
-            placeholder="الهاتف"
+            placeholder={t("employeesPage.rowActions.phonePlaceholder")}
             className="w-24 rounded-md border border-stone-300 px-2 py-1 text-xs"
           />
           <Button size="sm" onClick={onSave} disabled={busy}>
-            حفظ
+            {t("common.save")}
           </Button>
           <Button size="sm" variant="secondary" onClick={() => setEditing(false)} disabled={busy}>
-            إلغاء
+            {t("common.cancel")}
           </Button>
         </div>
       </div>
@@ -310,10 +313,10 @@ function EmployeeRowActions({ employee, onChanged }: { employee: Employee; onCha
     <div className="flex justify-end gap-3">
       {error && <span className="text-xs text-danger-600">{error}</span>}
       <button type="button" onClick={() => setEditing(true)} className="text-sm text-primary hover:underline">
-        تعديل
+        {t("employeesPage.rowActions.edit")}
       </button>
       <button type="button" onClick={onToggleStatus} disabled={busy} className="text-sm text-stone-500 hover:underline">
-        {employee.status === "active" ? "إلغاء التنشيط" : "إعادة التنشيط"}
+        {employee.status === "active" ? t("employeesPage.rowActions.deactivate") : t("employeesPage.rowActions.reactivate")}
       </button>
     </div>
   );
