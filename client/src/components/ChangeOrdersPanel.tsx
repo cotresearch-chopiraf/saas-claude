@@ -2,14 +2,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { apiFetch, ApiError } from "../api/client";
 import { formatMoney } from "../lib/format";
 import type { ChangeOrder } from "../api/types";
-
-const money = (n: number) => (n >= 0 ? "+" : "") + formatMoney(n);
-
-const statusLabel: Record<ChangeOrder["status"], string> = {
-  pending: "بانتظار القرار",
-  approved: "معتمد",
-  rejected: "مرفوض",
-};
+import { useTranslation } from "../i18n/I18nProvider";
 
 const statusColor: Record<ChangeOrder["status"], string> = {
   pending: "bg-amber-100 text-amber-700",
@@ -18,6 +11,8 @@ const statusColor: Record<ChangeOrder["status"], string> = {
 };
 
 export function ChangeOrdersPanel({ projectId }: { projectId: string }) {
+  const { t, locale } = useTranslation();
+  const money = (n: number) => (n >= 0 ? "+" : "") + formatMoney(n, undefined, locale);
   const [orders, setOrders] = useState<ChangeOrder[]>([]);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -43,7 +38,7 @@ export function ChangeOrdersPanel({ projectId }: { projectId: string }) {
       setAmountDelta("");
       load();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّرت إضافة أمر التغيير");
+      setError(err instanceof ApiError ? err.message : t("legacyBudgetPage.changeOrdersPanel.addError"));
     }
   }
 
@@ -56,14 +51,14 @@ export function ChangeOrdersPanel({ projectId }: { projectId: string }) {
       });
       load();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر تنفيذ القرار");
+      setError(err instanceof ApiError ? err.message : t("legacyBudgetPage.changeOrdersPanel.decisionError"));
     }
   }
 
   return (
     <div>
       <p className="mb-3 text-sm text-stone-500">
-        عند اعتماد أمر تغيير، يُضاف مبلغه تلقائياً إلى ميزانية المشروع الإجمالية.
+        {t("legacyBudgetPage.changeOrdersPanel.intro")}
       </p>
       {error && <div className="mb-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
       <ul className="divide-y divide-stone-100 rounded-lg border border-stone-200 bg-white">
@@ -83,36 +78,36 @@ export function ChangeOrdersPanel({ projectId }: { projectId: string }) {
                     onClick={() => decide(order, "approved")}
                     className="rounded-md bg-primary px-3 py-1 text-xs font-medium text-white"
                   >
-                    اعتماد
+                    {t("legacyBudgetPage.changeOrdersPanel.approve")}
                   </button>
                   <button
                     onClick={() => decide(order, "rejected")}
                     className="rounded-md border border-stone-300 px-3 py-1 text-xs text-stone-600"
                   >
-                    رفض
+                    {t("legacyBudgetPage.changeOrdersPanel.reject")}
                   </button>
                 </>
               ) : (
                 <span className={`rounded-full px-2 py-0.5 text-xs ${statusColor[order.status]}`}>
-                  {statusLabel[order.status]}
+                  {t(`legacyBudgetPage.changeOrdersPanel.status.${order.status}`)}
                 </span>
               )}
             </div>
           </li>
         ))}
-        {orders.length === 0 && <li className="p-4 text-center text-stone-400">لا توجد أوامر تغيير بعد</li>}
+        {orders.length === 0 && <li className="p-4 text-center text-stone-400">{t("legacyBudgetPage.changeOrdersPanel.noOrders")}</li>}
       </ul>
 
       <form onSubmit={addOrder} className="mt-3 flex flex-wrap gap-2">
         <input
           required
-          placeholder="عنوان أمر التغيير (مثال: تغيير نوع البلاط)"
+          placeholder={t("legacyBudgetPage.changeOrdersPanel.titlePlaceholder")}
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           className="flex-1 rounded-md border border-stone-300 px-3 py-2 text-sm"
         />
         <input
-          placeholder="تفاصيل إضافية (اختياري)"
+          placeholder={t("legacyBudgetPage.changeOrdersPanel.descriptionPlaceholder")}
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           className="flex-1 rounded-md border border-stone-300 px-3 py-2 text-sm"
@@ -120,12 +115,12 @@ export function ChangeOrdersPanel({ projectId }: { projectId: string }) {
         <input
           required
           type="number"
-          placeholder="أثر المبلغ (ر.س، سالب للخصم)"
+          placeholder={t("legacyBudgetPage.changeOrdersPanel.amountDeltaPlaceholder")}
           value={amountDelta}
           onChange={(e) => setAmountDelta(e.target.value)}
           className="w-56 rounded-md border border-stone-300 px-3 py-2 text-sm"
         />
-        <button className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white">إضافة أمر تغيير</button>
+        <button className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white">{t("legacyBudgetPage.changeOrdersPanel.addOrder")}</button>
       </form>
     </div>
   );
