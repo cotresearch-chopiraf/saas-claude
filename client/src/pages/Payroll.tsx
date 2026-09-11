@@ -12,14 +12,8 @@ import { formatDate, formatMoney } from "../lib/format";
 import { listPayrollPeriods, createPayrollPeriod } from "../api/payrollPeriods";
 import { ApiError } from "../api/client";
 import type { PayrollPeriod, PayrollPeriodStatus } from "../api/types";
+import { useTranslation } from "../i18n/I18nProvider";
 
-const statusLabel: Record<PayrollPeriodStatus, string> = {
-  draft: "مسودة",
-  submitted: "بانتظار الاعتماد",
-  approved: "معتمدة",
-  posted: "مرحّلة",
-  rejected: "مرفوضة",
-};
 const statusTone: Record<PayrollPeriodStatus, "neutral" | "warning" | "success" | "danger"> = {
   draft: "neutral",
   submitted: "warning",
@@ -36,6 +30,7 @@ const statusTone: Record<PayrollPeriodStatus, "neutral" | "warning" | "success" 
 // no charts, no analytics, matching this app's existing master-data list
 // pattern (Suppliers/Customers/Employees) rather than a payroll dashboard.
 export function Payroll() {
+  const { t, locale } = useTranslation();
   const [periods, setPeriods] = useState<PayrollPeriod[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
@@ -45,34 +40,34 @@ export function Payroll() {
     setPeriods(null);
     listPayrollPeriods()
       .then(setPeriods)
-      .catch((err) => setError(err instanceof Error ? err.message : "تعذّر تحميل فترات الرواتب"));
+      .catch((err) => setError(err instanceof Error ? err.message : t("payrollPage.loadError")));
   }
   useEffect(load, []);
 
   const columns: FinancialColumn<PayrollPeriod>[] = [
     {
       key: "period",
-      header: "الفترة",
+      header: t("payrollPage.columns.period"),
       render: (p) => (
         <Link to={`/payroll/${p.id}`} className="font-medium text-primary hover:underline">
-          {formatDate(p.periodStart)} – {formatDate(p.periodEnd)}
+          {formatDate(p.periodStart, locale)} – {formatDate(p.periodEnd, locale)}
         </Link>
       ),
     },
-    { key: "status", header: "الحالة", render: (p) => <Badge tone={statusTone[p.status]}>{statusLabel[p.status]}</Badge> },
-    { key: "employeeCount", header: "عدد الموظفين", render: (p) => String(p.summary.employeeCount) },
-    { key: "totalNet", header: "إجمالي صافي الرواتب", render: (p) => formatMoney(p.summary.totalNet) },
+    { key: "status", header: t("payrollPage.columns.status"), render: (p) => <Badge tone={statusTone[p.status]}>{t(`payrollPage.status.${p.status}`)}</Badge> },
+    { key: "employeeCount", header: t("payrollPage.columns.employeeCount"), render: (p) => String(p.summary.employeeCount) },
+    { key: "totalNet", header: t("payrollPage.columns.totalNet"), render: (p) => formatMoney(p.summary.totalNet, undefined, locale) },
   ];
 
   return (
     <Layout>
       <PageHeader
-        title="الرواتب"
-        subtitle="سجل الرواتب الداخلي للشركة — بيانات داخلية، وليست ربطاً رسمياً مع مدد."
+        title={t("payrollPage.title")}
+        subtitle={t("payrollPage.subtitle")}
         actions={
           <Can permission="payroll.manage">
             <Button size="sm" onClick={() => setShowCreate((v) => !v)}>
-              {showCreate ? "إلغاء" : "+ فترة رواتب جديدة"}
+              {showCreate ? t("common.cancel") : t("payrollPage.newPeriod")}
             </Button>
           </Can>
         }
@@ -97,10 +92,10 @@ export function Payroll() {
         rowKey={(p) => p.id}
         error={error}
         onRetry={load}
-        emptyMessage="لا توجد فترات رواتب بعد"
+        emptyMessage={t("payrollPage.emptyMessage")}
         rowActions={(p) => (
           <Link to={`/payroll/${p.id}`} className="text-sm text-primary hover:underline">
-            فتح الفترة
+            {t("payrollPage.openPeriod")}
           </Link>
         )}
       />
@@ -109,6 +104,7 @@ export function Payroll() {
 }
 
 function PayrollPeriodForm({ onCreated }: { onCreated: () => void }) {
+  const { t } = useTranslation();
   const [periodStart, setPeriodStart] = useState("");
   const [periodEnd, setPeriodEnd] = useState("");
   const [payrollDate, setPayrollDate] = useState("");
@@ -129,7 +125,7 @@ function PayrollPeriodForm({ onCreated }: { onCreated: () => void }) {
       });
       onCreated();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر إنشاء فترة الرواتب");
+      setError(err instanceof ApiError ? err.message : t("payrollPage.form.genericError"));
     } finally {
       setSubmitting(false);
     }
@@ -144,7 +140,7 @@ function PayrollPeriodForm({ onCreated }: { onCreated: () => void }) {
           </div>
         )}
         <div>
-          <label className="mb-1 block text-xs text-stone-500">بداية الفترة</label>
+          <label className="mb-1 block text-xs text-stone-500">{t("payrollPage.form.periodStart")}</label>
           <input
             required
             type="date"
@@ -154,7 +150,7 @@ function PayrollPeriodForm({ onCreated }: { onCreated: () => void }) {
           />
         </div>
         <div>
-          <label className="mb-1 block text-xs text-stone-500">نهاية الفترة</label>
+          <label className="mb-1 block text-xs text-stone-500">{t("payrollPage.form.periodEnd")}</label>
           <input
             required
             type="date"
@@ -164,7 +160,7 @@ function PayrollPeriodForm({ onCreated }: { onCreated: () => void }) {
           />
         </div>
         <div>
-          <label className="mb-1 block text-xs text-stone-500">تاريخ صرف الرواتب (اختياري)</label>
+          <label className="mb-1 block text-xs text-stone-500">{t("payrollPage.form.payrollDateLabel")}</label>
           <input
             type="date"
             value={payrollDate}
@@ -173,13 +169,13 @@ function PayrollPeriodForm({ onCreated }: { onCreated: () => void }) {
           />
         </div>
         <input
-          placeholder="ملاحظات (اختياري)"
+          placeholder={t("payrollPage.form.notesPlaceholder")}
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm sm:col-span-2"
         />
         <Button type="submit" disabled={submitting}>
-          {submitting ? "جارٍ الحفظ..." : "إنشاء الفترة"}
+          {submitting ? t("payrollPage.form.saving") : t("payrollPage.form.create")}
         </Button>
       </form>
     </Card>
