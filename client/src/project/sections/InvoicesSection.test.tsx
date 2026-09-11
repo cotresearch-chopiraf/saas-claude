@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
 import { AuthProvider } from "../../auth/AuthContext";
+import { I18nProvider } from "../../i18n/I18nProvider";
 import { InvoicesSection } from "./InvoicesSection";
 import type { Contract, Invoice } from "../../api/types";
 
@@ -112,9 +113,11 @@ function mockApi(role: "owner" | "member", invoices: Invoice[] = [fixtureInvoice
 
 function renderSection() {
   return render(
-    <AuthProvider>
-      <InvoicesSection />
-    </AuthProvider>,
+    <I18nProvider>
+      <AuthProvider>
+        <InvoicesSection />
+      </AuthProvider>
+    </I18nProvider>,
   );
 }
 

@@ -13,12 +13,8 @@ import { listContracts } from "../../api/contracts";
 import { ApiError } from "../../api/client";
 import type { Contract, Invoice, InvoiceStatus } from "../../api/types";
 import { useProjectContext } from "../context";
+import { useTranslation } from "../../i18n/I18nProvider";
 
-const statusLabel: Record<InvoiceStatus, string> = {
-  draft: "مسودة",
-  sent: "مرسلة",
-  paid: "مدفوعة",
-};
 const statusTone: Record<InvoiceStatus, "warning" | "info" | "success"> = {
   draft: "warning",
   sent: "info",
@@ -36,6 +32,7 @@ const statusTone: Record<InvoiceStatus, "warning" | "info" | "success"> = {
 // paid/outstanding-amount field anywhere in this domain — status is a
 // strict draft/sent/paid enum, nothing more granular.
 export function InvoicesSection() {
+  const { t, locale } = useTranslation();
   const { projectId } = useProjectContext();
   const [invoices, setInvoices] = useState<Invoice[] | null>(null);
   const [contracts, setContracts] = useState<Contract[]>([]);
@@ -52,7 +49,7 @@ export function InvoicesSection() {
         setInvoices(invoiceRows);
         setContracts(contractRows);
       })
-      .catch((err) => setError(err instanceof Error ? err.message : "تعذّر تحميل فواتير المشروع"));
+      .catch((err) => setError(err instanceof Error ? err.message : t("invoicesPage.loadError")));
   }
   useEffect(load, [projectId]);
 
@@ -68,7 +65,7 @@ export function InvoicesSection() {
       setPendingAction(null);
       load();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر تنفيذ الإجراء");
+      setError(err instanceof ApiError ? err.message : t("invoicesPage.actionError"));
       setPendingAction(null);
     } finally {
       setActingBusy(false);
@@ -82,28 +79,28 @@ export function InvoicesSection() {
   };
 
   const columns: FinancialColumn<Invoice>[] = [
-    { key: "invoiceNumber", header: "رقم الفاتورة", render: (i) => i.invoiceNumber },
-    { key: "contract", header: "العقد", render: (i) => contractLabel(i.contractId) },
-    { key: "status", header: "الحالة", render: (i) => <Badge tone={statusTone[i.status]}>{statusLabel[i.status]}</Badge> },
-    { key: "issueDate", header: "تاريخ الإصدار", render: (i) => formatDate(i.issueDate) },
-    { key: "dueDate", header: "تاريخ الاستحقاق", render: (i) => formatDate(i.dueDate) },
-    { key: "subtotal", header: "المجموع الفرعي", align: "end", render: (i) => formatMoney(i.subtotal) },
-    { key: "taxAmount", header: "الضريبة", align: "end", render: (i) => formatMoney(i.taxAmount) },
-    { key: "total", header: "الإجمالي", align: "end", render: (i) => formatMoney(i.total) },
+    { key: "invoiceNumber", header: t("invoicesPage.columns.number"), render: (i) => i.invoiceNumber },
+    { key: "contract", header: t("invoicesPage.columns.contract"), render: (i) => contractLabel(i.contractId) },
+    { key: "status", header: t("invoicesPage.columns.status"), render: (i) => <Badge tone={statusTone[i.status]}>{t(`invoicesPage.status.${i.status}`)}</Badge> },
+    { key: "issueDate", header: t("invoicesPage.columns.issueDate"), render: (i) => formatDate(i.issueDate, locale) },
+    { key: "dueDate", header: t("invoicesPage.columns.dueDate"), render: (i) => formatDate(i.dueDate, locale) },
+    { key: "subtotal", header: t("invoicesPage.columns.subtotal"), align: "end", render: (i) => formatMoney(i.subtotal, "SAR", locale) },
+    { key: "taxAmount", header: t("invoicesPage.columns.taxAmount"), align: "end", render: (i) => formatMoney(i.taxAmount, "SAR", locale) },
+    { key: "total", header: t("invoicesPage.columns.total"), align: "end", render: (i) => formatMoney(i.total, "SAR", locale) },
   ];
 
   const confirmCopy =
     pendingAction?.type === "send"
-      ? { title: "إرسال الفاتورة", message: "بعد الإرسال ستصبح الفاتورة قابلة للعرض عبر رابطها العام. هل تريد المتابعة؟", confirmLabel: "إرسال" }
+      ? { title: t("invoicesPage.confirm.sendTitle"), message: t("invoicesPage.confirm.sendMessage"), confirmLabel: t("invoicesPage.confirm.sendLabel") }
       : pendingAction?.type === "markPaid"
-        ? { title: "تحديد الفاتورة كمدفوعة", message: "لا يمكن التراجع عن هذا الإجراء. هل تريد المتابعة؟", confirmLabel: "تحديد كمدفوعة", destructive: true }
+        ? { title: t("invoicesPage.confirm.markPaidTitle"), message: t("invoicesPage.confirm.markPaidMessage"), confirmLabel: t("invoicesPage.confirm.markPaidLabel"), destructive: true }
         : null;
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="الفواتير"
-        subtitle="فواتير هذا المشروع تحديداً — القيم المالية معروضة كما وردت من الخادم دون أي حساب في المتصفح."
+        title={t("invoicesPage.title")}
+        subtitle={t("invoicesPage.subtitle")}
         actions={
           // Creation carries no requirePermission gate on the backend (see
           // routes/invoices.ts — only an explicit manual taxRatePercent
@@ -111,7 +108,7 @@ export function InvoicesSection() {
           // send/markPaid below, this control is open to any member, not
           // wrapped in <Can>.
           <Button size="sm" onClick={() => setShowCreate((v) => !v)}>
-            {showCreate ? "إلغاء" : "+ فاتورة جديدة"}
+            {showCreate ? t("common.cancel") : t("invoicesPage.newInvoice")}
           </Button>
         }
       />
@@ -142,7 +139,7 @@ export function InvoicesSection() {
         rowKey={(i) => i.id}
         error={invoices === null ? error : null}
         onRetry={load}
-        emptyMessage="لا توجد فواتير لهذا المشروع بعد"
+        emptyMessage={t("invoicesPage.emptyMessage")}
         rowActions={(i) => (
           <div className="flex justify-end gap-2">
             {i.status === "draft" && (
@@ -152,7 +149,7 @@ export function InvoicesSection() {
                   onClick={() => setPendingAction({ type: "send", invoice: i })}
                   className="text-sm text-primary hover:underline"
                 >
-                  إرسال
+                  {t("invoicesPage.send")}
                 </button>
               </Can>
             )}
@@ -163,7 +160,7 @@ export function InvoicesSection() {
                   onClick={() => setPendingAction({ type: "markPaid", invoice: i })}
                   className="text-sm text-primary hover:underline"
                 >
-                  تحديد كمدفوعة
+                  {t("invoicesPage.markPaid")}
                 </button>
               </Can>
             )}
@@ -175,7 +172,7 @@ export function InvoicesSection() {
         open={pendingAction !== null}
         title={confirmCopy?.title ?? ""}
         message={confirmCopy?.message ?? ""}
-        confirmLabel={actingBusy ? "جارٍ التنفيذ..." : (confirmCopy?.confirmLabel ?? "")}
+        confirmLabel={actingBusy ? t("invoicesPage.confirm.executing") : (confirmCopy?.confirmLabel ?? "")}
         destructive={confirmCopy?.destructive}
         onConfirm={onConfirmAction}
         onCancel={() => setPendingAction(null)}
@@ -193,6 +190,7 @@ function InvoiceCreateForm({
   contracts: Contract[];
   onCreated: () => void;
 }) {
+  const { t } = useTranslation();
   const [contractId, setContractId] = useState("");
   const [clientName, setClientName] = useState("");
   const [dueDate, setDueDate] = useState("");
@@ -220,7 +218,7 @@ function InvoiceCreateForm({
       });
       onCreated();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر إنشاء الفاتورة");
+      setError(err instanceof ApiError ? err.message : t("invoicesPage.createForm.genericError"));
     } finally {
       setSubmitting(false);
     }
@@ -239,7 +237,7 @@ function InvoiceCreateForm({
           onChange={(e) => setContractId(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
         >
-          <option value="">بدون عقد محدد (مرتبطة بالمشروع مباشرة)</option>
+          <option value="">{t("invoicesPage.createForm.noContract")}</option>
           {contracts.map((c) => (
             <option key={c.id} value={c.id}>
               {c.contractNumber ?? c.id.slice(0, 8)}
@@ -248,13 +246,13 @@ function InvoiceCreateForm({
         </select>
         <input
           required
-          placeholder="اسم العميل"
+          placeholder={t("invoicesPage.createForm.clientNamePlaceholder")}
           value={clientName}
           onChange={(e) => setClientName(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
         />
         <label className="text-sm text-stone-600">
-          تاريخ الاستحقاق (اختياري)
+          {t("invoicesPage.createForm.dueDateLabel")}
           <input
             type="date"
             value={dueDate}
@@ -264,7 +262,7 @@ function InvoiceCreateForm({
         </label>
         <input
           required
-          placeholder="وصف البند"
+          placeholder={t("invoicesPage.createForm.itemDescriptionPlaceholder")}
           value={itemDescription}
           onChange={(e) => setItemDescription(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
@@ -274,13 +272,13 @@ function InvoiceCreateForm({
           type="number"
           min="0"
           step="0.01"
-          placeholder="المبلغ"
+          placeholder={t("invoicesPage.createForm.amountPlaceholder")}
           value={itemAmount}
           onChange={(e) => setItemAmount(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
         />
         <Button type="submit" disabled={submitting} className="sm:col-span-4">
-          {submitting ? "جارٍ الحفظ..." : "إنشاء الفاتورة"}
+          {submitting ? t("invoicesPage.createForm.saving") : t("invoicesPage.createForm.create")}
         </Button>
       </form>
     </Card>
