@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { ClientPortalAuthProvider } from "../auth/ClientPortalAuthContext";
+import { I18nProvider } from "../../i18n/I18nProvider";
 import { PortalLogin } from "./PortalLogin";
 
 vi.mock("../api/portalClient", async () => {
@@ -13,11 +14,13 @@ import { portalApiFetch } from "../api/portalClient";
 
 function renderLogin() {
   return render(
-    <MemoryRouter initialEntries={["/portal/login"]}>
-      <ClientPortalAuthProvider>
-        <PortalLogin />
-      </ClientPortalAuthProvider>
-    </MemoryRouter>,
+    <I18nProvider>
+      <MemoryRouter initialEntries={["/portal/login"]}>
+        <ClientPortalAuthProvider>
+          <PortalLogin />
+        </ClientPortalAuthProvider>
+      </MemoryRouter>
+    </I18nProvider>,
   );
 }
 

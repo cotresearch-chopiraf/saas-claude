@@ -3,6 +3,7 @@ import { Table } from "./Table";
 import { Skeleton } from "./Skeleton";
 import { ErrorState } from "./ErrorState";
 import { EmptyState } from "./EmptyState";
+import { useTranslation } from "../i18n/I18nProvider";
 
 // The one reusable financial table pattern every future MIDAD financial
 // screen (BOQ, Cost Plan, Commitments, Measurements, IPC, Forecast, Cash
@@ -53,14 +54,15 @@ export function FinancialTable<T>({
   loading,
   error,
   onRetry,
-  emptyMessage = "لا توجد بيانات بعد",
+  emptyMessage,
   rowActions,
   sort,
   onSort,
 }: FinancialTableProps<T>) {
+  const { t } = useTranslation();
   if (error) return <ErrorState message={error} onRetry={onRetry} />;
   if (loading || rows === null) return <Skeleton rows={4} />;
-  if (rows.length === 0) return <EmptyState message={emptyMessage} />;
+  if (rows.length === 0) return <EmptyState message={emptyMessage ?? t("common.noDataYet")} />;
 
   const hasTotals = columns.some((c) => c.total);
 
@@ -84,7 +86,7 @@ export function FinancialTable<T>({
               )}
             </th>
           ))}
-          {rowActions && <th className="p-3" aria-label="إجراءات" />}
+          {rowActions && <th className="p-3" aria-label={t("common.actions")} />}
         </tr>
       </thead>
       <tbody>

@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { PlatformAuthProvider } from "../auth/PlatformAuthContext";
+import { I18nProvider } from "../../i18n/I18nProvider";
 import { PlatformDashboard } from "./PlatformDashboard";
 import type { Organization, PlatformActivityEvent, SupportSessionSummary } from "../api/types";
 
@@ -56,16 +57,18 @@ function mockDefault(overrides: Partial<Record<string, () => Promise<unknown>>> 
 
 function renderDashboard() {
   return render(
-    <MemoryRouter initialEntries={["/platform"]}>
-      <PlatformAuthProvider>
-        <Routes>
-          <Route path="/platform" element={<PlatformDashboard />} />
-          <Route path="/platform/organizations" element={<div>صفحة المؤسسات</div>} />
-          <Route path="/platform/support-sessions" element={<div>صفحة جلسات الدعم</div>} />
-          <Route path="/platform/support-sessions/:id" element={<div>صفحة تفاصيل الجلسة</div>} />
-        </Routes>
-      </PlatformAuthProvider>
-    </MemoryRouter>,
+    <I18nProvider>
+      <MemoryRouter initialEntries={["/platform"]}>
+        <PlatformAuthProvider>
+          <Routes>
+            <Route path="/platform" element={<PlatformDashboard />} />
+            <Route path="/platform/organizations" element={<div>صفحة المؤسسات</div>} />
+            <Route path="/platform/support-sessions" element={<div>صفحة جلسات الدعم</div>} />
+            <Route path="/platform/support-sessions/:id" element={<div>صفحة تفاصيل الجلسة</div>} />
+          </Routes>
+        </PlatformAuthProvider>
+      </MemoryRouter>
+    </I18nProvider>,
   );
 }
 

@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { PlatformAuthProvider } from "../auth/PlatformAuthContext";
+import { I18nProvider } from "../../i18n/I18nProvider";
 import { PlatformSupportSession } from "./PlatformSupportSession";
 import type { SupportActivityEvent, SupportActivityPage } from "../api/types";
 
@@ -31,13 +32,15 @@ function mockActivity(page: SupportActivityPage) {
 
 function renderPage(state?: { organizationName?: string }) {
   return render(
-    <MemoryRouter initialEntries={[{ pathname: "/platform/support-sessions/sess-1", state }]}>
-      <PlatformAuthProvider>
-        <Routes>
-          <Route path="/platform/support-sessions/:id" element={<PlatformSupportSession />} />
-        </Routes>
-      </PlatformAuthProvider>
-    </MemoryRouter>,
+    <I18nProvider>
+      <MemoryRouter initialEntries={[{ pathname: "/platform/support-sessions/sess-1", state }]}>
+        <PlatformAuthProvider>
+          <Routes>
+            <Route path="/platform/support-sessions/:id" element={<PlatformSupportSession />} />
+          </Routes>
+        </PlatformAuthProvider>
+      </MemoryRouter>
+    </I18nProvider>,
   );
 }
 

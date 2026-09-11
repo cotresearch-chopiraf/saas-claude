@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { PlatformAuthProvider } from "../auth/PlatformAuthContext";
+import { I18nProvider } from "../../i18n/I18nProvider";
 import { PlatformSupportSessions } from "./PlatformSupportSessions";
 import type { SupportSessionListPage, SupportSessionSummary } from "../api/types";
 
@@ -50,14 +51,16 @@ function mockList(page: SupportSessionListPage) {
 
 function renderPage() {
   return render(
-    <MemoryRouter initialEntries={["/platform/support-sessions"]}>
-      <PlatformAuthProvider>
-        <Routes>
-          <Route path="/platform/support-sessions" element={<PlatformSupportSessions />} />
-          <Route path="/platform/support-sessions/:id" element={<div>صفحة تفاصيل الجلسة</div>} />
-        </Routes>
-      </PlatformAuthProvider>
-    </MemoryRouter>,
+    <I18nProvider>
+      <MemoryRouter initialEntries={["/platform/support-sessions"]}>
+        <PlatformAuthProvider>
+          <Routes>
+            <Route path="/platform/support-sessions" element={<PlatformSupportSessions />} />
+            <Route path="/platform/support-sessions/:id" element={<div>صفحة تفاصيل الجلسة</div>} />
+          </Routes>
+        </PlatformAuthProvider>
+      </MemoryRouter>
+    </I18nProvider>,
   );
 }
 

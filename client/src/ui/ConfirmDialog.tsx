@@ -1,5 +1,6 @@
 import { Modal } from "./Modal";
 import { Button } from "./Button";
+import { useTranslation } from "../i18n/I18nProvider";
 
 // The one reusable confirmation pattern for a destructive/irreversible
 // action (cancel a commitment, reject a measurement, etc.) — future domain
@@ -9,8 +10,8 @@ export function ConfirmDialog({
   open,
   title,
   message,
-  confirmLabel = "تأكيد",
-  cancelLabel = "إلغاء",
+  confirmLabel,
+  cancelLabel,
   destructive = false,
   onConfirm,
   onCancel,
@@ -24,15 +25,16 @@ export function ConfirmDialog({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <Modal open={open} onClose={onCancel} title={title}>
       <p className="text-sm text-stone-600">{message}</p>
       <div className="mt-5 flex justify-end gap-2">
         <Button variant="secondary" size="sm" onClick={onCancel}>
-          {cancelLabel}
+          {cancelLabel ?? t("common.cancel")}
         </Button>
         <Button variant={destructive ? "danger" : "primary"} size="sm" onClick={onConfirm}>
-          {confirmLabel}
+          {confirmLabel ?? t("common.confirm")}
         </Button>
       </div>
     </Modal>

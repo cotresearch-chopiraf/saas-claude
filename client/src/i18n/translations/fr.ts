@@ -32,6 +32,9 @@ const fr = {
     date: "Date",
     amount: "Montant",
     notes: "Notes",
+    noDataYet: "Aucune donnée pour l'instant",
+    loadingAriaLabel: "Chargement en cours",
+    comingSoon: "Ce module est en cours de développement",
   },
   boq: {
     title: "Bordereau de quantités",

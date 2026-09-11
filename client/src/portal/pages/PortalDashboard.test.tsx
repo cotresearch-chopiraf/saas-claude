@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { ClientPortalAuthProvider } from "../auth/ClientPortalAuthContext";
+import { I18nProvider } from "../../i18n/I18nProvider";
 import { PortalDashboard } from "./PortalDashboard";
 import type { PortalProject } from "../api/types";
 
@@ -27,15 +28,17 @@ function seedStoredUser() {
 
 function renderDashboard() {
   return render(
-    <MemoryRouter initialEntries={["/portal"]}>
-      <ClientPortalAuthProvider>
-        <Routes>
-          <Route path="/portal" element={<PortalDashboard />} />
-          <Route path="/portal/login" element={<div>صفحة تسجيل الدخول</div>} />
-          <Route path="/portal/projects/:projectId" element={<div>صفحة تفاصيل المشروع</div>} />
-        </Routes>
-      </ClientPortalAuthProvider>
-    </MemoryRouter>,
+    <I18nProvider>
+      <MemoryRouter initialEntries={["/portal"]}>
+        <ClientPortalAuthProvider>
+          <Routes>
+            <Route path="/portal" element={<PortalDashboard />} />
+            <Route path="/portal/login" element={<div>صفحة تسجيل الدخول</div>} />
+            <Route path="/portal/projects/:projectId" element={<div>صفحة تفاصيل المشروع</div>} />
+          </Routes>
+        </ClientPortalAuthProvider>
+      </MemoryRouter>
+    </I18nProvider>,
   );
 }
 

@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { PlatformAuthProvider } from "../auth/PlatformAuthContext";
+import { I18nProvider } from "../../i18n/I18nProvider";
 import { PlatformLogin } from "./PlatformLogin";
 
 vi.mock("../api/platformClient", async () => {
@@ -13,11 +14,13 @@ import { platformApiFetch } from "../api/platformClient";
 
 function renderLogin() {
   return render(
-    <MemoryRouter initialEntries={["/platform/login"]}>
-      <PlatformAuthProvider>
-        <PlatformLogin />
-      </PlatformAuthProvider>
-    </MemoryRouter>,
+    <I18nProvider>
+      <MemoryRouter initialEntries={["/platform/login"]}>
+        <PlatformAuthProvider>
+          <PlatformLogin />
+        </PlatformAuthProvider>
+      </MemoryRouter>
+    </I18nProvider>,
   );
 }
 

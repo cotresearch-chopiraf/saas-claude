@@ -32,6 +32,9 @@ const en = {
     date: "Date",
     amount: "Amount",
     notes: "Notes",
+    noDataYet: "No data yet",
+    loadingAriaLabel: "Loading",
+    comingSoon: "This module is under development",
   },
   boq: {
     title: "Bill of quantities",

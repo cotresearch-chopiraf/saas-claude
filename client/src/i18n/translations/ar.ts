@@ -31,6 +31,9 @@ const ar = {
     date: "التاريخ",
     amount: "المبلغ",
     notes: "ملاحظات",
+    noDataYet: "لا توجد بيانات بعد",
+    loadingAriaLabel: "جارٍ التحميل",
+    comingSoon: "هذه الوحدة قيد التطوير",
   },
   boq: {
     title: "جدول الكميات",

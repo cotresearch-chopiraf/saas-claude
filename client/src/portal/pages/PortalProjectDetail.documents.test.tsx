@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { ClientPortalAuthProvider } from "../auth/ClientPortalAuthContext";
+import { I18nProvider } from "../../i18n/I18nProvider";
 import { PortalProjectDetail } from "./PortalProjectDetail";
 import type { PortalProject, PortalDocument } from "../api/types";
 
@@ -55,15 +56,17 @@ function mockApi(opts: { documents?: PortalDocument[] | "error"; project?: Porta
 
 function renderDetail() {
   return render(
-    <MemoryRouter initialEntries={["/portal/projects/proj-1"]}>
-      <ClientPortalAuthProvider>
-        <Routes>
-          <Route path="/portal" element={<div>صفحة المشاريع</div>} />
-          <Route path="/portal/login" element={<div>صفحة تسجيل الدخول</div>} />
-          <Route path="/portal/projects/:projectId" element={<PortalProjectDetail />} />
-        </Routes>
-      </ClientPortalAuthProvider>
-    </MemoryRouter>,
+    <I18nProvider>
+      <MemoryRouter initialEntries={["/portal/projects/proj-1"]}>
+        <ClientPortalAuthProvider>
+          <Routes>
+            <Route path="/portal" element={<div>صفحة المشاريع</div>} />
+            <Route path="/portal/login" element={<div>صفحة تسجيل الدخول</div>} />
+            <Route path="/portal/projects/:projectId" element={<PortalProjectDetail />} />
+          </Routes>
+        </ClientPortalAuthProvider>
+      </MemoryRouter>
+    </I18nProvider>,
   );
 }
 
