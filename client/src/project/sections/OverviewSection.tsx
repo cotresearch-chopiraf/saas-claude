@@ -317,24 +317,22 @@ export function OverviewSection() {
         />
       </div>
 
-      <div className="order-7 grid gap-5 lg:order-9 lg:grid-cols-2 lg:gap-6">
-        <IpcCard
+      {/* Tertiary cluster: BOQ status, Commercial Execution, Activity share one
+          slot with a tighter internal gap than the primary/secondary sections
+          above — a spacing signal, on top of the tier system, that these read
+          as one supporting group rather than three independent blocks. */}
+      <div className="order-7 flex flex-col gap-3 lg:order-8 lg:gap-4">
+        <BoqStatusCard revision={latestRevision} projectId={projectId} />
+        <CommercialExecutionCard
           projectId={projectId}
           awaitingCertification={ipcsAwaitingCertification.length}
           awaitingApproval={ipcsAwaitingApproval.length}
           certifiedTotal={certifiedTotal}
           certifiedCount={certifiedIpcs.length}
           currency={data.forecast.currency}
+          laborCost={data.laborCost}
         />
-        <LaborCostCard laborCost={data.laborCost} />
-      </div>
-
-      <div className="order-7 lg:order-10">
         <ActivityFeedCard events={projectActivity} />
-      </div>
-
-      <div className="order-7 lg:order-8">
-        <BoqStatusCard revision={latestRevision} projectId={projectId} />
       </div>
     </div>
   );
@@ -555,8 +553,8 @@ function HeroStat({ label, value, hint }: { label: string; value: string; hint?:
   return (
     <div>
       <p className="text-xs text-stone-500">{label}</p>
-      <p className="text-xl font-extrabold tracking-tight text-stone-900">{value}</p>
-      {hint && <p className="text-[11px] text-stone-400">{hint}</p>}
+      <p className="text-2xl font-extrabold tracking-tight text-stone-900">{value}</p>
+      {hint && <p className="text-xs text-stone-400">{hint}</p>}
     </div>
   );
 }
@@ -682,8 +680,8 @@ function HealthGrid({ health, projectId }: { health: HealthIndicator[]; projectI
                 <IconBadge icon={Icon} tone={healthBadgeTone[h.tone]} />
                 <span className="text-sm font-semibold text-stone-800">{h.label}</span>
               </div>
-              <p className="mt-2 text-xs font-medium text-stone-600">{h.statusText}</p>
-              <p className="mt-0.5 text-[11px] text-stone-400">{h.metric}</p>
+              <p className="mt-2 text-sm font-medium text-stone-600">{h.statusText}</p>
+              <p className="mt-0.5 text-xs text-stone-400">{h.metric}</p>
             </Link>
           );
         })}
@@ -708,37 +706,58 @@ function FinancialWaterfallCard({
 }) {
   const m = forecast.methods.commitment_aware;
   const overBudget = m.variance < 0;
-  const steps: { label: string; value: number; href: string }[] = [
+  // Contract -> Budget -> (Actual + Commitments, shown together as one step,
+  // matching how the two are actually related — committed exposure sits
+  // alongside spend-to-date, not after it) -> Forecast. Every figure is
+  // still read verbatim off forecast.methods.commitment_aware / the
+  // contract, never recomputed.
+  const steps: { label: string; value: number; href: string; combined?: { label: string; value: number; href: string } }[] = [
     { label: "قيمة العقد", value: contract ? Number(contract.revisedValue) : m.costPlan, href: "contract" },
     { label: "الميزانية المعتمدة", value: m.costPlan, href: "cost-plan" },
-    { label: "التكلفة الفعلية", value: m.actualCost, href: "actual-cost" },
-    { label: "الالتزامات", value: m.committedCost, href: "procurement" },
+    {
+      label: "التكلفة الفعلية",
+      value: m.actualCost,
+      href: "actual-cost",
+      combined: { label: "الالتزامات", value: m.committedCost, href: "procurement" },
+    },
     { label: "التوقع عند الإنجاز", value: m.eac, href: "forecast" },
   ];
 
   return (
     <Panel tier="primary">
       <SectionHeader icon={IconMoney} tier="primary" title="المركز المالي" meta={`بتاريخ ${formatDate(forecast.asOfDate)}`} />
-      <div className="flex flex-wrap items-stretch gap-2 lg:flex-nowrap">
+      <div className="flex flex-wrap items-stretch gap-2">
         {steps.map((s, i) => (
-          <div key={s.label} className="flex flex-1 items-center gap-2" style={{ minWidth: "8.5rem" }}>
-            <Link
-              to={`/projects/${projectId}/${s.href}`}
-              className="flex-1 rounded-lg border border-stone-200 bg-stone-50/60 p-3 transition hover:border-primary/40 hover:bg-white hover:shadow-sm"
-            >
-              <p className="text-[11px] text-stone-500">{s.label}</p>
-              <p className="mt-1 truncate text-base font-extrabold text-stone-900">{formatMoney(s.value, forecast.currency)}</p>
-            </Link>
+          <div
+            key={s.label}
+            className={`flex min-w-0 items-center gap-2 ${s.combined ? "flex-[2]" : "flex-1"}`}
+            style={{ minWidth: s.combined ? "18rem" : "10rem" }}
+          >
+            <div className={`min-w-0 flex-1 rounded-lg border border-stone-200 bg-stone-50/60 p-3 ${s.combined ? "flex divide-x divide-x-reverse divide-stone-200" : ""}`}>
+              <Link
+                to={`/projects/${projectId}/${s.href}`}
+                className={`block min-w-0 rounded-md transition hover:bg-white ${s.combined ? "flex-1 pl-3" : ""}`}
+              >
+                <p className="text-xs text-stone-500">{s.label}</p>
+                <p className="mt-1 text-base font-extrabold leading-snug text-stone-900">{formatMoney(s.value, forecast.currency)}</p>
+              </Link>
+              {s.combined && (
+                <Link to={`/projects/${projectId}/${s.combined.href}`} className="block min-w-0 flex-1 rounded-md pr-3 transition hover:bg-white">
+                  <p className="text-xs text-stone-500">{s.combined.label}</p>
+                  <p className="mt-1 whitespace-nowrap text-base font-extrabold text-stone-900">{formatMoney(s.combined.value, forecast.currency)}</p>
+                </Link>
+              )}
+            </div>
             {i < steps.length - 1 && <IconChevron className="hidden shrink-0 text-stone-300 lg:block" />}
           </div>
         ))}
       </div>
-      <div className={`mt-4 flex items-center justify-between gap-3 rounded-lg border p-3.5 ${overBudget ? "border-danger-200 bg-danger-50" : "border-success-200 bg-success-50"}`}>
+      <div className={`mt-4 flex items-center justify-between gap-3 rounded-lg border p-4 ${overBudget ? "border-danger-200 bg-danger-50" : "border-success-200 bg-success-50"}`}>
         <span className={`flex items-center gap-2 text-sm font-semibold ${overBudget ? "text-danger-700" : "text-success-700"}`}>
-          {overBudget ? <IconAlertTriangle width={16} height={16} /> : <IconTrend width={16} height={16} />}
+          {overBudget ? <IconAlertTriangle width={18} height={18} /> : <IconTrend width={18} height={18} />}
           الانحراف المتوقع{overBudget ? " — تجاوز متوقع للميزانية" : ""}
         </span>
-        <span className={`text-base font-extrabold ${overBudget ? "text-danger-700" : "text-success-700"}`}>
+        <span className={`text-xl font-extrabold ${overBudget ? "text-danger-700" : "text-success-700"}`}>
           {formatMoney(m.variance, forecast.currency)} ({formatPercent(m.variancePercent)})
         </span>
       </div>
@@ -764,8 +783,8 @@ function CostVsProgressCard({ budget, avgProgress }: { budget: BudgetSummary; av
         <RadialGauge value={costConsumption} label="استهلاك التكلفة" color={warn ? "#dc2626" : "#16a34a"} />
       </div>
       {warn && (
-        <p className="mt-4 flex items-center gap-2 rounded-md bg-warning-50 px-3 py-2 text-sm font-medium text-warning-700">
-          <IconAlertTriangle width={16} height={16} />
+        <p className="mt-4 flex items-center gap-2 rounded-md bg-warning-50 px-3 py-2.5 text-sm font-semibold text-warning-700">
+          <IconAlertTriangle width={18} height={18} />
           استهلاك التكلفة يسبق الإنجاز الفعلي للمشروع
         </p>
       )}
@@ -786,8 +805,8 @@ function CostVsProgressCard({ budget, avgProgress }: { budget: BudgetSummary; av
 // A single real percentage (never a fabricated time series) rendered as an
 // SVG radial gauge — the one genuine chart on this page, used twice above.
 function RadialGauge({ value, label, color }: { value: number | null; label: string; color: string }) {
-  const size = 108;
-  const stroke = 10;
+  const size = 132;
+  const stroke = 11;
   const r = (size - stroke) / 2;
   const circumference = 2 * Math.PI * r;
   const pct = Math.min(100, Math.max(0, value ?? 0));
@@ -812,10 +831,10 @@ function RadialGauge({ value, label, color }: { value: number | null; label: str
           )}
         </svg>
         <div className="absolute inset-0 flex items-center justify-center">
-          <span className="text-xl font-extrabold text-stone-900">{value !== null ? formatPercent(value, 0) : "—"}</span>
+          <span className="text-2xl font-extrabold text-stone-900">{value !== null ? formatPercent(value, 0) : "—"}</span>
         </div>
       </div>
-      <span className="text-xs font-medium text-stone-600">{label}</span>
+      <span className="text-sm font-semibold text-stone-600">{label}</span>
     </div>
   );
 }
@@ -1085,14 +1104,20 @@ function ProcurementCard({
   );
 }
 
-// ── LEVEL 9 — IPC ────────────────────────────────────────────────────────
-function IpcCard({
+// ── LEVEL 9 — Commercial Execution (IPC + Labor Cost) ───────────────────
+// IPC and distributed labor cost are two distinct real data sources
+// (Ipc[] and ProjectLaborCost) — grouped under one panel purely as
+// presentation (one visual object instead of two competing tertiary
+// cards), each keeping its own heading, figures, and drill-down link
+// untouched.
+function CommercialExecutionCard({
   projectId,
   awaitingCertification,
   awaitingApproval,
   certifiedTotal,
   certifiedCount,
   currency,
+  laborCost,
 }: {
   projectId: string;
   awaitingCertification: number;
@@ -1100,50 +1125,42 @@ function IpcCard({
   certifiedTotal: number;
   certifiedCount: number;
   currency: string;
+  laborCost: ProjectLaborCost;
 }) {
   return (
     <Panel tier="tertiary">
-      <SectionHeader
-        icon={IconClipboard}
-        tier="tertiary"
-        title="شهادات الدفع (IPC)"
-        action={
-          <Link to={`/projects/${projectId}/ipc`} className="text-sm font-medium text-primary hover:underline">
+      <SectionHeader icon={IconClipboard} tier="tertiary" title="التنفيذ التجاري" meta="شهادات الدفع وتكلفة العمالة" />
+      <div>
+        <div className="mb-2 flex items-center justify-between">
+          <h3 className="text-xs font-semibold text-stone-500">شهادات الدفع (IPC)</h3>
+          <Link to={`/projects/${projectId}/ipc`} className="text-xs font-medium text-primary hover:underline">
             فتح الشهادات
           </Link>
-        }
-      />
-      <MetricCard label={`القيمة المصدَّقة (${certifiedCount})`} value={formatMoney(certifiedTotal, currency)} tone="success" />
-      <div className="mt-3 grid grid-cols-2 gap-3">
-        <MetricCard label="بانتظار التصديق" value={String(awaitingCertification)} tone={awaitingCertification > 0 ? "warning" : "default"} />
-        <MetricCard label="بانتظار الاعتماد" value={String(awaitingApproval)} tone={awaitingApproval > 0 ? "warning" : "default"} />
-      </div>
-    </Panel>
-  );
-}
-
-// ── Labor cost (kept from the previous Overview, unchanged logic) ──────
-function LaborCostCard({ laborCost }: { laborCost: ProjectLaborCost }) {
-  return (
-    <Panel tier="tertiary">
-      <SectionHeader
-        icon={IconBars}
-        tier="tertiary"
-        title="تكلفة العمالة الموزَّعة"
-        action={laborCost.allocationCount > 0 && laborCost.posted ? <Badge tone="success">مرحّلة بالكامل</Badge> : undefined}
-      />
-      {laborCost.allocationCount === 0 ? (
-        <p className="text-sm text-stone-400">لا توجد تكلفة عمالة موزعة</p>
-      ) : (
-        <div className="grid grid-cols-2 gap-3">
-          <MetricCard label="إجمالي الموزَّع" value={formatMoney(laborCost.allocatedTotal)} />
-          <MetricCard label="عدد التوزيعات" value={String(laborCost.allocationCount)} />
         </div>
-      )}
-      <div className="mt-3 text-end">
-        <Link to="/payroll" className="text-sm font-medium text-primary hover:underline">
-          عرض تفاصيل توزيع الرواتب
-        </Link>
+        <MetricCard label={`القيمة المصدَّقة (${certifiedCount})`} value={formatMoney(certifiedTotal, currency)} tone="success" />
+        <div className="mt-3 grid grid-cols-2 gap-3">
+          <MetricCard label="بانتظار التصديق" value={String(awaitingCertification)} tone={awaitingCertification > 0 ? "warning" : "default"} />
+          <MetricCard label="بانتظار الاعتماد" value={String(awaitingApproval)} tone={awaitingApproval > 0 ? "warning" : "default"} />
+        </div>
+      </div>
+      <div className="mt-4 border-t border-stone-100 pt-4">
+        <div className="mb-2 flex items-center justify-between">
+          <h3 className="text-xs font-semibold text-stone-500">تكلفة العمالة الموزَّعة</h3>
+          {laborCost.allocationCount > 0 && laborCost.posted ? <Badge tone="success">مرحّلة بالكامل</Badge> : null}
+        </div>
+        {laborCost.allocationCount === 0 ? (
+          <p className="text-sm text-stone-400">لا توجد تكلفة عمالة موزعة</p>
+        ) : (
+          <div className="grid grid-cols-2 gap-3">
+            <MetricCard label="إجمالي الموزَّع" value={formatMoney(laborCost.allocatedTotal)} />
+            <MetricCard label="عدد التوزيعات" value={String(laborCost.allocationCount)} />
+          </div>
+        )}
+        <div className="mt-3 text-end">
+          <Link to="/payroll" className="text-xs font-medium text-primary hover:underline">
+            عرض تفاصيل توزيع الرواتب
+          </Link>
+        </div>
       </div>
     </Panel>
   );
