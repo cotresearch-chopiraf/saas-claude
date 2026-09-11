@@ -12,6 +12,7 @@ import { MetricCard } from "../ui/MetricCard";
 import { FinancialTable, type FinancialColumn } from "../ui/FinancialTable";
 import { ErrorState } from "../ui/ErrorState";
 import { EmptyState } from "../ui/EmptyState";
+import { useTranslation } from "../i18n/I18nProvider";
 
 // Slice AA Scope G — GET /api/invoices is now paginated server-side (a
 // server-enforced max page size, closing the previous unbounded-query
@@ -23,7 +24,6 @@ import { EmptyState } from "../ui/EmptyState";
 // ones.
 const PAGE_SIZE = 100;
 
-const statusLabel: Record<Invoice["status"], string> = { draft: "مسودة", sent: "أُرسلت", paid: "مُسدَّدة" };
 // Same neutral/warning/success vocabulary used everywhere else (Badge's
 // own tone system), replacing this page's previous hand-mapped colors.
 const statusTone: Record<Invoice["status"], "neutral" | "warning" | "success"> = {
@@ -31,7 +31,6 @@ const statusTone: Record<Invoice["status"], "neutral" | "warning" | "success"> =
   sent: "warning",
   paid: "success",
 };
-const money = (n: number) => formatMoney(n);
 
 interface DraftItem {
   description: string;
@@ -55,6 +54,7 @@ async function downloadInvoicePdf(id: string, invoiceNumber: string) {
 // same pagination walk, same feature-flag-off handling, same per-status
 // actions.
 export function Invoices() {
+  const { t, locale } = useTranslation();
   const [invoices, setInvoices] = useState<Invoice[] | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [disabled, setDisabled] = useState(false);
@@ -83,7 +83,7 @@ export function Invoices() {
       if (err instanceof ApiError && err.status === 403) {
         setDisabled(true);
       } else {
-        setError(err instanceof ApiError ? err.message : "تعذّر تحميل الفواتير");
+        setError(err instanceof ApiError ? err.message : t("globalInvoicesPage.loadError"));
       }
     }
   }
@@ -104,8 +104,8 @@ export function Invoices() {
   if (disabled) {
     return (
       <Layout>
-        <PageHeader title="الفواتير" />
-        <EmptyState message="ميزة الفوترة معطّلة حالياً لشركتك — فعّليها من صفحة الإعدادات لبدء إصدار الفواتير." />
+        <PageHeader title={t("globalInvoicesPage.title")} />
+        <EmptyState message={t("globalInvoicesPage.disabledMessage")} />
       </Layout>
     );
   }
@@ -115,30 +115,30 @@ export function Invoices() {
   const paidRevenueTotal = paidInvoices.reduce((sum, inv) => sum + inv.total, 0);
 
   const columns: FinancialColumn<Invoice>[] = [
-    { key: "invoiceNumber", header: "رقم الفاتورة", render: (inv) => <span className="font-mono text-xs text-stone-500">{inv.invoiceNumber}</span> },
-    { key: "clientName", header: "العميل", render: (inv) => inv.clientName },
-    { key: "issueDate", header: "تاريخ الإصدار", render: (inv) => inv.issueDate },
-    { key: "subtotal", header: "المجموع الفرعي", render: (inv) => money(inv.subtotal) },
-    { key: "tax", header: "الضريبة", render: (inv) => `${money(inv.taxAmount)} (${inv.taxRatePercent}%)` },
-    { key: "total", header: "الإجمالي", render: (inv) => <span className="font-medium text-stone-700">{money(inv.total)}</span> },
-    { key: "status", header: "الحالة", render: (inv) => <Badge tone={statusTone[inv.status]}>{statusLabel[inv.status]}</Badge> },
+    { key: "invoiceNumber", header: t("globalInvoicesPage.columns.invoiceNumber"), render: (inv) => <span className="font-mono text-xs text-stone-500">{inv.invoiceNumber}</span> },
+    { key: "clientName", header: t("globalInvoicesPage.columns.clientName"), render: (inv) => inv.clientName },
+    { key: "issueDate", header: t("globalInvoicesPage.columns.issueDate"), render: (inv) => inv.issueDate },
+    { key: "subtotal", header: t("globalInvoicesPage.columns.subtotal"), render: (inv) => formatMoney(inv.subtotal, undefined, locale) },
+    { key: "tax", header: t("globalInvoicesPage.columns.tax"), render: (inv) => t("globalInvoicesPage.taxCell", { amount: formatMoney(inv.taxAmount, undefined, locale), percent: inv.taxRatePercent }) },
+    { key: "total", header: t("globalInvoicesPage.columns.total"), render: (inv) => <span className="font-medium text-stone-700">{formatMoney(inv.total, undefined, locale)}</span> },
+    { key: "status", header: t("globalInvoicesPage.columns.status"), render: (inv) => <Badge tone={statusTone[inv.status]}>{t(`globalInvoicesPage.status.${inv.status}`)}</Badge> },
   ];
 
   return (
     <Layout>
       <PageHeader
-        title="الفواتير"
+        title={t("globalInvoicesPage.title")}
         actions={
           <Button size="sm" onClick={() => setShowForm((v) => !v)}>
-            {showForm ? "إلغاء" : "+ فاتورة جديدة"}
+            {showForm ? t("common.cancel") : t("globalInvoicesPage.newInvoice")}
           </Button>
         }
       />
 
       {!error && invoices !== null && paidInvoices.length > 0 && (
         <div className="mb-6 grid gap-4 sm:grid-cols-2">
-          <MetricCard label="إجمالي المُحصَّل (فواتير مُسدَّدة)" value={money(paidRevenueTotal)} />
-          <MetricCard label="إجمالي الضريبة من الفواتير المُسدَّدة" value={money(paidTaxTotal)} />
+          <MetricCard label={t("globalInvoicesPage.metrics.paidRevenue")} value={formatMoney(paidRevenueTotal, undefined, locale)} />
+          <MetricCard label={t("globalInvoicesPage.metrics.paidTax")} value={formatMoney(paidTaxTotal, undefined, locale)} />
         </div>
       )}
 
@@ -159,21 +159,21 @@ export function Invoices() {
         rowKey={(inv) => inv.id}
         error={error}
         onRetry={load}
-        emptyMessage="لا توجد فواتير بعد"
+        emptyMessage={t("globalInvoicesPage.emptyMessage")}
         rowActions={(inv) => (
           <div className="flex flex-wrap justify-end gap-2">
             {inv.status === "draft" && (
               <Button size="sm" onClick={() => sendInvoice(inv)}>
-                إرسال للعميل
+                {t("globalInvoicesPage.actions.sendToClient")}
               </Button>
             )}
             {inv.status === "sent" && (
               <Button size="sm" onClick={() => markPaid(inv)}>
-                تسجيل كمُسدَّدة
+                {t("globalInvoicesPage.actions.markPaid")}
               </Button>
             )}
             <Button size="sm" variant="secondary" onClick={() => downloadInvoicePdf(inv.id, inv.invoiceNumber)}>
-              تنزيل PDF
+              {t("globalInvoicesPage.actions.downloadPdf")}
             </Button>
           </div>
         )}
@@ -183,6 +183,7 @@ export function Invoices() {
 }
 
 function NewInvoiceForm({ onCreated }: { onCreated: () => void }) {
+  const { t } = useTranslation();
   const [clientName, setClientName] = useState("");
   const [clientAddress, setClientAddress] = useState("");
   const [language, setLanguage] = useState<DocumentLanguage>("ar");
@@ -210,7 +211,7 @@ function NewInvoiceForm({ onCreated }: { onCreated: () => void }) {
       });
       onCreated();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر إنشاء الفاتورة");
+      setError(err instanceof ApiError ? err.message : t("globalInvoicesPage.form.genericError"));
     }
   }
 
@@ -220,13 +221,13 @@ function NewInvoiceForm({ onCreated }: { onCreated: () => void }) {
       <div className="grid gap-3 sm:grid-cols-2">
         <input
           required
-          placeholder="اسم العميل"
+          placeholder={t("globalInvoicesPage.form.clientNamePlaceholder")}
           value={clientName}
           onChange={(e) => setClientName(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
         />
         <input
-          placeholder="عنوان العميل (اختياري)"
+          placeholder={t("globalInvoicesPage.form.clientAddressPlaceholder")}
           value={clientAddress}
           onChange={(e) => setClientAddress(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
@@ -239,7 +240,7 @@ function NewInvoiceForm({ onCreated }: { onCreated: () => void }) {
         {items.map((item, i) => (
           <div key={i} className="flex gap-2">
             <input
-              placeholder="بند (مثال: أجور تركيب)"
+              placeholder={t("globalInvoicesPage.form.itemDescriptionPlaceholder")}
               value={item.description}
               onChange={(e) => updateItem(i, { description: e.target.value })}
               className="flex-1 rounded-md border border-stone-300 px-3 py-2 text-sm"
@@ -247,7 +248,7 @@ function NewInvoiceForm({ onCreated }: { onCreated: () => void }) {
             <input
               type="number"
               min="0"
-              placeholder="المبلغ"
+              placeholder={t("globalInvoicesPage.form.amountPlaceholder")}
               value={item.amount}
               onChange={(e) => updateItem(i, { amount: e.target.value })}
               className="w-40 rounded-md border border-stone-300 px-3 py-2 text-sm"
@@ -259,12 +260,12 @@ function NewInvoiceForm({ onCreated }: { onCreated: () => void }) {
           onClick={() => setItems((prev) => [...prev, { description: "", amount: "" }])}
           className="text-sm text-primary underline decoration-dotted"
         >
-          + إضافة بند آخر
+          {t("globalInvoicesPage.form.addItem")}
         </button>
       </div>
 
-      <p className="text-xs text-stone-400">الترقيم ونسبة الضريبة ومعلومات الشركة تُملأ تلقائياً من الإعدادات.</p>
-      <Button type="submit">حفظ كمسودة</Button>
+      <p className="text-xs text-stone-400">{t("globalInvoicesPage.form.autoFillNotice")}</p>
+      <Button type="submit">{t("globalInvoicesPage.form.saveDraft")}</Button>
     </form>
   );
 }
