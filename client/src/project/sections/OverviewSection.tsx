@@ -44,10 +44,16 @@ import type {
 // ─────────────────────────────────────────────────────────────────────────
 // MIDAD — Executive Command Center (project-level).
 //
-// Real visual hierarchy: identity → health → financial waterfall → cost vs
-// progress → risk → progress/schedule → cash flow → procurement → IPC →
-// activity → quick actions. Every figure still comes from this codebase's
-// own already-authoritative endpoints (Contract/Budget/Forecast/Cash Flow/
+// Composition is one asymmetric 12-column grid (see the JSX below), not a
+// vertical stack of equal-weight cards: identity (full width) -> health +
+// financial control -> cost-vs-progress (large) + needs attention ->
+// progress/schedule + cash flow -> procurement + commercial execution ->
+// activity + quick actions (full width, lowest priority). Source order
+// equals reading/priority order on every breakpoint, so the same JSX
+// collapses to that exact sequence on mobile with no per-breakpoint
+// `order-N` overrides needed. Every figure still comes from this
+// codebase's own already-authoritative endpoints (Contract/Budget/
+// Forecast/Cash Flow/
 // Commitments/IPCs/Measurements/Schedule/Punch List/Budget Alerts/Labor
 // Cost/BOQ, plus the canonical audit_events feed filtered client-side to
 // this project's own entity ids) — nothing here computes a second version
@@ -268,29 +274,35 @@ export function OverviewSection() {
     measurementsHaveData: data.measurements.length > 0,
   });
 
+  // Executive Command Center composition: one 12-column grid, source order
+  // equal to reading/priority order on every breakpoint (project -> health
+  // -> financial -> cost-vs-progress -> needs attention -> progress/cash/
+  // procurement/commercial -> activity/actions), so no per-breakpoint
+  // `order-N` overrides are needed the way the previous single-column
+  // layout required. Column spans create the asymmetric zones the brief
+  // calls for; below `md` every zone is simply full width in this same
+  // order, which is already the requested mobile priority sequence.
   return (
-    <div className="flex flex-col gap-5 lg:gap-6">
-      <div className="order-1">
+    <div className="grid grid-cols-1 gap-5 xl:grid-cols-12 lg:gap-6">
+      <div className="xl:col-span-12">
         <IdentityStrip project={project} contract={mainContract} avgProgress={avgProgress} activity={data.activity} />
       </div>
 
-      <div className="order-2">
+      <div className="xl:col-span-5">
         <HealthGrid health={health} projectId={projectId} />
       </div>
+      <div className="xl:col-span-7">
+        <FinancialWaterfallCard contract={mainContract} forecast={data.forecast} projectId={projectId} revision={latestRevision} />
+      </div>
 
-      <div className="order-3 lg:order-5">
+      <div className="xl:col-span-7">
+        <CostVsProgressCard budget={data.budget} avgProgress={avgProgress} />
+      </div>
+      <div className="xl:col-span-5">
         <NeedsAttentionCard items={needsAttention} />
       </div>
 
-      <div className="order-4 lg:order-3">
-        <FinancialWaterfallCard contract={mainContract} forecast={data.forecast} projectId={projectId} />
-      </div>
-
-      <div className="order-4 lg:order-4">
-        <CostVsProgressCard budget={data.budget} avgProgress={avgProgress} />
-      </div>
-
-      <div className="order-5 lg:order-6">
+      <div className="xl:col-span-6">
         <ProgressScheduleCard
           projectId={projectId}
           tasks={data.tasks}
@@ -300,13 +312,11 @@ export function OverviewSection() {
           measurementsAwaitingApproval={measurementsAwaitingApproval}
         />
       </div>
-
-      <div className="order-6 lg:order-11">
-        <QuickActionsCard projectId={projectId} />
+      <div className="xl:col-span-6">
+        <CashFlowCard cashFlow={data.cashFlow} projectId={projectId} />
       </div>
 
-      <div className="order-7 grid gap-5 lg:order-7 lg:grid-cols-2 lg:gap-6">
-        <CashFlowCard cashFlow={data.cashFlow} projectId={projectId} />
+      <div className="xl:col-span-6">
         <ProcurementCard
           projectId={projectId}
           totalCommitted={totalCommitted}
@@ -316,13 +326,7 @@ export function OverviewSection() {
           currency={data.forecast.currency}
         />
       </div>
-
-      {/* Tertiary cluster: BOQ status, Commercial Execution, Activity share one
-          slot with a tighter internal gap than the primary/secondary sections
-          above — a spacing signal, on top of the tier system, that these read
-          as one supporting group rather than three independent blocks. */}
-      <div className="order-7 flex flex-col gap-3 lg:order-8 lg:gap-4">
-        <BoqStatusCard revision={latestRevision} projectId={projectId} />
+      <div className="xl:col-span-6">
         <CommercialExecutionCard
           projectId={projectId}
           awaitingCertification={ipcsAwaitingCertification.length}
@@ -332,7 +336,13 @@ export function OverviewSection() {
           currency={data.forecast.currency}
           laborCost={data.laborCost}
         />
+      </div>
+
+      <div className="xl:col-span-12">
         <ActivityFeedCard events={projectActivity} />
+      </div>
+      <div className="xl:col-span-12">
+        <QuickActionsCard projectId={projectId} />
       </div>
     </div>
   );
@@ -395,9 +405,6 @@ const IconWallet = (p: IconProps) => (
 );
 const IconPlus = (p: IconProps) => (
   <svg {...iconBase} {...p}><path d="M12 5v14M5 12h14" /></svg>
-);
-const IconChevron = (p: IconProps) => (
-  <svg {...iconBase} {...p} strokeWidth={2}><path d="M14.5 6 8.5 12l6 6" /></svg>
 );
 const IconClock = (p: IconProps) => (
   <svg {...iconBase} {...p}><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3.5 2" /></svg>
@@ -531,19 +538,16 @@ function IdentityStrip({
   const lastActivityAt = activity[0]?.createdAt ?? project.createdAt;
   const statusDot: Record<Project["status"], string> = { active: "bg-success-500", on_hold: "bg-warning-500", completed: "bg-stone-400" };
   return (
-    <div className="overflow-hidden rounded-xl border border-stone-200/80 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04),0_1px_8px_rgba(15,23,42,0.03)]">
-      <div className="h-1 bg-gradient-to-l from-primary to-primary/40" />
-      <div className="flex flex-wrap items-center gap-x-10 gap-y-4 p-4 lg:p-5">
-        <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${statusTone[project.status] === "success" ? "bg-success-100 text-success-700" : statusTone[project.status] === "warning" ? "bg-warning-100 text-warning-700" : "bg-stone-100 text-stone-600"}`}>
-          <span className={`h-1.5 w-1.5 rounded-full ${statusDot[project.status]}`} aria-hidden="true" />
-          {statusLabel[project.status]}
-        </span>
-        <HeroStat label="قيمة العقد" value={contract ? formatMoney(contract.revisedValue, contract.currency) : "—"} />
-        <HeroStat label="نسبة الإنجاز" value={avgProgress !== null ? formatPercent(avgProgress) : "لا توجد بيانات"} hint="من الجدول الزمني" />
-        <div className="mr-auto flex items-center gap-1.5 text-xs text-stone-400">
-          <IconClock width={14} height={14} />
-          آخر تحديث: {formatDateTime(lastActivityAt)}
-        </div>
+    <div className="flex flex-wrap items-center gap-x-8 gap-y-3 rounded-lg border border-stone-200/80 bg-white px-4 py-3 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_1px_8px_rgba(15,23,42,0.03)]">
+      <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${statusTone[project.status] === "success" ? "bg-success-100 text-success-700" : statusTone[project.status] === "warning" ? "bg-warning-100 text-warning-700" : "bg-stone-100 text-stone-600"}`}>
+        <span className={`h-1.5 w-1.5 rounded-full ${statusDot[project.status]}`} aria-hidden="true" />
+        {statusLabel[project.status]}
+      </span>
+      <HeroStat label="قيمة العقد" value={contract ? formatMoney(contract.revisedValue, contract.currency) : "—"} />
+      <HeroStat label="نسبة الإنجاز" value={avgProgress !== null ? formatPercent(avgProgress) : "لا توجد بيانات"} hint="من الجدول الزمني" />
+      <div className="mr-auto flex items-center gap-1.5 text-xs text-stone-400">
+        <IconClock width={14} height={14} />
+        آخر تحديث: {formatDateTime(lastActivityAt)}
       </div>
     </div>
   );
@@ -553,7 +557,7 @@ function HeroStat({ label, value, hint }: { label: string; value: string; hint?:
   return (
     <div>
       <p className="text-xs text-stone-500">{label}</p>
-      <p className="text-2xl font-extrabold tracking-tight text-stone-900">{value}</p>
+      <p className="text-xl font-extrabold tracking-tight text-stone-900">{value}</p>
       {hint && <p className="text-xs text-stone-400">{hint}</p>}
     </div>
   );
@@ -666,7 +670,10 @@ function HealthGrid({ health, projectId }: { health: HealthIndicator[]; projectI
   return (
     <Panel tier="primary">
       <SectionHeader icon={IconShield} tier="primary" title="صحة المشروع" />
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+      {/* Capped at 2 columns, not 3 — this zone now lives in a permanently
+          partial-width column (not full page width like before), so a 3rd
+          column leaves too little room for longer labels ("المشتريات"). */}
+      <div className="grid grid-cols-2 gap-3">
         {health.map((h) => {
           const Icon = healthIcon[h.key] ?? IconInfo;
           return (
@@ -699,68 +706,78 @@ function FinancialWaterfallCard({
   contract,
   forecast,
   projectId,
+  revision,
 }: {
   contract: Contract | null;
   forecast: ForecastResult;
   projectId: string;
+  revision: BoqRevision | null;
 }) {
   const m = forecast.methods.commitment_aware;
   const overBudget = m.variance < 0;
-  // Contract -> Budget -> (Actual + Commitments, shown together as one step,
-  // matching how the two are actually related — committed exposure sits
-  // alongside spend-to-date, not after it) -> Forecast. Every figure is
-  // still read verbatim off forecast.methods.commitment_aware / the
-  // contract, never recomputed.
-  const steps: { label: string; value: number; href: string; combined?: { label: string; value: number; href: string } }[] = [
-    { label: "قيمة العقد", value: contract ? Number(contract.revisedValue) : m.costPlan, href: "contract" },
-    { label: "الميزانية المعتمدة", value: m.costPlan, href: "cost-plan" },
-    {
-      label: "التكلفة الفعلية",
-      value: m.actualCost,
-      href: "actual-cost",
-      combined: { label: "الالتزامات", value: m.committedCost, href: "procurement" },
-    },
-    { label: "التوقع عند الإنجاز", value: m.eac, href: "forecast" },
+  // Contract -> Budget -> Actual + Commitments -> Forecast, as a vertical
+  // label:value list (not a horizontal step chain) so every figure reads
+  // at full size regardless of the column this zone sits in. Every value
+  // is still read verbatim off forecast.methods.commitment_aware / the
+  // contract, never recomputed — grouping into three rows is presentation
+  // only.
+  const rows: { label: string; value: number; href: string }[][] = [
+    [
+      { label: "قيمة العقد", value: contract ? Number(contract.revisedValue) : m.costPlan, href: "contract" },
+      { label: "الميزانية المعتمدة", value: m.costPlan, href: "cost-plan" },
+    ],
+    [
+      { label: "التكلفة الفعلية", value: m.actualCost, href: "actual-cost" },
+      { label: "الالتزامات", value: m.committedCost, href: "procurement" },
+    ],
   ];
 
   return (
     <Panel tier="primary">
       <SectionHeader icon={IconMoney} tier="primary" title="المركز المالي" meta={`بتاريخ ${formatDate(forecast.asOfDate)}`} />
-      <div className="flex flex-wrap items-stretch gap-2">
-        {steps.map((s, i) => (
-          <div
-            key={s.label}
-            className={`flex min-w-0 items-center gap-2 ${s.combined ? "flex-[2]" : "flex-1"}`}
-            style={{ minWidth: s.combined ? "18rem" : "10rem" }}
-          >
-            <div className={`min-w-0 flex-1 rounded-lg border border-stone-200 bg-stone-50/60 p-3 ${s.combined ? "flex divide-x divide-x-reverse divide-stone-200" : ""}`}>
+      <div className="space-y-1">
+        {rows.map((group, gi) => (
+          <div key={gi} className={gi > 0 ? "border-t border-stone-100 pt-1" : ""}>
+            {group.map((r) => (
               <Link
-                to={`/projects/${projectId}/${s.href}`}
-                className={`block min-w-0 rounded-md transition hover:bg-white ${s.combined ? "flex-1 pl-3" : ""}`}
+                key={r.label}
+                to={`/projects/${projectId}/${r.href}`}
+                className="flex items-center justify-between gap-3 rounded-md px-2 py-2 text-sm transition hover:bg-stone-50"
               >
-                <p className="text-xs text-stone-500">{s.label}</p>
-                <p className="mt-1 text-base font-extrabold leading-snug text-stone-900">{formatMoney(s.value, forecast.currency)}</p>
+                <span className="text-stone-500">{r.label}</span>
+                <span className="font-bold text-stone-900">{formatMoney(r.value, forecast.currency)}</span>
               </Link>
-              {s.combined && (
-                <Link to={`/projects/${projectId}/${s.combined.href}`} className="block min-w-0 flex-1 rounded-md pr-3 transition hover:bg-white">
-                  <p className="text-xs text-stone-500">{s.combined.label}</p>
-                  <p className="mt-1 whitespace-nowrap text-base font-extrabold text-stone-900">{formatMoney(s.combined.value, forecast.currency)}</p>
-                </Link>
-              )}
-            </div>
-            {i < steps.length - 1 && <IconChevron className="hidden shrink-0 text-stone-300 lg:block" />}
+            ))}
           </div>
         ))}
       </div>
-      <div className={`mt-4 flex items-center justify-between gap-3 rounded-lg border p-4 ${overBudget ? "border-danger-200 bg-danger-50" : "border-success-200 bg-success-50"}`}>
-        <span className={`flex items-center gap-2 text-sm font-semibold ${overBudget ? "text-danger-700" : "text-success-700"}`}>
-          {overBudget ? <IconAlertTriangle width={18} height={18} /> : <IconTrend width={18} height={18} />}
-          الانحراف المتوقع{overBudget ? " — تجاوز متوقع للميزانية" : ""}
-        </span>
-        <span className={`text-xl font-extrabold ${overBudget ? "text-danger-700" : "text-success-700"}`}>
-          {formatMoney(m.variance, forecast.currency)} ({formatPercent(m.variancePercent)})
-        </span>
+      <div className="mt-2 border-t border-stone-100 pt-3">
+        <Link
+          to={`/projects/${projectId}/forecast`}
+          className="flex items-center justify-between gap-3 rounded-md px-2 py-1.5 transition hover:bg-stone-50"
+        >
+          <span className="text-sm text-stone-500">التوقع عند الإنجاز</span>
+          <span className="text-lg font-extrabold text-stone-900">{formatMoney(m.eac, forecast.currency)}</span>
+        </Link>
+        <div className={`mt-2 flex items-center justify-between gap-3 rounded-lg border p-3.5 ${overBudget ? "border-danger-200 bg-danger-50" : "border-success-200 bg-success-50"}`}>
+          <span className={`flex items-center gap-2 text-sm font-semibold ${overBudget ? "text-danger-700" : "text-success-700"}`}>
+            {overBudget ? <IconAlertTriangle width={18} height={18} /> : <IconTrend width={18} height={18} />}
+            الانحراف المتوقع{overBudget ? " — تجاوز متوقع للميزانية" : ""}
+          </span>
+          <span className={`text-xl font-extrabold ${overBudget ? "text-danger-700" : "text-success-700"}`}>
+            {formatMoney(m.variance, forecast.currency)} ({formatPercent(m.variancePercent)})
+          </span>
+        </div>
       </div>
+      {revision && (
+        <p className="mt-3 border-t border-stone-100 pt-2.5 text-xs text-stone-400">
+          جدول الكميات — النسخة #{revision.revisionNumber}{" "}
+          <Badge tone={boqRevisionStatusTone[revision.status]}>{boqRevisionStatusLabel[revision.status]}</Badge>{" "}
+          <Link to={`/projects/${projectId}/boq`} className="text-primary hover:underline">
+            فتح جدول الكميات
+          </Link>
+        </p>
+      )}
     </Panel>
   );
 }
@@ -772,24 +789,42 @@ function FinancialWaterfallCard({
 // figures stay visible right below, never dropped.
 function CostVsProgressCard({ budget, avgProgress }: { budget: BudgetSummary; avgProgress: number | null }) {
   const costConsumption = budget.totals.planned > 0 ? (budget.totals.spent / budget.totals.planned) * 100 : null;
-  const warn = avgProgress !== null && costConsumption !== null && costConsumption - avgProgress > 5;
+  // Same subtraction the old `warn` flag already made — surfaced as a plain-
+  // language headline with the actual point gap instead of only a boolean,
+  // since this zone is now the dashboard's primary analytical moment. Still
+  // just a difference of two already-displayed percentages, not a new
+  // financial figure.
+  const gap = avgProgress !== null && costConsumption !== null ? costConsumption - avgProgress : null;
+  const warn = gap !== null && gap > 5;
   const overBudget = budget.totals.remaining < 0;
+
+  const headline =
+    gap === null
+      ? "لا تتوفر بيانات إنجاز من الجدول الزمني بعد."
+      : gap > 5
+        ? `استهلاك التكلفة يسبق الإنجاز الفعلي بفارق ${formatPercent(gap, 0)}`
+        : gap < -5
+          ? `الإنجاز الفعلي يسبق استهلاك التكلفة بفارق ${formatPercent(Math.abs(gap), 0)}`
+          : "استهلاك التكلفة متوافق مع الإنجاز الفعلي للمشروع";
 
   return (
     <Panel tier="primary">
       <SectionHeader icon={IconBars} tier="primary" title="الإنجاز الفعلي مقابل استهلاك التكلفة" />
-      <div className="flex flex-col items-center gap-6 sm:flex-row sm:items-stretch sm:justify-center">
+      <p
+        className={`mb-5 flex items-center gap-2 text-base font-bold ${
+          warn ? "text-warning-700" : gap !== null ? "text-success-700" : "text-stone-400"
+        }`}
+      >
+        {warn ? <IconAlertTriangle width={20} height={20} /> : gap !== null ? <IconTrend width={20} height={20} /> : null}
+        {headline}
+      </p>
+      <div className="flex flex-col items-center gap-8 sm:flex-row sm:items-stretch sm:justify-center">
         <RadialGauge value={avgProgress} label="الإنجاز الفعلي" color="#2563eb" />
         <RadialGauge value={costConsumption} label="استهلاك التكلفة" color={warn ? "#dc2626" : "#16a34a"} />
       </div>
-      {warn && (
-        <p className="mt-4 flex items-center gap-2 rounded-md bg-warning-50 px-3 py-2.5 text-sm font-semibold text-warning-700">
-          <IconAlertTriangle width={18} height={18} />
-          استهلاك التكلفة يسبق الإنجاز الفعلي للمشروع
-        </p>
-      )}
-      {avgProgress === null && <p className="mt-3 text-xs text-stone-400">لا تتوفر بيانات إنجاز من الجدول الزمني بعد.</p>}
-      <div className="mt-5 grid gap-3 border-t border-stone-100 pt-4 sm:grid-cols-3">
+      {/* Capped at 2 columns (not 3) — this zone shares its row with Needs
+          Attention now, so it never has true full-page width to spare. */}
+      <div className="mt-6 grid grid-cols-2 gap-3 border-t border-stone-100 pt-4">
         <MetricCard label="إجمالي المخطَّط" value={formatMoney(budget.totals.planned)} />
         <MetricCard label="إجمالي المُنفَق" value={formatMoney(budget.totals.spent)} />
         <MetricCard
@@ -1014,7 +1049,9 @@ function ProgressScheduleCard({
       {tasks.length === 0 ? (
         <p className="text-sm text-stone-400">لا توجد بيانات جدولة بعد.</p>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-3">
+        // Capped at 2 columns (not 3) — this zone shares its row with Cash
+        // Flow now, so it never has true full-page width to spare.
+        <div className="grid grid-cols-2 gap-4">
           <MetricCard label="الإنجاز العام" value={avgProgress !== null ? formatPercent(avgProgress) : "—"} />
           <MetricCard
             label="حالة الجدول"
@@ -1128,8 +1165,8 @@ function CommercialExecutionCard({
   laborCost: ProjectLaborCost;
 }) {
   return (
-    <Panel tier="tertiary">
-      <SectionHeader icon={IconClipboard} tier="tertiary" title="التنفيذ التجاري" meta="شهادات الدفع وتكلفة العمالة" />
+    <Panel tier="secondary">
+      <SectionHeader icon={IconClipboard} tier="secondary" title="التنفيذ التجاري" meta="شهادات الدفع وتكلفة العمالة" />
       <div>
         <div className="mb-2 flex items-center justify-between">
           <h3 className="text-xs font-semibold text-stone-500">شهادات الدفع (IPC)</h3>
@@ -1246,7 +1283,10 @@ function QuickActionsCard({ projectId }: { projectId: string }) {
   );
 }
 
-// ── BOQ status (kept, unchanged logic) ──────────────────────────────────
+// ── BOQ revision status — folded into the Financial Control panel's
+// footnote (see FinancialWaterfallCard) instead of its own zone, since
+// it's a "what was agreed" fact in the same family as Contract/Budget.
+// Labels/tones kept as their own constants, unchanged.
 const boqRevisionStatusLabel: Record<BoqRevision["status"], string> = {
   draft: "مسودة",
   published: "منشورة",
@@ -1257,38 +1297,3 @@ const boqRevisionStatusTone: Record<BoqRevision["status"], "neutral" | "success"
   published: "success",
   superseded: "neutral",
 };
-
-function BoqStatusCard({ revision, projectId }: { revision: BoqRevision | null; projectId: string }) {
-  return (
-    <Panel tier="tertiary">
-      <SectionHeader
-        icon={IconClipboard}
-        tier="tertiary"
-        title="حالة جدول الكميات"
-        action={
-          <Link to={`/projects/${projectId}/boq`} className="text-sm font-medium text-primary hover:underline">
-            فتح جدول الكميات
-          </Link>
-        }
-      />
-      {!revision ? (
-        <p className="text-sm text-stone-400">لا توجد نسخة من جدول الكميات لهذا المشروع بعد.</p>
-      ) : (
-        <dl className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
-          <Field label="النسخة" value={`#${revision.revisionNumber}`} />
-          <Field label="الحالة" value="" valueNode={<Badge tone={boqRevisionStatusTone[revision.status]}>{boqRevisionStatusLabel[revision.status]}</Badge>} />
-          <Field label="تاريخ النشر" value={formatDate(revision.publishedAt)} />
-        </dl>
-      )}
-    </Panel>
-  );
-}
-
-function Field({ label, value, valueNode }: { label: string; value: string; valueNode?: ReactNode }) {
-  return (
-    <div className="flex items-baseline gap-2">
-      <dt className="text-stone-500">{label}:</dt>
-      <dd className="font-medium text-stone-800">{valueNode ?? value}</dd>
-    </div>
-  );
-}

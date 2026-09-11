@@ -515,8 +515,9 @@ describe("<OverviewSection/> (Executive Command Center)", () => {
   it("does not fabricate a BOQ total: only fetches revision metadata, never revision items", async () => {
     mockApi("owner");
     renderSection();
-    await waitFor(() => expect(screen.getByText("حالة جدول الكميات")).toBeInTheDocument());
-    expect(screen.getByText("#2")).toBeInTheDocument();
+    // BOQ revision status is a footnote inside the Financial Control panel,
+    // not its own card — assert on that footnote's own content.
+    await waitFor(() => expect(screen.getByText(/النسخة #2/)).toBeInTheDocument());
     expect(screen.getByText("منشورة")).toBeInTheDocument();
     const calledPaths = vi.mocked(apiFetch).mock.calls.map((c) => String(c[0]));
     expect(calledPaths.some((p) => /\/boq-revisions\/rev/.test(p))).toBe(false);
