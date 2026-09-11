@@ -26,14 +26,8 @@ import {
 import { ApiError } from "../../api/client";
 import type { BoqItem, BoqRevision, Contract, Ipc, IpcLine, IpcStatus, IpcWithLines } from "../../api/types";
 import { useProjectContext } from "../context";
+import { useTranslation } from "../../i18n/I18nProvider";
 
-const statusLabel: Record<IpcStatus, string> = {
-  draft: "مسودة",
-  submitted: "بانتظار الاعتماد",
-  approved: "معتمدة (بانتظار التصديق)",
-  certified: "مصدَّقة",
-  rejected: "مرفوضة",
-};
 const statusTone: Record<IpcStatus, "neutral" | "success" | "warning" | "info" | "danger"> = {
   draft: "warning",
   submitted: "info",
@@ -54,6 +48,7 @@ const EDITABLE_STATUSES: IpcStatus[] = ["draft", "rejected"];
 // a certified billing document carries real contractual consequence, so
 // nothing about it is member-writable, only member-readable.
 export function IpcSection() {
+  const { t, locale } = useTranslation();
   const { projectId } = useProjectContext();
   const [ipcs, setIpcs] = useState<Ipc[] | null>(null);
   const [contracts, setContracts] = useState<Contract[]>([]);
@@ -71,7 +66,7 @@ export function IpcSection() {
         setContracts(contractRows);
         setPublishedRevisions(revisionRows.filter((r) => r.status === "published"));
       })
-      .catch((err) => setError(err instanceof Error ? err.message : "تعذّر تحميل شهادات الدفع"));
+      .catch((err) => setError(err instanceof Error ? err.message : t("ipcPage.loadError")));
   }
   useEffect(load, [projectId]);
 
@@ -81,28 +76,28 @@ export function IpcSection() {
   };
 
   const columns: FinancialColumn<Ipc>[] = [
-    { key: "ipcNumber", header: "الرقم", render: (i) => `#${i.ipcNumber}` },
-    { key: "contract", header: "العقد", render: (i) => contractLabel(i.contractId) },
-    { key: "period", header: "الفترة", render: (i) => `${formatDate(i.periodStart)} — ${formatDate(i.periodEnd)}` },
-    { key: "status", header: "الحالة", render: (i) => <Badge tone={statusTone[i.status]}>{statusLabel[i.status]}</Badge> },
-    { key: "netCertified", header: "الصافي المصدَّق", align: "end", render: (i) => (i.netCertified !== null ? formatMoney(i.netCertified, i.currency) : "—") },
+    { key: "ipcNumber", header: t("ipcPage.columns.number"), render: (i) => `#${i.ipcNumber}` },
+    { key: "contract", header: t("ipcPage.columns.contract"), render: (i) => contractLabel(i.contractId) },
+    { key: "period", header: t("ipcPage.columns.period"), render: (i) => `${formatDate(i.periodStart, locale)} — ${formatDate(i.periodEnd, locale)}` },
+    { key: "status", header: t("ipcPage.columns.status"), render: (i) => <Badge tone={statusTone[i.status]}>{t(`ipcPage.status.${i.status}`)}</Badge> },
+    { key: "netCertified", header: t("ipcPage.columns.netCertified"), align: "end", render: (i) => (i.netCertified !== null ? formatMoney(i.netCertified, i.currency, locale) : "—") },
   ];
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="شهادات الدفع (IPC)"
+        title={t("ipcPage.title")}
         actions={
           <Can permission="ipc.manage">
             <Button size="sm" onClick={() => setShowCreate((v) => !v)} disabled={contracts.length === 0}>
-              {showCreate ? "إلغاء" : "+ شهادة جديدة"}
+              {showCreate ? t("common.cancel") : t("ipcPage.newIpc")}
             </Button>
           </Can>
         }
       />
 
       {contracts.length === 0 && ipcs !== null && (
-        <p className="text-sm text-stone-400">يجب إضافة عقد أولاً من قسم "العقد" قبل إنشاء شهادة دفع.</p>
+        <p className="text-sm text-stone-400">{t("ipcPage.noContractsMessage")}</p>
       )}
 
       {showCreate && (
@@ -126,10 +121,10 @@ export function IpcSection() {
         rowKey={(i) => i.id}
         error={error}
         onRetry={load}
-        emptyMessage="لا توجد شهادات دفع بعد"
+        emptyMessage={t("ipcPage.emptyMessage")}
         rowActions={(i) => (
           <button type="button" onClick={() => setSelectedId(i.id)} className="text-sm text-primary hover:underline">
-            عرض
+            {t("ipcPage.view")}
           </button>
         )}
       />
@@ -150,6 +145,7 @@ function IpcCreateForm({
   publishedRevisions: BoqRevision[];
   onCreated: (result: { id: string }) => void;
 }) {
+  const { t } = useTranslation();
   const [contractId, setContractId] = useState(contracts[0]?.id ?? "");
   const [periodStart, setPeriodStart] = useState("");
   const [periodEnd, setPeriodEnd] = useState("");
@@ -176,7 +172,7 @@ function IpcCreateForm({
       });
       onCreated(result);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر إنشاء الشهادة");
+      setError(err instanceof ApiError ? err.message : t("ipcPage.createForm.genericError"));
     } finally {
       setSubmitting(false);
     }
@@ -203,7 +199,7 @@ function IpcCreateForm({
           ))}
         </select>
         <label className="text-sm text-stone-600">
-          بداية الفترة
+          {t("ipcPage.createForm.periodStart")}
           <input
             required
             type="date"
@@ -213,7 +209,7 @@ function IpcCreateForm({
           />
         </label>
         <label className="text-sm text-stone-600">
-          نهاية الفترة
+          {t("ipcPage.createForm.periodEnd")}
           <input
             required
             type="date"
@@ -223,18 +219,18 @@ function IpcCreateForm({
           />
         </label>
         <input
-          placeholder="ملاحظات (اختياري)"
+          placeholder={t("ipcPage.createForm.notesPlaceholder")}
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
         />
         {!revision && contractId && (
           <p className="text-sm text-danger-600 sm:col-span-4">
-            هذا العقد لا يحتوي على نسخة منشورة من جدول الكميات — يجب نشر جدول الكميات أولاً قبل إنشاء شهادة دفع عليه.
+            {t("ipcPage.createForm.noRevisionWarning")}
           </p>
         )}
         <Button type="submit" disabled={submitting || !revision} className="sm:col-span-4">
-          {submitting ? "جارٍ الحفظ..." : "إنشاء الشهادة"}
+          {submitting ? t("ipcPage.createForm.saving") : t("ipcPage.createForm.create")}
         </Button>
       </form>
     </Card>
@@ -243,25 +239,28 @@ function IpcCreateForm({
 
 type PendingAction = "submit" | "approve" | "certify" | null;
 
-const confirmCopy: Record<Exclude<PendingAction, null>, { title: string; message: string; confirmLabel: string; destructive?: boolean }> = {
-  submit: {
-    title: "إرسال الشهادة للاعتماد",
-    message: "بعد الإرسال لن يمكن إضافة أو حذف بنود هذه الشهادة إلا إذا تم رفضها. هل تريد المتابعة؟",
-    confirmLabel: "إرسال",
-  },
-  approve: {
-    title: "اعتماد الشهادة",
-    message: "هذه مراجعة تحريرية أولية فقط، ولا تُصدِّق الكميات بعد — التصديق الفعلي خطوة منفصلة لاحقة. هل تريد المتابعة؟",
-    confirmLabel: "اعتماد",
-  },
-  certify: {
-    title: "تصديق الشهادة",
-    message:
-      "بعد التصديق تصبح القيم المالية لهذه الشهادة (الإجمالي والاستقطاع والصافي) نهائية ومجمَّدة، وتُحتسب كمياتها بشكل نهائي ضمن السقف المعتمد لبنود جدول الكميات المرتبطة. لا يمكن التراجع عن هذا الإجراء.",
-    confirmLabel: "تصديق",
-    destructive: true,
-  },
-};
+function confirmCopyFor(
+  t: (key: string) => string,
+): Record<Exclude<PendingAction, null>, { title: string; message: string; confirmLabel: string; destructive?: boolean }> {
+  return {
+    submit: {
+      title: t("ipcPage.confirm.submitTitle"),
+      message: t("ipcPage.confirm.submitMessage"),
+      confirmLabel: t("ipcPage.confirm.submitLabel"),
+    },
+    approve: {
+      title: t("ipcPage.confirm.approveTitle"),
+      message: t("ipcPage.confirm.approveMessage"),
+      confirmLabel: t("ipcPage.confirm.approveLabel"),
+    },
+    certify: {
+      title: t("ipcPage.confirm.certifyTitle"),
+      message: t("ipcPage.confirm.certifyMessage"),
+      confirmLabel: t("ipcPage.confirm.certifyLabel"),
+      destructive: true,
+    },
+  };
+}
 
 function IpcDetail({
   projectId,
@@ -274,6 +273,8 @@ function IpcDetail({
   contracts: Contract[];
   onChanged: () => void;
 }) {
+  const { t, locale } = useTranslation();
+  const confirmCopy = confirmCopyFor(t);
   const [ipc, setIpc] = useState<IpcWithLines | null>(null);
   const [boqItems, setBoqItems] = useState<BoqItem[]>([]);
   const [revisionNumber, setRevisionNumber] = useState<number | null>(null);
@@ -296,7 +297,7 @@ function IpcDetail({
           setBoqItems(rev.items.filter((it) => it.itemType === "item" && it.rate !== null));
         });
       })
-      .catch((err) => setError(err instanceof Error ? err.message : "تعذّر تحميل تفاصيل الشهادة"));
+      .catch((err) => setError(err instanceof Error ? err.message : t("ipcPage.detail.loadError")));
   }
   useEffect(load, [projectId, ipcId]);
 
@@ -311,7 +312,7 @@ function IpcDetail({
       load();
       onChanged();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر تنفيذ الإجراء");
+      setError(err instanceof ApiError ? err.message : t("ipcPage.detail.actionError"));
       setPendingAction(null);
     } finally {
       setActingBusy(false);
@@ -323,7 +324,7 @@ function IpcDetail({
       await deleteIpcLine(projectId, ipcId, lineId);
       load();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر حذف البند");
+      setError(err instanceof ApiError ? err.message : t("ipcPage.detail.deleteLineError"));
     }
   }
 
@@ -341,20 +342,20 @@ function IpcDetail({
   const isApproved = ipc.status === "approved";
 
   const lineColumns: FinancialColumn<IpcLine>[] = [
-    { key: "boqItem", header: "بند جدول الكميات", render: (l) => boqItemLabel(l.boqItemId) },
-    { key: "currentQuantity", header: "الكمية الحالية", align: "end", render: (l) => formatQuantity(l.currentQuantity) },
-    { key: "rate", header: "السعر", align: "end", render: (l) => formatMoney(l.rate, ipc.currency) },
-    { key: "currentValue", header: "القيمة الحالية", align: "end", render: (l) => formatMoney(l.currentValue, ipc.currency) },
-    { key: "previousCertifiedQuantity", header: "الكمية المصدَّقة سابقاً", align: "end", render: (l) => (l.previousCertifiedQuantity !== null ? formatQuantity(l.previousCertifiedQuantity) : "—") },
-    { key: "cumulativeQuantity", header: "الكمية التراكمية", align: "end", render: (l) => (l.cumulativeQuantity !== null ? formatQuantity(l.cumulativeQuantity) : "—") },
+    { key: "boqItem", header: t("ipcPage.detail.lineColumns.boqItem"), render: (l) => boqItemLabel(l.boqItemId) },
+    { key: "currentQuantity", header: t("ipcPage.detail.lineColumns.currentQuantity"), align: "end", render: (l) => formatQuantity(l.currentQuantity, null, locale) },
+    { key: "rate", header: t("ipcPage.detail.lineColumns.rate"), align: "end", render: (l) => formatMoney(l.rate, ipc.currency, locale) },
+    { key: "currentValue", header: t("ipcPage.detail.lineColumns.currentValue"), align: "end", render: (l) => formatMoney(l.currentValue, ipc.currency, locale) },
+    { key: "previousCertifiedQuantity", header: t("ipcPage.detail.lineColumns.previousCertifiedQuantity"), align: "end", render: (l) => (l.previousCertifiedQuantity !== null ? formatQuantity(l.previousCertifiedQuantity, null, locale) : "—") },
+    { key: "cumulativeQuantity", header: t("ipcPage.detail.lineColumns.cumulativeQuantity"), align: "end", render: (l) => (l.cumulativeQuantity !== null ? formatQuantity(l.cumulativeQuantity, null, locale) : "—") },
   ];
 
   return (
     <Card className="p-5">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <h2 className="font-semibold text-stone-800">شهادة #{ipc.ipcNumber}</h2>
-          <Badge tone={statusTone[ipc.status]}>{statusLabel[ipc.status]}</Badge>
+          <h2 className="font-semibold text-stone-800">{t("ipcPage.detail.header", { number: ipc.ipcNumber })}</h2>
+          <Badge tone={statusTone[ipc.status]}>{t(`ipcPage.status.${ipc.status}`)}</Badge>
         </div>
         {/* Every mutation on this screen requires ipc.manage (owner-only) —
             unlike Measurement, nothing here is member-writable. */}
@@ -362,31 +363,31 @@ function IpcDetail({
           <div className="flex flex-wrap gap-2">
             {isEditable && (
               <Button size="sm" variant="secondary" onClick={() => setShowAddLine((v) => !v)}>
-                {showAddLine ? "إلغاء" : "+ بند"}
+                {showAddLine ? t("common.cancel") : t("ipcPage.detail.addLine")}
               </Button>
             )}
             {isEditable && (
               <Button size="sm" disabled={ipc.lines.length === 0} onClick={() => setPendingAction("submit")}>
-                إرسال للاعتماد
+                {t("ipcPage.detail.submitForApproval")}
               </Button>
             )}
             {isSubmitted && (
               <Button size="sm" onClick={() => setPendingAction("approve")}>
-                اعتماد
+                {t("ipcPage.detail.approve")}
               </Button>
             )}
             {isSubmitted && (
               <Button size="sm" variant="danger" onClick={() => setShowReject((v) => !v)}>
-                {showReject ? "إلغاء" : "رفض"}
+                {showReject ? t("common.cancel") : t("ipcPage.detail.reject")}
               </Button>
             )}
             {isApproved && (
               // Certify finalizes/approves — a positive terminal action, not a
               // destructive one, so it should not carry the same visual
-              // weight as "رفض" above; the ConfirmDialog already states the
+              // weight as reject above; the ConfirmDialog already states the
               // irreversibility warning, the button itself doesn't need to.
               <Button size="sm" onClick={() => setPendingAction("certify")}>
-                تصديق
+                {t("ipcPage.detail.certify")}
               </Button>
             )}
           </div>
@@ -400,29 +401,29 @@ function IpcDetail({
       )}
 
       <dl className="mb-5 grid grid-cols-1 gap-x-8 gap-y-3 text-sm sm:grid-cols-2">
-        <Field label="العقد" value={contractLabel} />
-        <Field label="نسخة جدول الكميات" value={revisionNumber !== null ? `النسخة #${revisionNumber}` : "—"} />
-        <Field label="بداية الفترة" value={formatDate(ipc.periodStart)} />
-        <Field label="نهاية الفترة" value={formatDate(ipc.periodEnd)} />
-        <Field label="ملاحظات" value={ipc.notes ?? "—"} />
-        <Field label="العملة" value={ipc.currency} />
-        <Field label="تاريخ الإرسال للاعتماد" value={formatDateTime(ipc.submittedAt)} />
-        <Field label="تاريخ الاعتماد" value={formatDateTime(ipc.approvedAt)} />
-        <Field label="تاريخ التصديق" value={formatDateTime(ipc.certifiedAt)} />
+        <Field label={t("ipcPage.detail.contract")} value={contractLabel} />
+        <Field label={t("ipcPage.detail.revisionNumber")} value={revisionNumber !== null ? t("ipcPage.detail.revisionValue", { number: revisionNumber }) : "—"} />
+        <Field label={t("ipcPage.detail.periodStart")} value={formatDate(ipc.periodStart, locale)} />
+        <Field label={t("ipcPage.detail.periodEnd")} value={formatDate(ipc.periodEnd, locale)} />
+        <Field label={t("ipcPage.detail.notes")} value={ipc.notes ?? "—"} />
+        <Field label={t("ipcPage.detail.currency")} value={ipc.currency} />
+        <Field label={t("ipcPage.detail.submittedAt")} value={formatDateTime(ipc.submittedAt, locale)} />
+        <Field label={t("ipcPage.detail.approvedAt")} value={formatDateTime(ipc.approvedAt, locale)} />
+        <Field label={t("ipcPage.detail.certifiedAt")} value={formatDateTime(ipc.certifiedAt, locale)} />
         {ipc.status === "rejected" && (
           <>
-            <Field label="تاريخ الرفض" value={formatDateTime(ipc.rejectedAt)} />
-            <Field label="سبب الرفض" value={ipc.rejectionReason ?? "—"} />
+            <Field label={t("ipcPage.detail.rejectedAt")} value={formatDateTime(ipc.rejectedAt, locale)} />
+            <Field label={t("ipcPage.detail.rejectionReason")} value={ipc.rejectionReason ?? "—"} />
           </>
         )}
       </dl>
 
       <div className="mb-5 grid gap-4 sm:grid-cols-3 lg:grid-cols-5">
-        <MetricCard label="الإجمالي (Gross)" value={ipc.grossValue !== null ? formatMoney(ipc.grossValue, ipc.currency) : "—"} />
-        <MetricCard label="استقطاع الضمان" value={ipc.retentionAmount !== null ? formatMoney(ipc.retentionAmount, ipc.currency) : "—"} />
-        <MetricCard label="استرداد الدفعة المقدَّمة" value={ipc.advanceRecoveryAmount !== null ? formatMoney(ipc.advanceRecoveryAmount, ipc.currency) : "—"} />
-        <MetricCard label="خصومات أخرى" value={ipc.otherDeductions !== null ? formatMoney(ipc.otherDeductions, ipc.currency) : "—"} />
-        <MetricCard label="الصافي المصدَّق" value={ipc.netCertified !== null ? formatMoney(ipc.netCertified, ipc.currency) : "—"} tone={ipc.netCertified !== null ? "success" : "default"} />
+        <MetricCard label={t("ipcPage.detail.metrics.gross")} value={ipc.grossValue !== null ? formatMoney(ipc.grossValue, ipc.currency, locale) : "—"} />
+        <MetricCard label={t("ipcPage.detail.metrics.retention")} value={ipc.retentionAmount !== null ? formatMoney(ipc.retentionAmount, ipc.currency, locale) : "—"} />
+        <MetricCard label={t("ipcPage.detail.metrics.advanceRecovery")} value={ipc.advanceRecoveryAmount !== null ? formatMoney(ipc.advanceRecoveryAmount, ipc.currency, locale) : "—"} />
+        <MetricCard label={t("ipcPage.detail.metrics.otherDeductions")} value={ipc.otherDeductions !== null ? formatMoney(ipc.otherDeductions, ipc.currency, locale) : "—"} />
+        <MetricCard label={t("ipcPage.detail.metrics.netCertified")} value={ipc.netCertified !== null ? formatMoney(ipc.netCertified, ipc.currency, locale) : "—"} tone={ipc.netCertified !== null ? "success" : "default"} />
       </div>
 
       {showAddLine && isEditable && (
@@ -459,13 +460,13 @@ function IpcDetail({
         columns={lineColumns}
         rows={ipc.lines}
         rowKey={(l) => l.id}
-        emptyMessage="لا توجد بنود في هذه الشهادة بعد"
+        emptyMessage={t("ipcPage.detail.emptyMessage")}
         rowActions={
           isEditable
             ? (line) => (
                 <Can permission="ipc.manage">
                   <button type="button" onClick={() => onDeleteLine(line.id)} className="text-sm text-danger-600 hover:underline">
-                    حذف
+                    {t("ipcPage.detail.deleteLine")}
                   </button>
                 </Can>
               )
@@ -477,7 +478,7 @@ function IpcDetail({
         open={pendingAction !== null}
         title={pendingAction ? confirmCopy[pendingAction].title : ""}
         message={pendingAction ? confirmCopy[pendingAction].message : ""}
-        confirmLabel={actingBusy ? "جارٍ التنفيذ..." : pendingAction ? confirmCopy[pendingAction].confirmLabel : ""}
+        confirmLabel={actingBusy ? t("ipcPage.confirm.executing") : pendingAction ? confirmCopy[pendingAction].confirmLabel : ""}
         destructive={pendingAction ? confirmCopy[pendingAction].destructive : undefined}
         onConfirm={onConfirmAction}
         onCancel={() => setPendingAction(null)}
@@ -502,6 +503,7 @@ function IpcLineForm({
   boqItems: BoqItem[];
   onSubmit: (input: { boqItemId: string; currentQuantity: number; description?: string }) => Promise<void>;
 }) {
+  const { t } = useTranslation();
   const [boqItemId, setBoqItemId] = useState(boqItems[0]?.id ?? "");
   const [currentQuantity, setCurrentQuantity] = useState("");
   const [description, setDescription] = useState("");
@@ -519,7 +521,7 @@ function IpcLineForm({
       // المطلوبة تتجاوز الكمية المعتمدة القابلة للتصديق لهذا البند" — the
       // backend remains the sole authority on certifiable-quantity limits;
       // this form never recreates that check.
-      setError(err instanceof ApiError ? err.message : "تعذّر حفظ البند");
+      setError(err instanceof ApiError ? err.message : t("ipcPage.lineForm.genericError"));
     } finally {
       setSubmitting(false);
     }
@@ -538,7 +540,7 @@ function IpcLineForm({
         onChange={(e) => setBoqItemId(e.target.value)}
         className="rounded-md border border-stone-300 px-3 py-2 text-sm sm:col-span-2"
       >
-        {boqItems.length === 0 && <option value="">لا توجد بنود قابلة للتصديق</option>}
+        {boqItems.length === 0 && <option value="">{t("ipcPage.lineForm.noItemsOption")}</option>}
         {boqItems.map((i) => (
           <option key={i.id} value={i.id}>
             {i.code ? `${i.code} — ${i.description}` : i.description}
@@ -550,19 +552,19 @@ function IpcLineForm({
         type="number"
         min="0"
         step="0.001"
-        placeholder="الكمية الحالية"
+        placeholder={t("ipcPage.lineForm.quantityPlaceholder")}
         value={currentQuantity}
         onChange={(e) => setCurrentQuantity(e.target.value)}
         className="rounded-md border border-stone-300 px-3 py-2 text-sm"
       />
       <input
-        placeholder="وصف (اختياري)"
+        placeholder={t("ipcPage.lineForm.descriptionPlaceholder")}
         value={description}
         onChange={(e) => setDescription(e.target.value)}
         className="rounded-md border border-stone-300 px-3 py-2 text-sm"
       />
       <Button type="submit" size="sm" disabled={submitting || !boqItemId} className="sm:col-span-4">
-        {submitting ? "جارٍ الحفظ..." : "إضافة البند"}
+        {submitting ? t("ipcPage.lineForm.saving") : t("ipcPage.lineForm.submit")}
       </Button>
     </form>
   );
@@ -571,6 +573,7 @@ function IpcLineForm({
 // Rejection requires a reason (server-enforced, non-empty) — same
 // dedicated small-form pattern already proven in ProgressSection.tsx.
 function RejectForm({ onReject }: { onReject: (reason: string) => Promise<void> }) {
+  const { t } = useTranslation();
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -582,7 +585,7 @@ function RejectForm({ onReject }: { onReject: (reason: string) => Promise<void> 
     try {
       await onReject(reason);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر رفض الشهادة");
+      setError(err instanceof ApiError ? err.message : t("ipcPage.rejectForm.genericError"));
     } finally {
       setSubmitting(false);
     }
@@ -593,14 +596,14 @@ function RejectForm({ onReject }: { onReject: (reason: string) => Promise<void> 
       {error && <ErrorState message={error} />}
       <textarea
         required
-        placeholder="سبب الرفض"
+        placeholder={t("ipcPage.rejectForm.reasonPlaceholder")}
         value={reason}
         onChange={(e) => setReason(e.target.value)}
         className="rounded-md border border-stone-300 px-3 py-2 text-sm"
         rows={2}
       />
       <Button type="submit" size="sm" variant="danger" disabled={submitting || !reason.trim()}>
-        {submitting ? "جارٍ الرفض..." : "تأكيد الرفض"}
+        {submitting ? t("ipcPage.rejectForm.rejecting") : t("ipcPage.rejectForm.submit")}
       </Button>
     </form>
   );

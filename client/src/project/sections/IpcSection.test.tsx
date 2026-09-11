@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
 import { AuthProvider } from "../../auth/AuthContext";
+import { I18nProvider } from "../../i18n/I18nProvider";
 import { IpcSection } from "./IpcSection";
 import type { Ipc, IpcWithLines, Contract, BoqRevision, BoqRevisionWithItems } from "../../api/types";
 
@@ -186,9 +187,11 @@ function mockApi(role: "owner" | "member", ipcDetail: IpcWithLines = fixtureIpcD
 
 function renderSection() {
   return render(
-    <AuthProvider>
-      <IpcSection />
-    </AuthProvider>,
+    <I18nProvider>
+      <AuthProvider>
+        <IpcSection />
+      </AuthProvider>
+    </I18nProvider>,
   );
 }
 
