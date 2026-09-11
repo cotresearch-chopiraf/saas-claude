@@ -1,12 +1,13 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { PageHeader } from "../../ui/PageHeader";
 import { Card } from "../../ui/Card";
 import { Badge } from "../../ui/Badge";
 import { MetricCard } from "../../ui/MetricCard";
 import { ErrorState } from "../../ui/ErrorState";
 import { Skeleton } from "../../ui/Skeleton";
-import { formatMoney, formatPercent, formatDate } from "../../lib/format";
+import { Button } from "../../ui/Button";
+import { Can } from "../../auth/Can";
+import { formatMoney, formatPercent, formatDate, formatDateTime } from "../../lib/format";
 import { listContracts } from "../../api/contracts";
 import { getBudget } from "../../api/costPlan";
 import { getForecast } from "../../api/forecast";
@@ -16,21 +17,52 @@ import { getProjectLaborCost } from "../../api/laborCost";
 import { listBudgetAlerts } from "../../api/budgetAlerts";
 import { getProjectSchedule } from "../../api/projectSchedule";
 import { listPunchItems } from "../../api/punchItems";
+import { listCommitments } from "../../api/commitments";
+import { listIpcs } from "../../api/ipcs";
+import { listMeasurements } from "../../api/measurements";
+import { listActivity } from "../../api/auditEvents";
 import { useProjectContext } from "../context";
 import type {
+  ActivityEvent,
   BoqRevision,
   BudgetAlert,
   BudgetSummary,
   CashFlowResult,
+  Commitment,
+  CommitmentStatus,
   Contract,
-  ForecastCalculation,
-  ForecastMethod,
   ForecastResult,
+  Ipc,
+  IpcStatus,
+  Measurement,
   Project,
   ProjectLaborCost,
   ProjectTask,
   PunchItem,
 } from "../../api/types";
+
+// ─────────────────────────────────────────────────────────────────────────
+// MIDAD — Executive Command Center (project-level).
+//
+// This replaces the previous flat stack of independent cards with a real
+// visual hierarchy: identity → health → financial waterfall → cost vs
+// progress → risk → progress/schedule → cash flow → procurement → IPC →
+// activity → quick actions. Every figure still comes from this codebase's
+// own already-authoritative endpoints (Contract/Budget/Forecast/Cash Flow/
+// Commitments/IPCs/Measurements/Schedule/Punch List/Budget Alerts/Labor
+// Cost/BOQ, plus the canonical audit_events feed filtered client-side to
+// this project's own entity ids) — nothing here computes a second version
+// of a financial number the backend already owns. Two things ARE new
+// client-side *compositions* of existing facts, not new calculations: the
+// unified "Needs Attention" list (grouping already-real risk signals by
+// severity) and the project-scoped Activity feed (filtering the company-
+// wide audit log to entities this project actually owns).
+//
+// Fetching is consolidated into one Promise.all (previously six separately
+// mounted cards fired their own requests, two of them duplicating the same
+// Budget Alerts call) — fewer requests, one loading/error state, no
+// staggered waterfall of independent spinners.
+// ─────────────────────────────────────────────────────────────────────────
 
 const statusLabel: Record<Project["status"], string> = {
   active: "نشط",
@@ -42,44 +74,49 @@ const statusTone: Record<Project["status"], "success" | "warning" | "neutral"> =
   on_hold: "warning",
   completed: "neutral",
 };
-const methodLabel: Record<ForecastMethod, string> = {
-  cost_to_complete: "الطريقة المحافظة (تجاهل الالتزامات)",
-  commitment_aware: "الطريقة الواعية بالالتزامات",
-};
-const methods: ForecastMethod[] = ["cost_to_complete", "commitment_aware"];
-const boqRevisionStatusLabel: Record<BoqRevision["status"], string> = {
+
+const ipcStatusLabel: Record<IpcStatus, string> = {
   draft: "مسودة",
-  published: "منشورة",
-  superseded: "مُستبدَلة",
-};
-const boqRevisionStatusTone: Record<BoqRevision["status"], "neutral" | "success" | "warning"> = {
-  draft: "warning",
-  published: "success",
-  superseded: "neutral",
+  submitted: "بانتظار الاعتماد",
+  approved: "معتمدة (بانتظار التصديق)",
+  certified: "مصدَّقة",
+  rejected: "مرفوضة",
 };
 
-interface DashboardData {
+const commitmentStatusLabel: Record<CommitmentStatus, string> = {
+  draft: "مسودة",
+  pending_approval: "بانتظار الاعتماد",
+  active: "نشط",
+  partially_fulfilled: "منفَّذ جزئياً",
+  closed: "مغلق",
+  cancelled: "ملغى",
+};
+
+const alertSeverityLabel: Record<BudgetAlert["severity"], string> = { info: "معلومات", warning: "تحذير", critical: "حرج" };
+
+interface OverviewData {
   contracts: Contract[];
   budget: BudgetSummary;
   forecast: ForecastResult;
   cashFlow: CashFlowResult;
   revisions: BoqRevision[];
   laborCost: ProjectLaborCost;
+  budgetAlerts: BudgetAlert[];
+  tasks: ProjectTask[];
+  punchItems: PunchItem[];
+  commitments: Commitment[];
+  ipcs: Ipc[];
+  measurements: Measurement[];
+  activity: ActivityEvent[];
 }
 
-// Executive Dashboard (UI-08) — a read-only rollup of the project's
-// already-existing, already-authoritative financial/operational domains.
-// This screen never computes a financial value: every figure here comes
-// verbatim from Contract/Cost Plan/Forecast/Cash Flow's own existing,
-// tested endpoints (fanned out via Promise.all, since it is only
-// consuming their already-authoritative results — not deriving a new
-// one). BOQ has no backend-computed aggregate total anywhere in this
-// codebase, so this screen deliberately shows only non-financial BOQ
-// status (latest revision/publish state), never a summed "BOQ value" —
-// see docs/MIDAD_FINANCIAL_MODEL.md and the UI-08 discovery report.
+function today(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 export function OverviewSection() {
   const { project, projectId } = useProjectContext();
-  const [data, setData] = useState<DashboardData | null>(null);
+  const [data, setData] = useState<OverviewData | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   function load() {
@@ -92,9 +129,45 @@ export function OverviewSection() {
       getCashFlow(projectId),
       listRevisions(projectId),
       getProjectLaborCost(projectId),
+      listBudgetAlerts({ projectId }),
+      getProjectSchedule(projectId),
+      listPunchItems(projectId),
+      listCommitments(projectId),
+      listIpcs(projectId),
+      listMeasurements(projectId),
+      listActivity({ limit: 50 }),
     ])
-      .then(([contracts, budget, forecast, cashFlow, revisions, laborCost]) =>
-        setData({ contracts, budget, forecast, cashFlow, revisions, laborCost }),
+      .then(
+        ([
+          contracts,
+          budget,
+          forecast,
+          cashFlow,
+          revisions,
+          laborCost,
+          budgetAlerts,
+          schedule,
+          punchItems,
+          commitments,
+          ipcs,
+          measurements,
+          activityPage,
+        ]) =>
+          setData({
+            contracts,
+            budget,
+            forecast,
+            cashFlow,
+            revisions,
+            laborCost,
+            budgetAlerts,
+            tasks: schedule.tasks,
+            punchItems,
+            commitments,
+            ipcs,
+            measurements,
+            activity: activityPage.events,
+          }),
       )
       .catch((err) => setError(err instanceof Error ? err.message : "تعذّر تحميل نظرة عامة المشروع"));
   }
@@ -105,7 +178,7 @@ export function OverviewSection() {
   if (error && !data) {
     return (
       <div className="space-y-6">
-        <PageHeader title="نظرة عامة" actions={<Badge tone={statusTone[project.status]}>{statusLabel[project.status]}</Badge>} />
+        <HeaderSkeleton project={project} />
         <ErrorState message={error} onRetry={load} />
       </div>
     );
@@ -113,148 +186,553 @@ export function OverviewSection() {
   if (!data) {
     return (
       <div className="space-y-6">
-        <PageHeader title="نظرة عامة" actions={<Badge tone={statusTone[project.status]}>{statusLabel[project.status]}</Badge>} />
-        <Skeleton rows={8} />
+        <HeaderSkeleton project={project} />
+        <Skeleton rows={10} />
       </div>
     );
   }
 
-  // Same established rule as Measurement/Commitment/IPC's own create
-  // forms: "the main contract" is identified by contractType === "main",
-  // never contracts[0] and never summed across amendments.
   const mainContract = data.contracts.find((c) => c.contractType === "main") ?? null;
   const latestRevision = [...data.revisions].sort((a, b) => b.revisionNumber - a.revisionNumber)[0] ?? null;
+  const forecastMethod = data.forecast.methods.commitment_aware;
+
+  const activeAlerts = data.budgetAlerts.filter((a) => a.status !== "resolved");
+  const overdueTasks = data.tasks.filter((t) => t.status !== "completed" && t.endDate < today());
+  const scheduleTasks = data.tasks.filter((t) => t.taskType === "task");
+  const nextMilestone = data.tasks
+    .filter((t) => t.taskType === "milestone" && t.status !== "completed")
+    .sort((a, b) => a.endDate.localeCompare(b.endDate))[0];
+  // Physical progress: a plain average of the schedule's own per-task
+  // progressPercent (an authoritative field entered on Schedule itself),
+  // over ordinary tasks only — milestones are point-in-time markers
+  // (0%→100% instantly), not a progress figure, and would skew the
+  // average. null when there is no schedule data at all, never a
+  // fabricated number.
+  const avgProgress =
+    scheduleTasks.length > 0
+      ? scheduleTasks.reduce((sum, t) => sum + t.progressPercent, 0) / scheduleTasks.length
+      : null;
+
+  const openPunch = data.punchItems.filter((i) => ["open", "assigned", "in_progress"].includes(i.status));
+  const criticalPunch = openPunch.filter((i) => i.priority === "critical");
+
+  const liveCommitments = data.commitments.filter((c) => c.status !== "cancelled" && c.status !== "draft");
+  const pendingCommitments = data.commitments.filter((c) => c.status === "pending_approval");
+  const commitmentAmount = (c: Commitment) => Number(c.revisedAmount ?? c.originalAmount ?? 0);
+  const totalCommitted = liveCommitments.reduce((sum, c) => sum + commitmentAmount(c), 0);
+  const approvedCommitted = liveCommitments
+    .filter((c) => c.status === "active" || c.status === "partially_fulfilled" || c.status === "closed")
+    .reduce((sum, c) => sum + commitmentAmount(c), 0);
+  const pendingCommitted = pendingCommitments.reduce((sum, c) => sum + commitmentAmount(c), 0);
+
+  const ipcsAwaitingCertification = data.ipcs.filter((i) => i.status === "approved");
+  const ipcsAwaitingApproval = data.ipcs.filter((i) => i.status === "submitted");
+  const certifiedIpcs = data.ipcs.filter((i) => i.status === "certified");
+  const certifiedTotal = certifiedIpcs.reduce((sum, i) => sum + Number(i.netCertified ?? 0), 0);
+
+  const measurementsAwaitingApproval = data.measurements.filter((m) => m.status === "submitted");
+
+  // Project-scoped activity: the canonical audit_events feed is
+  // company-wide (no per-project filter exists server-side), so this
+  // filters the already-fetched page down to events on entities this
+  // project actually owns — real events, real timestamps, nothing invented.
+  const knownEntityIds = new Set<string>([
+    ...data.contracts.map((c) => c.id),
+    ...data.ipcs.map((i) => i.id),
+    ...data.commitments.map((c) => c.id),
+    ...data.revisions.map((r) => r.id),
+    ...data.measurements.map((m) => m.id),
+    ...data.punchItems.map((p) => p.id),
+  ]);
+  const projectActivity = data.activity.filter((e) => knownEntityIds.has(e.entityId)).slice(0, 8);
+
+  const needsAttention = buildNeedsAttention({
+    projectId,
+    activeAlerts,
+    overdueTasks,
+    criticalPunch,
+    ipcsAwaitingCertification,
+    pendingCommitments,
+    measurementsAwaitingApproval,
+    forecastMethod,
+  });
+
+  const health = computeHealth({
+    activeAlerts,
+    overdueTasks,
+    scheduleHasData: scheduleTasks.length > 0,
+    cashFlowNet: data.cashFlow.projected.net,
+    pendingCommitments,
+    measurementsAwaitingApproval,
+    measurementsHaveData: data.measurements.length > 0,
+  });
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="نظرة عامة"
-        subtitle={project.clientName ?? undefined}
-        actions={
-          <div className="flex items-center gap-3">
-            {/* MIDAD Phase A' — purely additive: shown only when a
-                Customer is linked, never replaces or requires clientName
-                above (the two fields are fully independent). */}
-            {project.customerId && (
-              <Link to={`/customers/${project.customerId}`} className="text-sm text-primary hover:underline">
-                عرض ملف العميل
-              </Link>
-            )}
-            <Badge tone={statusTone[project.status]}>{statusLabel[project.status]}</Badge>
-          </div>
-        }
-      />
-
-      {error && (
-        <div>
-          <ErrorState message={error} onRetry={load} />
-        </div>
-      )}
-
-      <ProjectHealthCard projectId={projectId} />
-
-      <div className="grid gap-4 lg:grid-cols-2">
-        <ContractCard contract={mainContract} />
-        <CostPlanCard budget={data.budget} />
+    <div className="flex flex-col gap-5 lg:gap-6">
+      <div className="order-1">
+        <IdentityStrip project={project} contract={mainContract} avgProgress={avgProgress} activity={data.activity} />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <ScheduleStatusCard projectId={projectId} />
-        <PunchListStatusCard projectId={projectId} />
+      <div className="order-2">
+        <HealthGrid health={health} projectId={projectId} />
       </div>
 
-      <BudgetAlertsCard projectId={projectId} />
+      <div className="order-3 lg:order-5">
+        <NeedsAttentionCard items={needsAttention} />
+      </div>
 
-      <ForecastCard forecast={data.forecast} />
+      <div className="order-4 lg:order-3">
+        <FinancialWaterfallCard contract={mainContract} forecast={data.forecast} projectId={projectId} />
+      </div>
 
-      <CashFlowCard cashFlow={data.cashFlow} />
+      <div className="order-4 lg:order-4">
+        <CostVsProgressCard budget={data.budget} avgProgress={avgProgress} />
+      </div>
 
-      <LaborCostCard laborCost={data.laborCost} />
+      <div className="order-5 lg:order-6">
+        <ProgressScheduleCard
+          projectId={projectId}
+          tasks={data.tasks}
+          overdueTasks={overdueTasks}
+          nextMilestone={nextMilestone}
+          avgProgress={avgProgress}
+          measurementsAwaitingApproval={measurementsAwaitingApproval}
+        />
+      </div>
 
-      <BoqStatusCard revision={latestRevision} />
+      <div className="order-6 lg:order-11">
+        <QuickActionsCard projectId={projectId} />
+      </div>
+
+      <div className="order-7 grid gap-5 lg:order-7 lg:grid-cols-2 lg:gap-6">
+        <CashFlowCard cashFlow={data.cashFlow} projectId={projectId} />
+        <ProcurementCard
+          projectId={projectId}
+          totalCommitted={totalCommitted}
+          approvedCommitted={approvedCommitted}
+          pendingCommitted={pendingCommitted}
+          pendingCount={pendingCommitments.length}
+          currency={data.forecast.currency}
+        />
+      </div>
+
+      <div className="order-7 grid gap-5 lg:order-9 lg:grid-cols-2 lg:gap-6">
+        <IpcCard
+          projectId={projectId}
+          awaitingCertification={ipcsAwaitingCertification.length}
+          awaitingApproval={ipcsAwaitingApproval.length}
+          certifiedTotal={certifiedTotal}
+          certifiedCount={certifiedIpcs.length}
+          currency={data.forecast.currency}
+        />
+        <LaborCostCard laborCost={data.laborCost} />
+      </div>
+
+      <div className="order-7 lg:order-10">
+        <ActivityFeedCard events={projectActivity} />
+      </div>
+
+      <div className="order-7 lg:order-8">
+        <BoqStatusCard revision={latestRevision} projectId={projectId} />
+      </div>
     </div>
   );
 }
 
-function ContractCard({ contract }: { contract: Contract | null }) {
+function HeaderSkeleton({ project }: { project: Project | null }) {
   return (
-    <Card className="p-5">
-      <h2 className="mb-3 font-semibold text-stone-800">العقد الرئيسي</h2>
-      {!contract ? (
-        <p className="text-sm text-stone-400">لا يوجد عقد رئيسي لهذا المشروع بعد.</p>
-      ) : (
-        <dl className="space-y-3 text-sm">
-          <Field label="رقم العقد" value={contract.contractNumber ?? "—"} />
-          <Field label="القيمة الأصلية" value={formatMoney(contract.originalValue, contract.currency)} />
-          <Field label="القيمة الحالية (المعدَّلة)" value={formatMoney(contract.revisedValue, contract.currency)} />
-        </dl>
-      )}
+    <div className="flex items-center justify-between">
+      <div>
+        <h1 className="text-xl font-bold text-stone-800">مركز القيادة التنفيذي</h1>
+        {project && <p className="mt-1 text-sm text-stone-500">{project.name}</p>}
+      </div>
+    </div>
+  );
+}
+
+// ── LEVEL 1 — Identity strip ────────────────────────────────────────────
+// The workspace shell (ProjectHeader.tsx) already shows the project name,
+// client, and a back-link above every section — this strip deliberately
+// does not repeat those, it adds the facts that genuinely aren't shown
+// anywhere else yet: status, contract value, schedule-based progress, and
+// when this project was last touched (the most recent real activity event
+// on it, falling back to the project's own creation date).
+function IdentityStrip({
+  project,
+  contract,
+  avgProgress,
+  activity,
+}: {
+  project: Project;
+  contract: Contract | null;
+  avgProgress: number | null;
+  activity: ActivityEvent[];
+}) {
+  const lastActivityAt = activity[0]?.createdAt ?? project.createdAt;
+  return (
+    <Card className="p-4 lg:p-5">
+      <div className="flex flex-wrap items-center gap-x-8 gap-y-3">
+        <Badge tone={statusTone[project.status]}>{statusLabel[project.status]}</Badge>
+        <Stat label="قيمة العقد" value={contract ? formatMoney(contract.revisedValue, contract.currency) : "—"} />
+        <Stat label="نسبة الإنجاز" value={avgProgress !== null ? formatPercent(avgProgress) : "لا توجد بيانات"} hint="من الجدول الزمني" />
+        <Stat label="آخر تحديث" value={formatDateTime(lastActivityAt)} />
+      </div>
     </Card>
   );
 }
 
-function CostPlanCard({ budget }: { budget: BudgetSummary }) {
+function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
-    <Card className="p-5">
-      <h2 className="mb-3 font-semibold text-stone-800">خطة التكلفة</h2>
-      <div className="grid gap-3 sm:grid-cols-3">
+    <div>
+      <p className="text-xs text-stone-500">{label}</p>
+      <p className="text-sm font-semibold text-stone-800">{value}</p>
+      {hint && <p className="text-[11px] text-stone-400">{hint}</p>}
+    </div>
+  );
+}
+
+// ── LEVEL 2 — Project Health ────────────────────────────────────────────
+type HealthTone = "healthy" | "watch" | "critical" | "neutral";
+const healthToneDot: Record<HealthTone, string> = {
+  healthy: "bg-success-500",
+  watch: "bg-warning-500",
+  critical: "bg-danger-500",
+  neutral: "bg-info-500",
+};
+
+interface HealthIndicator {
+  key: string;
+  label: string;
+  tone: HealthTone;
+  statusText: string;
+  metric: string;
+  href: string;
+}
+
+function computeHealth(input: {
+  activeAlerts: BudgetAlert[];
+  overdueTasks: ProjectTask[];
+  scheduleHasData: boolean;
+  cashFlowNet: number;
+  pendingCommitments: Commitment[];
+  measurementsAwaitingApproval: Measurement[];
+  measurementsHaveData: boolean;
+}): HealthIndicator[] {
+  const costTone: HealthTone = input.activeAlerts.some((a) => a.severity === "critical")
+    ? "critical"
+    : input.activeAlerts.length > 0
+      ? "watch"
+      : "healthy";
+
+  const scheduleTone: HealthTone = !input.scheduleHasData ? "neutral" : input.overdueTasks.length > 0 ? "critical" : "healthy";
+
+  const cashTone: HealthTone = input.cashFlowNet >= 0 ? "healthy" : "watch";
+
+  const procurementTone: HealthTone = input.pendingCommitments.length > 0 ? "watch" : "healthy";
+
+  const progressTone: HealthTone = !input.measurementsHaveData
+    ? "neutral"
+    : input.measurementsAwaitingApproval.length > 0
+      ? "watch"
+      : "healthy";
+
+  return [
+    {
+      key: "cost",
+      label: "التكلفة",
+      tone: costTone,
+      statusText: costTone === "critical" ? "تنبيهات حرجة" : costTone === "watch" ? "تحتاج مراقبة" : "على المسار الصحيح",
+      metric: `${input.activeAlerts.length} تنبيه نشط`,
+      href: "cost-plan",
+    },
+    {
+      key: "schedule",
+      label: "الجدول الزمني",
+      tone: scheduleTone,
+      statusText: !input.scheduleHasData ? "لا توجد بيانات" : scheduleTone === "critical" ? "متأخر" : "ضمن الجدول",
+      metric: input.scheduleHasData ? `${input.overdueTasks.length} مهمة متأخرة` : "—",
+      href: "schedule",
+    },
+    {
+      key: "cashflow",
+      label: "التدفق النقدي",
+      tone: cashTone,
+      statusText: cashTone === "healthy" ? "سليم" : "يحتاج متابعة",
+      metric: formatMoney(input.cashFlowNet),
+      href: "cash-flow",
+    },
+    {
+      key: "procurement",
+      label: "المشتريات",
+      tone: procurementTone,
+      statusText: procurementTone === "healthy" ? "لا إجراء مطلوب" : "بانتظار اعتماد",
+      metric: `${input.pendingCommitments.length} التزام معلَّق`,
+      href: "procurement",
+    },
+    {
+      key: "progress",
+      label: "الإنجاز",
+      tone: progressTone,
+      statusText: !input.measurementsHaveData ? "لا توجد بيانات" : progressTone === "watch" ? "بانتظار اعتماد" : "محدَّث",
+      metric: input.measurementsHaveData ? `${input.measurementsAwaitingApproval.length} قياس معلَّق` : "—",
+      href: "progress",
+    },
+    {
+      key: "compliance",
+      label: "الامتثال",
+      tone: "neutral",
+      statusText: "على مستوى الشركة",
+      metric: "نطاقات وGOSI",
+      href: "__company_compliance__",
+    },
+  ];
+}
+
+function HealthGrid({ health, projectId }: { health: HealthIndicator[]; projectId: string }) {
+  return (
+    <Card className="p-4 lg:p-5">
+      <h2 className="mb-3 text-sm font-semibold text-stone-800">صحة المشروع</h2>
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+        {health.map((h) => (
+          <Link
+            key={h.key}
+            to={h.href === "__company_compliance__" ? "/labor-compliance" : `/projects/${projectId}/${h.href}`}
+            className="rounded-md border border-stone-100 p-3 transition hover:border-stone-300 hover:bg-stone-50"
+          >
+            <div className="flex items-center gap-2">
+              <span className={`h-2 w-2 shrink-0 rounded-full ${healthToneDot[h.tone]}`} aria-hidden="true" />
+              <span className="text-sm font-medium text-stone-700">{h.label}</span>
+            </div>
+            <p className="mt-1.5 text-xs text-stone-500">{h.statusText}</p>
+            <p className="mt-0.5 text-xs font-medium text-stone-600">{h.metric}</p>
+          </Link>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+// ── LEVEL 3 — Financial Command Center ──────────────────────────────────
+// forecast.methods.commitment_aware already bundles the entire
+// Contract→Budget→Actual→Committed→EAC→Variance chain in one
+// already-authoritative object — this card is a presentation of that one
+// object, never a second computation of any of its figures.
+function FinancialWaterfallCard({
+  contract,
+  forecast,
+  projectId,
+}: {
+  contract: Contract | null;
+  forecast: ForecastResult;
+  projectId: string;
+}) {
+  const m = forecast.methods.commitment_aware;
+  const overBudget = m.variance < 0;
+  const steps: { label: string; value: number; href: string }[] = [
+    { label: "قيمة العقد", value: contract ? Number(contract.revisedValue) : m.costPlan, href: "contract" },
+    { label: "الميزانية المعتمدة", value: m.costPlan, href: "cost-plan" },
+    { label: "التكلفة الفعلية", value: m.actualCost, href: "actual-cost" },
+    { label: "الالتزامات", value: m.committedCost, href: "procurement" },
+    { label: "التوقع عند الإنجاز", value: m.eac, href: "forecast" },
+  ];
+
+  return (
+    <Card className="p-4 lg:p-5">
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-stone-800">المركز المالي</h2>
+        <span className="text-xs text-stone-400">بتاريخ {formatDate(forecast.asOfDate)}</span>
+      </div>
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+        {steps.map((s, i) => (
+          <Link
+            key={s.label}
+            to={`/projects/${projectId}/${s.href}`}
+            className="rounded-md border border-stone-100 p-3 transition hover:border-stone-300 hover:bg-stone-50"
+          >
+            <p className="text-[11px] text-stone-500">{s.label}</p>
+            <p className="mt-1 truncate text-sm font-bold text-stone-800">{formatMoney(s.value, forecast.currency)}</p>
+            {i < steps.length - 1 && <span className="mt-1 block text-stone-300">←</span>}
+          </Link>
+        ))}
+      </div>
+      <div className={`mt-4 flex items-center justify-between rounded-md border p-3 ${overBudget ? "border-danger-200 bg-danger-50" : "border-success-200 bg-success-50"}`}>
+        <span className={`text-sm font-medium ${overBudget ? "text-danger-700" : "text-success-700"}`}>
+          الانحراف المتوقع{overBudget ? " — تجاوز متوقع للميزانية" : ""}
+        </span>
+        <span className={`text-sm font-bold ${overBudget ? "text-danger-700" : "text-success-700"}`}>
+          {formatMoney(m.variance, forecast.currency)} ({formatPercent(m.variancePercent)})
+        </span>
+      </div>
+    </Card>
+  );
+}
+
+// ── LEVEL 4 — Cost vs Progress ───────────────────────────────────────────
+// Also the one place the Cost Plan's own raw planned/spent/remaining
+// figures are shown verbatim (the previous Overview's CostPlanCard) — the
+// percentage bars above summarize the *relationship*, but the underlying
+// money figures stay visible right below them, never dropped.
+function CostVsProgressCard({ budget, avgProgress }: { budget: BudgetSummary; avgProgress: number | null }) {
+  const costConsumption = budget.totals.planned > 0 ? (budget.totals.spent / budget.totals.planned) * 100 : null;
+  const warn = avgProgress !== null && costConsumption !== null && costConsumption - avgProgress > 5;
+  const overBudget = budget.totals.remaining < 0;
+
+  return (
+    <Card className="p-4 lg:p-5">
+      <h2 className="mb-3 text-sm font-semibold text-stone-800">الإنجاز الفعلي مقابل استهلاك التكلفة</h2>
+      <div className="space-y-3">
+        <ProgressBar label="الإنجاز الفعلي" value={avgProgress} tone="info" />
+        <ProgressBar label="استهلاك التكلفة" value={costConsumption} tone={warn ? "danger" : "success"} />
+      </div>
+      {warn && (
+        <p className="mt-3 rounded-md bg-warning-50 px-3 py-2 text-sm text-warning-700">
+          ⚠ استهلاك التكلفة يسبق الإنجاز الفعلي للمشروع
+        </p>
+      )}
+      {avgProgress === null && <p className="mt-3 text-xs text-stone-400">لا تتوفر بيانات إنجاز من الجدول الزمني بعد.</p>}
+      <div className="mt-4 grid gap-3 border-t border-stone-100 pt-4 sm:grid-cols-3">
         <MetricCard label="إجمالي المخطَّط" value={formatMoney(budget.totals.planned)} />
         <MetricCard label="إجمالي المُنفَق" value={formatMoney(budget.totals.spent)} />
         <MetricCard
-          label={budget.totals.remaining < 0 ? "تجاوز الميزانية" : "المتبقي"}
+          label={overBudget ? "تجاوز الميزانية" : "المتبقي"}
           value={formatMoney(budget.totals.remaining)}
-          tone={budget.totals.remaining < 0 ? "danger" : "default"}
+          tone={overBudget ? "danger" : "default"}
         />
       </div>
     </Card>
   );
 }
 
-const alertSeverityLabel: Record<BudgetAlert["severity"], string> = { info: "معلومات", warning: "تحذير", critical: "حرج" };
-const alertSeverityTone: Record<BudgetAlert["severity"], "info" | "warning" | "danger"> = { info: "info", warning: "warning", critical: "danger" };
-const alertSeverityRank: Record<BudgetAlert["severity"], number> = { critical: 0, warning: 1, info: 2 };
+function ProgressBar({ label, value, tone }: { label: string; value: number | null; tone: "info" | "success" | "danger" }) {
+  const barColor = tone === "danger" ? "bg-danger-500" : tone === "success" ? "bg-success-500" : "bg-info-500";
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between text-sm">
+        <span className="text-stone-600">{label}</span>
+        <span className="font-semibold text-stone-800">{value !== null ? formatPercent(value) : "—"}</span>
+      </div>
+      <div className="h-2 w-full overflow-hidden rounded-full bg-stone-100">
+        <div className={`h-full rounded-full ${barColor}`} style={{ width: `${Math.min(100, Math.max(0, value ?? 0))}%` }} />
+      </div>
+    </div>
+  );
+}
 
-// MIDAD Phase E — compact, read-only summary of this project's own OPEN/
-// ACKNOWLEDGED budget alerts. Deliberately independent of the Promise.all
-// above (its own load/error state): a Budget Alerts failure must never
-// block the rest of this already-established Overview from rendering. Only
-// ever displays server-generated alerts — never computes a rule or metric
-// itself. See pages/BudgetAlerts.tsx for the full list/detail/acknowledge/
-// resolve experience this card links out to.
-function BudgetAlertsCard({ projectId }: { projectId: string }) {
-  const [alerts, setAlerts] = useState<BudgetAlert[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+// ── LEVEL 5 — Needs Attention ────────────────────────────────────────────
+type AttentionSeverity = "critical" | "attention" | "info";
+interface AttentionItem {
+  severity: AttentionSeverity;
+  text: string;
+  metric?: string;
+  href: string;
+}
 
-  function load() {
-    setError(null);
-    listBudgetAlerts({ projectId })
-      .then(setAlerts)
-      .catch((err) => setError(err instanceof Error ? err.message : "تعذّر تحميل تنبيهات الميزانية"));
+function buildNeedsAttention(input: {
+  projectId: string;
+  activeAlerts: BudgetAlert[];
+  overdueTasks: ProjectTask[];
+  criticalPunch: PunchItem[];
+  ipcsAwaitingCertification: Ipc[];
+  pendingCommitments: Commitment[];
+  measurementsAwaitingApproval: Measurement[];
+  forecastMethod: ForecastResult["methods"]["commitment_aware"];
+}): AttentionItem[] {
+  const items: AttentionItem[] = [];
+  const p = input.projectId;
+
+  if (input.forecastMethod.variance < 0) {
+    items.push({
+      severity: "critical",
+      text: "التوقعات تتجاوز الميزانية المعتمدة",
+      metric: formatMoney(Math.abs(input.forecastMethod.variance)),
+      href: `/projects/${p}/forecast`,
+    });
   }
-  useEffect(load, [projectId]);
+  for (const a of [...input.activeAlerts].sort((x, y) => (x.severity === "critical" ? -1 : 1)).slice(0, 3)) {
+    items.push({
+      severity: a.severity === "critical" ? "critical" : a.severity === "warning" ? "attention" : "info",
+      text: a.title,
+      metric: alertSeverityLabel[a.severity],
+      href: `/budget-alerts?projectId=${p}`,
+    });
+  }
+  if (input.criticalPunch.length > 0) {
+    items.push({
+      severity: "critical",
+      text: `${input.criticalPunch.length} ملاحظة حرجة مفتوحة في قائمة الملاحظات`,
+      href: `/projects/${p}/punch-list`,
+    });
+  }
+  if (input.overdueTasks.length > 0) {
+    items.push({
+      severity: "attention",
+      text: `${input.overdueTasks.length} مهمة متأخرة عن الجدول الزمني`,
+      href: `/projects/${p}/schedule`,
+    });
+  }
+  if (input.ipcsAwaitingCertification.length > 0) {
+    items.push({
+      severity: "attention",
+      text: `${input.ipcsAwaitingCertification.length} شهادة دفع (IPC) بانتظار التصديق`,
+      href: `/projects/${p}/ipc`,
+    });
+  }
+  if (input.pendingCommitments.length > 0) {
+    items.push({
+      severity: "attention",
+      text: `${input.pendingCommitments.length} التزام شراء بانتظار الاعتماد`,
+      href: `/projects/${p}/procurement`,
+    });
+  }
+  if (input.measurementsAwaitingApproval.length > 0) {
+    items.push({
+      severity: "info",
+      text: `${input.measurementsAwaitingApproval.length} قياس إنجاز بانتظار الاعتماد`,
+      href: `/projects/${p}/progress`,
+    });
+  }
 
-  const active = (alerts ?? []).filter((a) => a.status !== "resolved");
-  const top = [...active].sort((a, b) => alertSeverityRank[a.severity] - alertSeverityRank[b.severity]).slice(0, 3);
+  const rank: Record<AttentionSeverity, number> = { critical: 0, attention: 1, info: 2 };
+  return items.sort((a, b) => rank[a.severity] - rank[b.severity]);
+}
+
+const attentionDot: Record<AttentionSeverity, string> = {
+  critical: "bg-danger-500",
+  attention: "bg-warning-500",
+  info: "bg-info-500",
+};
+const attentionEmoji: Record<AttentionSeverity, string> = { critical: "🔴", attention: "🟠", info: "ℹ️" };
+
+function NeedsAttentionCard({ items }: { items: AttentionItem[] }) {
+  const counts = {
+    critical: items.filter((i) => i.severity === "critical").length,
+    attention: items.filter((i) => i.severity === "attention").length,
+    info: items.filter((i) => i.severity === "info").length,
+  };
 
   return (
-    <Card className="p-5">
-      <div className="mb-3 flex items-center justify-between">
-        <h2 className="font-semibold text-stone-800">تنبيهات الميزانية</h2>
-        <Link to={`/budget-alerts?projectId=${projectId}`} className="text-sm text-primary hover:underline">
-          عرض جميع التنبيهات
-        </Link>
+    <Card className="p-4 lg:p-5">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-sm font-semibold text-stone-800">يحتاج إلى انتباه</h2>
+        <div className="flex items-center gap-3 text-xs">
+          <span>{attentionEmoji.critical} حرج {counts.critical}</span>
+          <span>{attentionEmoji.attention} تنبيه {counts.attention}</span>
+          <span>{attentionEmoji.info} معلومات {counts.info}</span>
+        </div>
       </div>
-      {error && <ErrorState message={error} onRetry={load} />}
-      {!error && alerts === null && <p className="text-sm text-stone-400">جارٍ التحميل...</p>}
-      {!error && alerts && active.length === 0 && (
-        <p className="text-sm text-stone-400">لا توجد حالياً مؤشرات مالية تتجاوز قواعد التنبيه المحددة.</p>
-      )}
-      {!error && top.length > 0 && (
-        <ul className="space-y-1.5">
-          {top.map((a) => (
-            <li key={a.id} className="flex items-center justify-between gap-2 text-sm">
-              <span className="text-stone-700">{a.title}</span>
-              <Badge tone={alertSeverityTone[a.severity]}>{alertSeverityLabel[a.severity]}</Badge>
+      {items.length === 0 ? (
+        <p className="text-sm text-stone-400">لا توجد حالياً بنود تحتاج إلى انتباه.</p>
+      ) : (
+        <ul className="divide-y divide-stone-100">
+          {items.map((item, i) => (
+            <li key={i}>
+              <Link to={item.href} className="flex items-center justify-between gap-3 py-2.5 text-sm hover:bg-stone-50">
+                <span className="flex items-center gap-2 text-stone-700">
+                  <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${attentionDot[item.severity]}`} aria-hidden="true" />
+                  {item.text}
+                </span>
+                {item.metric && <span className="shrink-0 text-xs font-medium text-stone-500">{item.metric}</span>}
+              </Link>
             </li>
           ))}
         </ul>
@@ -263,304 +741,162 @@ function BudgetAlertsCard({ projectId }: { projectId: string }) {
   );
 }
 
-function today(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
-type HealthTone = "healthy" | "watch" | "critical";
-const healthToneBadge: Record<HealthTone, "success" | "warning" | "danger"> = {
-  healthy: "success",
-  watch: "warning",
-  critical: "danger",
-};
-
-// MIDAD Phase F.1 — "Project Health" (master prompt §8): a compact,
-// at-a-glance read of the project across the dimensions for which this
-// codebase actually has an authoritative, already-computed source. This
-// card NEVER derives a health score from a formula of its own — each
-// dimension is a direct restatement of a fact another already-tested
-// domain already establishes:
-//   - Financial: the worst OPEN/ACKNOWLEDGED Budget Alert severity for
-//     this project (Phase E's own rule engine — never re-evaluated here).
-//   - Schedule: whether any incomplete task's end date has passed (the
-//     same plain date comparison ScheduleStatusCard below already makes).
-// Progress and Compliance are deliberately OMITTED: there is no
-// authoritative per-project "% complete" metric anywhere in this codebase
-// (see docs/MIDAD_FINANCIAL_MODEL.md / UI-08 discovery — BOQ has no
-// backend-computed total, so no progress-against-BOQ figure exists
-// either), and Workforce Compliance (Nitaqat/GOSI) is a company-level
-// concept with no per-project breakdown (see POST_AUDIT_BACKLOG.md #3).
-// Fabricating either would violate the master prompt's own explicit rule:
-// "Only display dimensions for which authoritative data exists. Do NOT
-// fabricate a score." Independent fetch, like every other card here — a
-// failure here must not block the rest of the page.
-function ProjectHealthCard({ projectId }: { projectId: string }) {
-  const [alerts, setAlerts] = useState<BudgetAlert[] | null>(null);
-  const [alertsError, setAlertsError] = useState<string | null>(null);
-  const [tasks, setTasks] = useState<ProjectTask[] | null>(null);
-  const [tasksError, setTasksError] = useState<string | null>(null);
-
-  function load() {
-    setAlertsError(null);
-    setTasksError(null);
-    listBudgetAlerts({ projectId })
-      .then(setAlerts)
-      .catch((err) => setAlertsError(err instanceof Error ? err.message : "تعذّر تحميل تنبيهات الميزانية"));
-    getProjectSchedule(projectId)
-      .then((s) => setTasks(s.tasks))
-      .catch((err) => setTasksError(err instanceof Error ? err.message : "تعذّر تحميل الجدول الزمني"));
-  }
-  useEffect(load, [projectId]);
-
-  const activeAlerts = (alerts ?? []).filter((a) => a.status !== "resolved");
-  const financialLoading = alerts === null && !alertsError;
-  const financialTone: HealthTone | null =
-    alerts === null
-      ? null
-      : activeAlerts.some((a) => a.severity === "critical")
-        ? "critical"
-        : activeAlerts.length > 0
-          ? "watch"
-          : "healthy";
-
-  const overdueTasks = (tasks ?? []).filter((t) => t.status !== "completed" && t.endDate < today());
-  const scheduleLoading = tasks === null && !tasksError;
-  const scheduleHasData = tasks !== null && tasks.length > 0;
-  const scheduleTone: HealthTone | null = scheduleHasData ? (overdueTasks.length > 0 ? "critical" : "healthy") : null;
-
-  // Deliberately distinct wording from BudgetAlertsCard's/ScheduleStatusCard's
-  // own badge text below (e.g. their "متأخر" / "على المسار الصحيح") — this
-  // card is a separate, higher-level summary, not a duplicate label for the
-  // same fact, and distinct text keeps the two cards independently testable.
-  const financialLabel: Record<HealthTone, string> = { healthy: "سليمة", watch: "تحتاج مراقبة", critical: "حرجة" };
-  const scheduleLabel: Record<HealthTone, string> = { healthy: "ضمن الجدول المخطط", watch: "قيد المراقبة", critical: "تأخر عن الجدول" };
-
+// ── LEVEL 6 — Progress + Schedule ───────────────────────────────────────
+function ProgressScheduleCard({
+  projectId,
+  tasks,
+  overdueTasks,
+  nextMilestone,
+  avgProgress,
+  measurementsAwaitingApproval,
+}: {
+  projectId: string;
+  tasks: ProjectTask[];
+  overdueTasks: ProjectTask[];
+  nextMilestone: ProjectTask | undefined;
+  avgProgress: number | null;
+  measurementsAwaitingApproval: Measurement[];
+}) {
   return (
-    <Card className="p-5">
-      <h2 className="mb-3 font-semibold text-stone-800">صحة المشروع</h2>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div className="flex items-center justify-between rounded-md border border-stone-100 p-3">
-          <span className="text-sm text-stone-600">الوضع المالي</span>
-          {alertsError ? (
-            <span className="text-xs text-danger-600">تعذّر التحميل</span>
-          ) : financialLoading ? (
-            <span className="text-xs text-stone-400">جارٍ التحميل...</span>
-          ) : (
-            <Badge tone={healthToneBadge[financialTone as HealthTone]}>{financialLabel[financialTone as HealthTone]}</Badge>
-          )}
-        </div>
-        <div className="flex items-center justify-between rounded-md border border-stone-100 p-3">
-          <span className="text-sm text-stone-600">الجدول الزمني</span>
-          {tasksError ? (
-            <span className="text-xs text-danger-600">تعذّر التحميل</span>
-          ) : scheduleLoading ? (
-            <span className="text-xs text-stone-400">جارٍ التحميل...</span>
-          ) : !scheduleHasData ? (
-            <span className="text-xs text-stone-400">لا توجد بيانات كافية</span>
-          ) : (
-            <Badge tone={healthToneBadge[scheduleTone as HealthTone]}>{scheduleLabel[scheduleTone as HealthTone]}</Badge>
-          )}
-        </div>
-      </div>
-    </Card>
-  );
-}
-
-// MIDAD Phase F — A–E integration: Schedule (Phase C1) surfaced as a
-// compact status card, the same "summary now, full screen one click away"
-// pattern as every other card here. Never computes a schedule health
-// verdict of its own beyond the two facts a plain date comparison can
-// state honestly (an incomplete task whose end date has passed; the
-// nearest upcoming incomplete milestone) — both derived from fields the
-// Schedule API already returns, nothing invented.
-function ScheduleStatusCard({ projectId }: { projectId: string }) {
-  const [tasks, setTasks] = useState<ProjectTask[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  function load() {
-    setError(null);
-    getProjectSchedule(projectId)
-      .then((s) => setTasks(s.tasks))
-      .catch((err) => setError(err instanceof Error ? err.message : "تعذّر تحميل الجدول الزمني"));
-  }
-  useEffect(load, [projectId]);
-
-  const overdue = (tasks ?? []).filter((t) => t.status !== "completed" && t.endDate < today());
-  const nextMilestone = (tasks ?? [])
-    .filter((t) => t.taskType === "milestone" && t.status !== "completed")
-    .sort((a, b) => a.endDate.localeCompare(b.endDate))[0];
-
-  return (
-    <Card className="p-5">
+    <Card className="p-4 lg:p-5">
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="font-semibold text-stone-800">الجدول الزمني</h2>
+        <h2 className="text-sm font-semibold text-stone-800">الإنجاز والجدول الزمني</h2>
         <Link to={`/projects/${projectId}/schedule`} className="text-sm text-primary hover:underline">
           فتح الجدول الزمني
         </Link>
       </div>
-      {error && <ErrorState message={error} onRetry={load} />}
-      {!error && tasks === null && <p className="text-sm text-stone-400">جارٍ التحميل...</p>}
-      {!error && tasks && tasks.length === 0 && <p className="text-sm text-stone-400">لا توجد بيانات جدولة بعد.</p>}
-      {!error && tasks && tasks.length > 0 && (
-        <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <Badge tone={overdue.length > 0 ? "warning" : "success"}>{overdue.length > 0 ? "متأخر" : "على المسار الصحيح"}</Badge>
-            {overdue.length > 0 && <span className="text-sm text-stone-500">{overdue.length} مهمة متأخرة</span>}
-          </div>
-          {nextMilestone && (
-            <p className="text-sm text-stone-600">المعلم القادم: {nextMilestone.name} — {formatDate(nextMilestone.endDate)}</p>
-          )}
+      {tasks.length === 0 ? (
+        <p className="text-sm text-stone-400">لا توجد بيانات جدولة بعد.</p>
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-3">
+          <MetricCard label="الإنجاز العام" value={avgProgress !== null ? formatPercent(avgProgress) : "—"} />
+          <MetricCard
+            label="حالة الجدول"
+            value={overdueTasks.length > 0 ? `${overdueTasks.length} متأخرة` : "على المسار الصحيح"}
+            tone={overdueTasks.length > 0 ? "warning" : "success"}
+          />
+          <MetricCard
+            label="المعلم القادم"
+            value={nextMilestone ? formatDate(nextMilestone.endDate) : "—"}
+            hint={nextMilestone?.name}
+          />
         </div>
+      )}
+      {measurementsAwaitingApproval.length > 0 && (
+        <p className="mt-3 text-xs text-stone-500">
+          <Link to={`/projects/${projectId}/progress`} className="text-primary hover:underline">
+            {measurementsAwaitingApproval.length} قياس إنجاز بانتظار الاعتماد
+          </Link>
+        </p>
       )}
     </Card>
   );
 }
 
-// MIDAD Phase F — A–E integration: Punch Lists (Phase C2) surfaced as a
-// compact status card. Only counts, from server-provided statuses — never
-// invents a deficiency-resolution verdict.
-const OPEN_PUNCH_STATUSES: PunchItem["status"][] = ["open", "assigned", "in_progress"];
-
-function PunchListStatusCard({ projectId }: { projectId: string }) {
-  const [items, setItems] = useState<PunchItem[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  function load() {
-    setError(null);
-    listPunchItems(projectId)
-      .then(setItems)
-      .catch((err) => setError(err instanceof Error ? err.message : "تعذّر تحميل قائمة الملاحظات"));
-  }
-  useEffect(load, [projectId]);
-
-  const open = (items ?? []).filter((i) => OPEN_PUNCH_STATUSES.includes(i.status));
-  const critical = open.filter((i) => i.priority === "critical").length;
-
+// ── LEVEL 7 — Cash Flow ──────────────────────────────────────────────────
+function CashFlowCard({ cashFlow, projectId }: { cashFlow: CashFlowResult; projectId: string }) {
   return (
-    <Card className="p-5">
+    <Card className="p-4 lg:p-5">
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="font-semibold text-stone-800">قائمة الملاحظات</h2>
-        <Link to={`/projects/${projectId}/punch-list`} className="text-sm text-primary hover:underline">
-          فتح القائمة
+        <h2 className="text-sm font-semibold text-stone-800">التدفق النقدي</h2>
+        <Link to={`/projects/${projectId}/cash-flow`} className="text-sm text-primary hover:underline">
+          التفاصيل الكاملة
         </Link>
       </div>
-      {error && <ErrorState message={error} onRetry={load} />}
-      {!error && items === null && <p className="text-sm text-stone-400">جارٍ التحميل...</p>}
-      {!error && items && items.length === 0 && <p className="text-sm text-stone-400">لا توجد ملاحظات مسجَّلة بعد.</p>}
-      {!error && items && items.length > 0 && (
-        <div className="flex items-center gap-2">
-          <Badge tone={open.length === 0 ? "success" : critical > 0 ? "danger" : "warning"}>
-            {open.length === 0 ? "لا توجد ملاحظات مفتوحة" : `${open.length} مفتوحة`}
-          </Badge>
-          {critical > 0 && <span className="text-sm text-danger-600">{critical} حرجة</span>}
-        </div>
-      )}
+      <div className="grid grid-cols-2 gap-3">
+        <MetricCard label="المُحصَّل فعلياً" value={formatMoney(cashFlow.historical.cashReceived, cashFlow.currency)} />
+        <MetricCard label="التكلفة المتكبَّدة" value={formatMoney(cashFlow.historical.incurredCost, cashFlow.currency)} />
+        <MetricCard label="مستحقات متوقعة" value={formatMoney(cashFlow.projected.receivables, cashFlow.currency)} />
+        <MetricCard
+          label="صافي المتوقع"
+          value={formatMoney(cashFlow.projected.net, cashFlow.currency)}
+          tone={cashFlow.projected.net < 0 ? "danger" : "success"}
+        />
+      </div>
     </Card>
   );
 }
 
-function ForecastCard({ forecast }: { forecast: ForecastResult }) {
+// ── LEVEL 8 — Procurement / Commitments ─────────────────────────────────
+function ProcurementCard({
+  projectId,
+  totalCommitted,
+  approvedCommitted,
+  pendingCommitted,
+  pendingCount,
+  currency,
+}: {
+  projectId: string;
+  totalCommitted: number;
+  approvedCommitted: number;
+  pendingCommitted: number;
+  pendingCount: number;
+  currency: string;
+}) {
   return (
-    <Card className="p-5">
+    <Card className="p-4 lg:p-5">
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="font-semibold text-stone-800">التوقعات المالية</h2>
-        <span className="text-xs text-stone-400">بتاريخ {formatDate(forecast.asOfDate)}</span>
+        <h2 className="text-sm font-semibold text-stone-800">المشتريات والالتزامات</h2>
+        <Link to={`/projects/${projectId}/procurement`} className="text-sm text-primary hover:underline">
+          فتح المشتريات
+        </Link>
       </div>
-      <div className="grid gap-4 sm:grid-cols-2">
-        {methods.map((m) => (
-          <ForecastMethodBlock key={m} calc={forecast.methods[m]} currency={forecast.currency} />
-        ))}
+      <MetricCard label="إجمالي الالتزامات" value={formatMoney(totalCommitted, currency)} />
+      <div className="mt-3 grid grid-cols-2 gap-3">
+        <MetricCard label="نشطة / منفَّذة" value={formatMoney(approvedCommitted, currency)} tone="success" />
+        <MetricCard label={`بانتظار الاعتماد (${pendingCount})`} value={formatMoney(pendingCommitted, currency)} tone="warning" />
       </div>
     </Card>
   );
 }
 
-function ForecastMethodBlock({ calc, currency }: { calc: ForecastCalculation; currency: string }) {
+// ── LEVEL 9 — IPC ────────────────────────────────────────────────────────
+function IpcCard({
+  projectId,
+  awaitingCertification,
+  awaitingApproval,
+  certifiedTotal,
+  certifiedCount,
+  currency,
+}: {
+  projectId: string;
+  awaitingCertification: number;
+  awaitingApproval: number;
+  certifiedTotal: number;
+  certifiedCount: number;
+  currency: string;
+}) {
   return (
-    <div className="rounded-md border border-stone-200 p-3">
-      <h3 className="mb-2 text-sm font-semibold text-stone-700">{methodLabel[calc.method]}</h3>
-      <dl className="space-y-2 text-sm">
-        <Field label="المتبقي لإنجاز العمل (ETC)" value={formatMoney(calc.etc, currency)} />
-        <Field label="التكلفة المتوقعة عند الإنجاز (EAC)" value={formatMoney(calc.eac, currency)} />
-        <Field label="الانحراف" value={formatMoney(calc.variance, currency)} />
-        <Field label="نسبة الانحراف" value={formatPercent(calc.variancePercent)} />
-      </dl>
-    </div>
-  );
-}
-
-function CashFlowCard({ cashFlow }: { cashFlow: CashFlowResult }) {
-  return (
-    <Card className="p-5">
+    <Card className="p-4 lg:p-5">
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="font-semibold text-stone-800">التدفق النقدي</h2>
-        <span className="text-xs text-stone-400">بتاريخ {formatDate(cashFlow.asOfDate)}</span>
+        <h2 className="text-sm font-semibold text-stone-800">شهادات الدفع (IPC)</h2>
+        <Link to={`/projects/${projectId}/ipc`} className="text-sm text-primary hover:underline">
+          فتح الشهادات
+        </Link>
       </div>
-      <div className="grid gap-4 sm:grid-cols-3">
-        <div>
-          <h3 className="mb-2 text-xs font-semibold text-stone-500">فعلي (محقَّق)</h3>
-          <dl className="space-y-2 text-sm">
-            <Field label="المُحصَّل فعلياً" value={formatMoney(cashFlow.historical.cashReceived, cashFlow.currency)} />
-            <Field label="التكلفة المتكبَّدة" value={formatMoney(cashFlow.historical.incurredCost, cashFlow.currency)} />
-          </dl>
-        </div>
-        <div>
-          <h3 className="mb-2 text-xs font-semibold text-stone-500">متوقَّع</h3>
-          <dl className="space-y-2 text-sm">
-            <Field label="المستحقات" value={formatMoney(cashFlow.projected.receivables, cashFlow.currency)} />
-            <Field label="التحصيل المتوقع من الشهادات المعتمدة" value={formatMoney(cashFlow.projected.certifiedExpectedCollection, cashFlow.currency)} />
-            <Field label="الالتزامات التعاقدية" value={formatMoney(cashFlow.projected.commitments, cashFlow.currency)} />
-            <Field label="الصافي" value={formatMoney(cashFlow.projected.net, cashFlow.currency)} />
-          </dl>
-        </div>
-        <div>
-          <h3 className="mb-2 text-xs font-semibold text-stone-500">غير مؤرَّخ (لا يوجد آلية توقيت في النظام الحالي)</h3>
-          <dl className="space-y-2 text-sm">
-            <Field label="المتبقي لإنجاز العمل (ETC)" value={formatMoney(cashFlow.undated.etc, cashFlow.currency)} />
-            <Field label="الضمان المحتجز" value={formatMoney(cashFlow.undated.retentionToBeReleased, cashFlow.currency)} />
-            <Field label="الدفعة المقدَّمة" value={cashFlow.undated.advance.supported ? "—" : "غير مدعومة"} />
-          </dl>
-        </div>
+      <MetricCard label={`القيمة المصدَّقة (${certifiedCount})`} value={formatMoney(certifiedTotal, currency)} tone="success" />
+      <div className="mt-3 grid grid-cols-2 gap-3">
+        <MetricCard label="بانتظار التصديق" value={String(awaitingCertification)} tone={awaitingCertification > 0 ? "warning" : "default"} />
+        <MetricCard label="بانتظار الاعتماد" value={String(awaitingApproval)} tone={awaitingApproval > 0 ? "warning" : "default"} />
       </div>
     </Card>
   );
 }
 
-// MIDAD Phase A4/A5.1 — read-only Labor Allocation visibility. Deliberately
-// a SEPARATE card from Cost Plan/Forecast/Cash Flow above, never merged
-// into their totals: this card never reads/writes `expenses` itself — a
-// posted allocation's real Actual Cost contribution lives entirely in the
-// project's own Expense/Actual Cost total, driven by routes/
-// payrollPeriods.ts's post(). What this card shows is the posting STATUS
-// of the labor cost already allocated here (posted/unposted, sourced from
-// `labor_cost_postings` — see api/laborCost.ts's own comment), not a
-// second Actual Cost figure.
+// ── Labor cost (kept from the previous Overview, unchanged logic) ──────
 function LaborCostCard({ laborCost }: { laborCost: ProjectLaborCost }) {
-  if (laborCost.allocationCount === 0) {
-    return (
-      <Card className="p-5">
-        <h2 className="mb-3 font-semibold text-stone-800">تكلفة العمالة الموزَّعة</h2>
-        <p className="text-sm text-stone-400">لا توجد تكلفة عمالة موزعة</p>
-      </Card>
-    );
-  }
-
-  const fullyUnposted = laborCost.postedTotal === 0;
-
   return (
-    <Card className="p-5">
+    <Card className="p-4 lg:p-5">
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="font-semibold text-stone-800">تكلفة العمالة الموزَّعة</h2>
-        {laborCost.posted && <Badge tone="success">مرحّلة بالكامل</Badge>}
+        <h2 className="text-sm font-semibold text-stone-800">تكلفة العمالة الموزَّعة</h2>
+        {laborCost.allocationCount > 0 && laborCost.posted && <Badge tone="success">مرحّلة بالكامل</Badge>}
       </div>
-      <div className="grid gap-4 sm:grid-cols-2">
-        <MetricCard label="إجمالي الموزَّع" value={formatMoney(laborCost.allocatedTotal)} />
-        <MetricCard label="عدد التوزيعات" value={String(laborCost.allocationCount)} />
-      </div>
-      {!laborCost.posted && (
-        <div className="mt-4 grid gap-4 sm:grid-cols-2">
-          {!fullyUnposted && <MetricCard label="مرحّلة" value={formatMoney(laborCost.postedTotal)} tone="success" />}
-          <MetricCard label="غير مرحّلة" value={formatMoney(laborCost.unpostedTotal)} tone="warning" />
+      {laborCost.allocationCount === 0 ? (
+        <p className="text-sm text-stone-400">لا توجد تكلفة عمالة موزعة</p>
+      ) : (
+        <div className="grid grid-cols-2 gap-3">
+          <MetricCard label="إجمالي الموزَّع" value={formatMoney(laborCost.allocatedTotal)} />
+          <MetricCard label="عدد التوزيعات" value={String(laborCost.allocationCount)} />
         </div>
       )}
       <div className="mt-3 text-end">
@@ -572,20 +908,105 @@ function LaborCostCard({ laborCost }: { laborCost: ProjectLaborCost }) {
   );
 }
 
-function BoqStatusCard({ revision }: { revision: BoqRevision | null }) {
+// ── LEVEL 10 — Recent Activity ───────────────────────────────────────────
+const activityVerb: Record<string, string> = {
+  "ipc.certified": "تم تصديق شهادة الدفع",
+  "ipc.approved": "تم اعتماد شهادة الدفع",
+  "ipc.submitted": "تم إرسال شهادة الدفع للاعتماد",
+  "ipc.rejected": "تم رفض شهادة الدفع",
+  "commitment.approved": "تم اعتماد التزام الشراء",
+  "commitment.submitted": "تم إرسال التزام الشراء للاعتماد",
+  "commitment.termsUpdated": "تم تعديل شروط التزام الشراء",
+  "measurement.approved": "تم اعتماد قياس الإنجاز",
+  "measurement.submitted": "تم إرسال قياس الإنجاز للاعتماد",
+  "boq_revision.published": "تم نشر نسخة جدول الكميات",
+};
+
+function ActivityFeedCard({ events }: { events: ActivityEvent[] }) {
   return (
-    <Card className="p-5">
-      <h2 className="mb-3 font-semibold text-stone-800">حالة جدول الكميات</h2>
+    <Card className="p-4 lg:p-5">
+      <h2 className="mb-3 text-sm font-semibold text-stone-800">آخر النشاطات</h2>
+      {events.length === 0 ? (
+        <p className="text-sm text-stone-400">لا توجد نشاطات مسجَّلة لهذا المشروع بعد.</p>
+      ) : (
+        <ul className="space-y-2.5">
+          {events.map((e) => (
+            <li key={e.id} className="flex items-center justify-between gap-3 text-sm">
+              <span className="text-stone-700">{activityVerb[e.action] ?? e.action}</span>
+              <span className="shrink-0 text-xs text-stone-400">{formatDateTime(e.createdAt)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
+// ── LEVEL 11 — Quick Actions ─────────────────────────────────────────────
+// Plain navigation to each domain's own existing, already permission-
+// gated create flow — this never duplicates a Can-wrapped create button
+// itself, it only links to the screen that owns it.
+function QuickActionsCard({ projectId }: { projectId: string }) {
+  // Document upload has no owner-only gate anywhere in this codebase
+  // (create/read are member-open, same posture as Tasks/Daily Logs), so
+  // it renders unconditionally — every other action below mirrors an
+  // existing owner-only permission from auth/permissions.ts exactly.
+  const gatedActions: { label: string; href: string; permission: Parameters<typeof Can>[0]["permission"] }[] = [
+    { label: "+ بند جدول كميات", href: "boq", permission: "boq.manage" },
+    { label: "+ التزام شراء", href: "procurement", permission: "commitment.manage" },
+    { label: "+ مصروف", href: "actual-cost", permission: "budget.manage" },
+    { label: "+ شهادة دفع", href: "ipc", permission: "ipc.manage" },
+  ];
+  return (
+    <Card className="p-4 lg:p-5">
+      <h2 className="mb-3 text-sm font-semibold text-stone-800">إجراءات سريعة</h2>
+      <div className="flex flex-wrap gap-2">
+        {gatedActions.map((a) => (
+          <Can key={a.href} permission={a.permission}>
+            <Link to={`/projects/${projectId}/${a.href}`}>
+              <Button variant="secondary" size="sm">
+                {a.label}
+              </Button>
+            </Link>
+          </Can>
+        ))}
+        <Link to={`/projects/${projectId}/documents`}>
+          <Button variant="secondary" size="sm">
+            + رفع مستند
+          </Button>
+        </Link>
+      </div>
+    </Card>
+  );
+}
+
+// ── BOQ status (kept, unchanged logic) ──────────────────────────────────
+const boqRevisionStatusLabel: Record<BoqRevision["status"], string> = {
+  draft: "مسودة",
+  published: "منشورة",
+  superseded: "مُستبدَلة",
+};
+const boqRevisionStatusTone: Record<BoqRevision["status"], "neutral" | "success" | "warning"> = {
+  draft: "warning",
+  published: "success",
+  superseded: "neutral",
+};
+
+function BoqStatusCard({ revision, projectId }: { revision: BoqRevision | null; projectId: string }) {
+  return (
+    <Card className="p-4 lg:p-5">
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-stone-800">حالة جدول الكميات</h2>
+        <Link to={`/projects/${projectId}/boq`} className="text-sm text-primary hover:underline">
+          فتح جدول الكميات
+        </Link>
+      </div>
       {!revision ? (
         <p className="text-sm text-stone-400">لا توجد نسخة من جدول الكميات لهذا المشروع بعد.</p>
       ) : (
-        <dl className="space-y-3 text-sm">
-          <Field label="النسخة" value={`النسخة #${revision.revisionNumber}`} />
-          <Field
-            label="الحالة"
-            value=""
-            valueNode={<Badge tone={boqRevisionStatusTone[revision.status]}>{boqRevisionStatusLabel[revision.status]}</Badge>}
-          />
+        <dl className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+          <Field label="النسخة" value={`#${revision.revisionNumber}`} />
+          <Field label="الحالة" value="" valueNode={<Badge tone={boqRevisionStatusTone[revision.status]}>{boqRevisionStatusLabel[revision.status]}</Badge>} />
           <Field label="تاريخ النشر" value={formatDate(revision.publishedAt)} />
         </dl>
       )}
@@ -595,8 +1016,8 @@ function BoqStatusCard({ revision }: { revision: BoqRevision | null }) {
 
 function Field({ label, value, valueNode }: { label: string; value: string; valueNode?: ReactNode }) {
   return (
-    <div className="flex items-baseline justify-between border-b border-stone-100 pb-2">
-      <dt className="text-stone-500">{label}</dt>
+    <div className="flex items-baseline gap-2">
+      <dt className="text-stone-500">{label}:</dt>
       <dd className="font-medium text-stone-800">{valueNode ?? value}</dd>
     </div>
   );
