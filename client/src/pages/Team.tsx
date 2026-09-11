@@ -8,11 +8,10 @@ import { Badge } from "../ui/Badge";
 import { Button } from "../ui/Button";
 import { ErrorState } from "../ui/ErrorState";
 import type { CompanyInvite, CompanyMember, CompanyRole } from "../api/types";
-
-const roleLabel: Record<string, string> = { owner: "مالك", member: "عضو" };
-const statusLabel: Record<string, string> = { active: "نشط", deactivated: "معطّل" };
+import { useTranslation } from "../i18n/I18nProvider";
 
 export function Team() {
+  const { t } = useTranslation();
   const [members, setMembers] = useState<CompanyMember[]>([]);
   const [invites, setInvites] = useState<CompanyInvite[]>([]);
   const [email, setEmail] = useState("");
@@ -43,20 +42,20 @@ export function Team() {
       setEmail("");
       setNotice(
         result.emailDelivered
-          ? "أُرسلت الدعوة عبر البريد الإلكتروني."
-          : "تعذّر إرسال البريد الإلكتروني — لم يتم إعداد مزوّد بريد حقيقي بعد. شارِكي رابط الدعوة يدوياً من سجلات الخادم.",
+          ? t("team.inviteSentByEmail")
+          : t("team.inviteNoProvider"),
       );
       load();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر إرسال الدعوة");
+      setError(err instanceof ApiError ? err.message : t("team.inviteError"));
     }
   }
 
   return (
     <Layout>
-      <PageHeader title="الفريق" subtitle="أعضاء الشركة، صلاحياتهم، والدعوات المُرسَلة." />
+      <PageHeader title={t("team.title")} subtitle={t("team.subtitle")} />
 
-      <h3 className="mb-2 font-semibold text-stone-700">الأعضاء</h3>
+      <h3 className="mb-2 font-semibold text-stone-700">{t("team.membersHeading")}</h3>
       <ul className="mb-6 divide-y divide-stone-100 rounded-lg border border-stone-200 bg-white">
         {members.map((m) => (
           <MemberRow key={m.id} member={m} onChanged={load} />
@@ -65,7 +64,7 @@ export function Team() {
 
       {invites.length > 0 && (
         <>
-          <h3 className="mb-2 font-semibold text-stone-700">دعوات بانتظار القبول</h3>
+          <h3 className="mb-2 font-semibold text-stone-700">{t("team.pendingInvitesHeading")}</h3>
           <ul className="mb-6 divide-y divide-stone-100 rounded-lg border border-stone-200 bg-white">
             {invites.map((inv) => (
               <li key={inv.id} className="p-3 text-sm text-stone-600">{inv.email}</li>
@@ -74,7 +73,7 @@ export function Team() {
         </>
       )}
 
-      <h3 className="mb-2 font-semibold text-stone-700">دعوة عضو جديد</h3>
+      <h3 className="mb-2 font-semibold text-stone-700">{t("team.inviteHeading")}</h3>
       <Card className="p-5">
         <form onSubmit={invite} className="space-y-3">
           {error && <ErrorState message={error} />}
@@ -83,12 +82,12 @@ export function Team() {
             <input
               type="email"
               required
-              placeholder="البريد الإلكتروني"
+              placeholder={t("team.emailPlaceholder")}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="flex-1 rounded-md border border-stone-300 px-3 py-2 text-sm"
             />
-            <Button type="submit">إرسال دعوة</Button>
+            <Button type="submit">{t("team.sendInvite")}</Button>
           </div>
         </form>
       </Card>
@@ -101,6 +100,7 @@ export function Team() {
 // enforced by server-side (see server/src/routes/company.ts's requireOwner);
 // mirrored client-side here only as a UX courtesy, per auth/permissions.ts.
 function MemberRow({ member, onChanged }: { member: CompanyMember; onChanged: () => void }) {
+  const { t } = useTranslation();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -111,7 +111,7 @@ function MemberRow({ member, onChanged }: { member: CompanyMember; onChanged: ()
       await apiFetch(`/company/members/${member.id}`, { method: "PATCH", body: JSON.stringify(body) });
       onChanged();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر حفظ التغيير");
+      setError(err instanceof ApiError ? err.message : t("team.saveChangeError"));
     } finally {
       setBusy(false);
     }
@@ -125,7 +125,7 @@ function MemberRow({ member, onChanged }: { member: CompanyMember; onChanged: ()
         {error && <p className="text-xs text-red-600">{error}</p>}
       </div>
       <div className="flex items-center gap-2">
-        <Badge tone={member.status === "active" ? "success" : "neutral"}>{statusLabel[member.status]}</Badge>
+        <Badge tone={member.status === "active" ? "success" : "neutral"}>{t(`team.status.${member.status}`)}</Badge>
         <Can permission="company.manage">
           <select
             value={member.role}
@@ -133,8 +133,8 @@ function MemberRow({ member, onChanged }: { member: CompanyMember; onChanged: ()
             onChange={(e) => patch({ role: e.target.value as CompanyRole })}
             className="rounded-md border border-stone-300 px-2 py-1 text-xs"
           >
-            <option value="owner">مالك</option>
-            <option value="member">عضو</option>
+            <option value="owner">{t("team.role.owner")}</option>
+            <option value="member">{t("team.role.member")}</option>
           </select>
           <button
             type="button"
@@ -142,10 +142,10 @@ function MemberRow({ member, onChanged }: { member: CompanyMember; onChanged: ()
             onClick={() => patch({ status: member.status === "active" ? "deactivated" : "active" })}
             className="text-xs text-stone-500 hover:underline disabled:opacity-50"
           >
-            {member.status === "active" ? "إلغاء التفعيل" : "إعادة التفعيل"}
+            {member.status === "active" ? t("team.deactivate") : t("team.reactivate")}
           </button>
         </Can>
-        <Badge tone="neutral">{roleLabel[member.role]}</Badge>
+        <Badge tone="neutral">{t(`team.role.${member.role}`)}</Badge>
       </div>
     </li>
   );
