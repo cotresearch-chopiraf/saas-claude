@@ -22,6 +22,7 @@ import {
 import { listCostCodes } from "../api/costPlan";
 import { apiFetch, ApiError } from "../api/client";
 import type { CostCode, LaborAllocation, PayrollPeriod, PayrollRecord, Project } from "../api/types";
+import { useTranslation } from "../i18n/I18nProvider";
 
 // A period's records/allocations are editable only while draft/rejected —
 // mirrors EDITABLE_PERIOD_STATUSES in server/src/routes/payrollPeriods.ts
@@ -37,6 +38,7 @@ const EDITABLE_STATUSES: PayrollPeriod["status"][] = ["draft", "rejected"];
 // module. Deliberately minimal per the A4 spec: الموظف → المشروع → كود
 // التكلفة → النسبة → القيمة, no database IDs or internal fields shown.
 export function LaborAllocation() {
+  const { t, locale } = useTranslation();
   const { periodId, recordId } = useParams<{ periodId: string; recordId: string }>();
   const [period, setPeriod] = useState<PayrollPeriod | null>(null);
   const [record, setRecord] = useState<PayrollRecord | null>(null);
@@ -61,7 +63,7 @@ export function LaborAllocation() {
         setRecord(r);
         setAllocations(a);
       })
-      .catch((err) => setError(err instanceof Error ? err.message : "تعذّر تحميل بيانات توزيع الراتب"));
+      .catch((err) => setError(err instanceof Error ? err.message : t("laborAllocationPage.loadError")));
   }
   useEffect(load, [periodId, recordId]);
   useEffect(() => {
@@ -79,17 +81,17 @@ export function LaborAllocation() {
   const remainingPercent = allocations ? Math.max(0, 100 - allocations.reduce((sum, a) => sum + Number(a.percentage), 0)) : 100;
 
   const columns: FinancialColumn<LaborAllocation>[] = [
-    { key: "project", header: "المشروع", render: (a) => a.project.name },
-    { key: "costCode", header: "كود التكلفة", render: (a) => (a.costCode ? `${a.costCode.code} — ${a.costCode.name}` : "—") },
-    { key: "percentage", header: "النسبة", render: (a) => `${Number(a.percentage)}%` },
-    { key: "amount", header: "القيمة", render: (a) => formatMoney(a.amount) },
+    { key: "project", header: t("laborAllocationPage.columns.project"), render: (a) => a.project.name },
+    { key: "costCode", header: t("laborAllocationPage.columns.costCode"), render: (a) => (a.costCode ? `${a.costCode.code} — ${a.costCode.name}` : "—") },
+    { key: "percentage", header: t("laborAllocationPage.columns.percentage"), render: (a) => `${Number(a.percentage)}%` },
+    { key: "amount", header: t("laborAllocationPage.columns.amount"), render: (a) => formatMoney(a.amount, undefined, locale) },
   ];
 
   return (
     <Layout>
       <div className="mb-4">
         <Link to={`/payroll/${periodId}`} className="text-sm text-primary hover:underline">
-          العودة إلى فترة الرواتب
+          {t("laborAllocationPage.backToPayrollPeriod")}
         </Link>
       </div>
 
@@ -99,25 +101,25 @@ export function LaborAllocation() {
       {period && record && allocations && (
         <>
           <PageHeader
-            title={`توزيع تكلفة ${record.employee.name}`}
-            subtitle={`رقم الموظف: ${record.employee.employeeNumber}`}
-            actions={<Badge tone={editable ? "neutral" : "success"}>{editable ? "الفترة قابلة للتعديل" : "الفترة مغلقة"}</Badge>}
+            title={t("laborAllocationPage.title", { name: record.employee.name })}
+            subtitle={t("laborAllocationPage.subtitle", { number: record.employee.employeeNumber })}
+            actions={<Badge tone={editable ? "neutral" : "success"}>{editable ? t("laborAllocationPage.editableBadge") : t("laborAllocationPage.lockedBadge")}</Badge>}
           />
 
           {!editable && (
             <div className="mb-4 rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-sm text-stone-600">
-              لا يمكن تعديل توزيع هذا الراتب — تم إرسال فترة الرواتب أو اعتمادها بالفعل.
+              {t("laborAllocationPage.lockedNotice")}
             </div>
           )}
 
           <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <MetricCard label="صافي الراتب" value={formatMoney(netAmount)} />
-            <MetricCard label="الموزَّع" value={formatMoney(allocatedTotal)} />
+            <MetricCard label={t("laborAllocationPage.metrics.netAmount")} value={formatMoney(netAmount, undefined, locale)} />
+            <MetricCard label={t("laborAllocationPage.metrics.allocated")} value={formatMoney(allocatedTotal, undefined, locale)} />
             <MetricCard
-              label="غير الموزَّع"
-              value={formatMoney(remaining)}
+              label={t("laborAllocationPage.metrics.unallocated")}
+              value={formatMoney(remaining, undefined, locale)}
               tone={remaining > 0 ? "warning" : "success"}
-              hint={`${remainingPercent}% متبقية`}
+              hint={t("laborAllocationPage.metrics.remainingHint", { percent: remainingPercent })}
             />
           </div>
 
@@ -125,7 +127,7 @@ export function LaborAllocation() {
             <Can permission="payroll.manage">
               <div className="mb-4">
                 <Button size="sm" onClick={() => setShowAdd((v) => !v)}>
-                  {showAdd ? "إلغاء" : "+ توزيع جديد"}
+                  {showAdd ? t("common.cancel") : t("laborAllocationPage.newAllocation")}
                 </Button>
               </div>
               {showAdd && projects && (
@@ -149,7 +151,7 @@ export function LaborAllocation() {
             columns={columns}
             rows={allocations}
             rowKey={(a) => a.id}
-            emptyMessage="لم يُوزَّع هذا الراتب على أي مشروع بعد"
+            emptyMessage={t("laborAllocationPage.emptyMessage")}
             rowActions={
               editable
                 ? (a) => (
@@ -179,6 +181,7 @@ function AllocationForm({
   remainingPercent: number;
   onCreated: () => void;
 }) {
+  const { t, locale } = useTranslation();
   const [projectId, setProjectId] = useState(projects[0]?.id ?? "");
   const [costCodeId, setCostCodeId] = useState("");
   const [costCodes, setCostCodes] = useState<CostCode[]>([]);
@@ -200,7 +203,7 @@ function AllocationForm({
     e.preventDefault();
     setError(null);
     if (!projectId) {
-      setError("اختر المشروع");
+      setError(t("laborAllocationPage.form.selectProjectError"));
       return;
     }
     setSubmitting(true);
@@ -213,7 +216,7 @@ function AllocationForm({
       });
       onCreated();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر حفظ التوزيع");
+      setError(err instanceof ApiError ? err.message : t("laborAllocationPage.form.genericError"));
     } finally {
       setSubmitting(false);
     }
@@ -243,7 +246,7 @@ function AllocationForm({
           onChange={(e) => setCostCodeId(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
         >
-          <option value="">بدون كود تكلفة (اختياري)</option>
+          <option value="">{t("laborAllocationPage.form.noCostCode")}</option>
           {costCodes.map((c) => (
             <option key={c.id} value={c.id}>
               {c.code} — {c.name}
@@ -256,17 +259,17 @@ function AllocationForm({
           min="0.01"
           max="100"
           step="0.01"
-          placeholder={`النسبة % (المتبقي ${remainingPercent}%)`}
+          placeholder={t("laborAllocationPage.form.percentagePlaceholder", { percent: remainingPercent })}
           value={percentage}
           onChange={(e) => setPercentage(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
         />
         <div className="flex items-center justify-between rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-sm">
-          <span className="text-stone-500">القيمة</span>
-          <span className="font-medium text-stone-800">{formatMoney(previewAmount)}</span>
+          <span className="text-stone-500">{t("laborAllocationPage.form.amountLabel")}</span>
+          <span className="font-medium text-stone-800">{formatMoney(previewAmount, undefined, locale)}</span>
         </div>
         <Button type="submit" disabled={submitting} className="sm:col-span-4">
-          {submitting ? "جارٍ الحفظ..." : "حفظ التوزيع"}
+          {submitting ? t("laborAllocationPage.form.saving") : t("laborAllocationPage.form.save")}
         </Button>
       </form>
     </Card>
@@ -284,6 +287,7 @@ function AllocationRowActions({
   remainingPercent: number;
   onChanged: () => void;
 }) {
+  const { t, locale } = useTranslation();
   const [editing, setEditing] = useState(false);
   const [percentage, setPercentage] = useState(allocation.percentage);
   const [error, setError] = useState<string | null>(null);
@@ -299,7 +303,7 @@ function AllocationRowActions({
       setEditing(false);
       onChanged();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر حفظ التعديل");
+      setError(err instanceof ApiError ? err.message : t("laborAllocationPage.rowActions.saveError"));
     } finally {
       setBusy(false);
     }
@@ -312,7 +316,7 @@ function AllocationRowActions({
       await deleteLaborAllocation(allocation.id);
       onChanged();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر حذف التوزيع");
+      setError(err instanceof ApiError ? err.message : t("laborAllocationPage.rowActions.deleteError"));
       setBusy(false);
     }
   }
@@ -331,13 +335,13 @@ function AllocationRowActions({
             onChange={(e) => setPercentage(e.target.value)}
             className="w-20 rounded-md border border-stone-300 px-2 py-1 text-xs"
           />
-          <span className="text-xs text-stone-400">حتى {ownRemainingPercent}%</span>
-          <span className="text-xs text-stone-500">{formatMoney((netAmount * (Number(percentage) || 0)) / 100)}</span>
+          <span className="text-xs text-stone-400">{t("laborAllocationPage.rowActions.upToPercent", { percent: ownRemainingPercent })}</span>
+          <span className="text-xs text-stone-500">{formatMoney((netAmount * (Number(percentage) || 0)) / 100, undefined, locale)}</span>
           <Button size="sm" onClick={onSave} disabled={busy}>
-            حفظ
+            {t("common.save")}
           </Button>
           <Button size="sm" variant="secondary" onClick={() => setEditing(false)} disabled={busy}>
-            إلغاء
+            {t("common.cancel")}
           </Button>
         </div>
       </div>
@@ -348,10 +352,10 @@ function AllocationRowActions({
     <div className="flex justify-end gap-3">
       {error && <span className="text-xs text-danger-600">{error}</span>}
       <button type="button" onClick={() => setEditing(true)} className="text-sm text-primary hover:underline">
-        تعديل
+        {t("laborAllocationPage.rowActions.edit")}
       </button>
       <button type="button" onClick={onDelete} disabled={busy} className="text-sm text-danger-600 hover:underline">
-        حذف
+        {t("common.delete")}
       </button>
     </div>
   );
