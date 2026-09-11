@@ -425,10 +425,44 @@ const badgeTone: Record<"primary" | "success" | "warning" | "danger" | "info" | 
   info: "bg-info-100 text-info-700",
   neutral: "bg-stone-100 text-stone-500",
 };
-function IconBadge({ icon: Icon, tone = "primary" }: { icon: (p: IconProps) => JSX.Element; tone?: keyof typeof badgeTone }) {
+// Section weight: the dashboard deliberately does NOT give every card equal
+// visual prominence (Project Health / Financial Control / Cost vs Progress /
+// Needs Attention read as the executive-primary layer; Progress-Schedule /
+// Cash Flow / Procurement as secondary; IPC / Labor / Activity / Quick
+// Actions / BOQ status as supporting tertiary detail). The scale is
+// intentionally restrained — smaller padding, icon and title size, not a
+// louder primary tier — so the hierarchy reads as calm information design,
+// not decoration.
+type SectionTier = "primary" | "secondary" | "tertiary";
+const badgeSizeByTier: Record<SectionTier, string> = {
+  primary: "h-8 w-8",
+  secondary: "h-7 w-7",
+  tertiary: "h-6 w-6",
+};
+const iconPxByTier: Record<SectionTier, number> = { primary: 16, secondary: 14, tertiary: 13 };
+const titleSizeByTier: Record<SectionTier, string> = {
+  primary: "text-[15px] font-bold",
+  secondary: "text-sm font-bold",
+  tertiary: "text-sm font-semibold",
+};
+const panelPaddingByTier: Record<SectionTier, string> = {
+  primary: "p-4 lg:p-5",
+  secondary: "p-4",
+  tertiary: "p-3.5 lg:p-4",
+};
+
+function IconBadge({
+  icon: Icon,
+  tone = "primary",
+  tier = "primary",
+}: {
+  icon: (p: IconProps) => JSX.Element;
+  tone?: keyof typeof badgeTone;
+  tier?: SectionTier;
+}) {
   return (
-    <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${badgeTone[tone]}`}>
-      <Icon width={16} height={16} />
+    <span className={`flex ${badgeSizeByTier[tier]} shrink-0 items-center justify-center rounded-lg ${badgeTone[tone]}`}>
+      <Icon width={iconPxByTier[tier]} height={iconPxByTier[tier]} />
     </span>
   );
 }
@@ -436,22 +470,24 @@ function IconBadge({ icon: Icon, tone = "primary" }: { icon: (p: IconProps) => J
 function SectionHeader({
   icon,
   tone = "primary",
+  tier = "primary",
   title,
   meta,
   action,
 }: {
   icon: (p: IconProps) => JSX.Element;
   tone?: keyof typeof badgeTone;
+  tier?: SectionTier;
   title: string;
   meta?: string;
   action?: ReactNode;
 }) {
   return (
-    <div className="mb-4 flex items-center justify-between gap-3">
+    <div className={`${tier === "tertiary" ? "mb-3" : "mb-4"} flex items-center justify-between gap-3`}>
       <div className="flex items-center gap-2.5">
-        <IconBadge icon={icon} tone={tone} />
+        <IconBadge icon={icon} tone={tone} tier={tier} />
         <div>
-          <h2 className="text-[15px] font-bold text-stone-900">{title}</h2>
+          <h2 className={`${titleSizeByTier[tier]} text-stone-900`}>{title}</h2>
           {meta && <p className="text-xs text-stone-400">{meta}</p>}
         </div>
       </div>
@@ -462,9 +498,18 @@ function SectionHeader({
 
 // Shared elevated-card shell every section below uses — a subtle shadow +
 // refined border replaces the previous flat border-only Card usage,
-// consistently across the whole page.
-function Panel({ className = "", children }: { className?: string; children: ReactNode }) {
-  return <Card className={`border-stone-200/80 p-4 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_1px_8px_rgba(15,23,42,0.03)] lg:p-5 ${className}`}>{children}</Card>;
+// consistently across the whole page. `tier` controls padding only: the
+// primary layer keeps the page's baseline spacing, secondary and tertiary
+// step down slightly so the primary layer reads as the anchor without
+// itself being inflated.
+function Panel({ className = "", tier = "primary", children }: { className?: string; tier?: SectionTier; children: ReactNode }) {
+  return (
+    <Card
+      className={`border-stone-200/80 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_1px_8px_rgba(15,23,42,0.03)] ${panelPaddingByTier[tier]} ${className}`}
+    >
+      {children}
+    </Card>
+  );
 }
 
 // ── LEVEL 1 — Identity strip ────────────────────────────────────────────
@@ -621,8 +666,8 @@ function computeHealth(input: {
 
 function HealthGrid({ health, projectId }: { health: HealthIndicator[]; projectId: string }) {
   return (
-    <Panel>
-      <SectionHeader icon={IconShield} title="صحة المشروع" />
+    <Panel tier="primary">
+      <SectionHeader icon={IconShield} tier="primary" title="صحة المشروع" />
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
         {health.map((h) => {
           const Icon = healthIcon[h.key] ?? IconInfo;
@@ -672,8 +717,8 @@ function FinancialWaterfallCard({
   ];
 
   return (
-    <Panel>
-      <SectionHeader icon={IconMoney} title="المركز المالي" meta={`بتاريخ ${formatDate(forecast.asOfDate)}`} />
+    <Panel tier="primary">
+      <SectionHeader icon={IconMoney} tier="primary" title="المركز المالي" meta={`بتاريخ ${formatDate(forecast.asOfDate)}`} />
       <div className="flex flex-wrap items-stretch gap-2 lg:flex-nowrap">
         {steps.map((s, i) => (
           <div key={s.label} className="flex flex-1 items-center gap-2" style={{ minWidth: "8.5rem" }}>
@@ -712,8 +757,8 @@ function CostVsProgressCard({ budget, avgProgress }: { budget: BudgetSummary; av
   const overBudget = budget.totals.remaining < 0;
 
   return (
-    <Panel>
-      <SectionHeader icon={IconBars} title="الإنجاز الفعلي مقابل استهلاك التكلفة" />
+    <Panel tier="primary">
+      <SectionHeader icon={IconBars} tier="primary" title="الإنجاز الفعلي مقابل استهلاك التكلفة" />
       <div className="flex flex-col items-center gap-6 sm:flex-row sm:items-stretch sm:justify-center">
         <RadialGauge value={avgProgress} label="الإنجاز الفعلي" color="#2563eb" />
         <RadialGauge value={costConsumption} label="استهلاك التكلفة" color={warn ? "#dc2626" : "#16a34a"} />
@@ -873,10 +918,11 @@ function NeedsAttentionCard({ items }: { items: AttentionItem[] }) {
   };
 
   return (
-    <Panel>
+    <Panel tier="primary">
       <SectionHeader
         icon={IconAlertTriangle}
         tone={counts.critical > 0 ? "danger" : counts.attention > 0 ? "warning" : "success"}
+        tier="primary"
         title="يحتاج إلى انتباه"
         action={
           <div className="flex items-center gap-1.5">
@@ -935,9 +981,10 @@ function ProgressScheduleCard({
   measurementsAwaitingApproval: Measurement[];
 }) {
   return (
-    <Panel>
+    <Panel tier="secondary">
       <SectionHeader
         icon={IconCalendar}
+        tier="secondary"
         title="الإنجاز والجدول الزمني"
         action={
           <Link to={`/projects/${projectId}/schedule`} className="text-sm font-medium text-primary hover:underline">
@@ -976,9 +1023,10 @@ function ProgressScheduleCard({
 // ── LEVEL 7 — Cash Flow ──────────────────────────────────────────────────
 function CashFlowCard({ cashFlow, projectId }: { cashFlow: CashFlowResult; projectId: string }) {
   return (
-    <Panel>
+    <Panel tier="secondary">
       <SectionHeader
         icon={IconWallet}
+        tier="secondary"
         title="التدفق النقدي"
         action={
           <Link to={`/projects/${projectId}/cash-flow`} className="text-sm font-medium text-primary hover:underline">
@@ -1017,9 +1065,10 @@ function ProcurementCard({
   currency: string;
 }) {
   return (
-    <Panel>
+    <Panel tier="secondary">
       <SectionHeader
         icon={IconPackage}
+        tier="secondary"
         title="المشتريات والالتزامات"
         action={
           <Link to={`/projects/${projectId}/procurement`} className="text-sm font-medium text-primary hover:underline">
@@ -1053,9 +1102,10 @@ function IpcCard({
   currency: string;
 }) {
   return (
-    <Panel>
+    <Panel tier="tertiary">
       <SectionHeader
         icon={IconClipboard}
+        tier="tertiary"
         title="شهادات الدفع (IPC)"
         action={
           <Link to={`/projects/${projectId}/ipc`} className="text-sm font-medium text-primary hover:underline">
@@ -1075,9 +1125,10 @@ function IpcCard({
 // ── Labor cost (kept from the previous Overview, unchanged logic) ──────
 function LaborCostCard({ laborCost }: { laborCost: ProjectLaborCost }) {
   return (
-    <Panel>
+    <Panel tier="tertiary">
       <SectionHeader
         icon={IconBars}
+        tier="tertiary"
         title="تكلفة العمالة الموزَّعة"
         action={laborCost.allocationCount > 0 && laborCost.posted ? <Badge tone="success">مرحّلة بالكامل</Badge> : undefined}
       />
@@ -1114,8 +1165,8 @@ const activityVerb: Record<string, string> = {
 
 function ActivityFeedCard({ events }: { events: ActivityEvent[] }) {
   return (
-    <Panel>
-      <SectionHeader icon={IconActivity} title="آخر النشاطات" />
+    <Panel tier="tertiary">
+      <SectionHeader icon={IconActivity} tier="tertiary" title="آخر النشاطات" />
       {events.length === 0 ? (
         <p className="text-sm text-stone-400">لا توجد نشاطات مسجَّلة لهذا المشروع بعد.</p>
       ) : (
@@ -1154,8 +1205,8 @@ function QuickActionsCard({ projectId }: { projectId: string }) {
     { label: "شهادة دفع", href: "ipc", permission: "ipc.manage" },
   ];
   return (
-    <Panel>
-      <SectionHeader icon={IconPlus} tone="neutral" title="إجراءات سريعة" />
+    <Panel tier="tertiary">
+      <SectionHeader icon={IconPlus} tone="neutral" tier="tertiary" title="إجراءات سريعة" />
       <div className="flex flex-wrap gap-2">
         {gatedActions.map((a) => (
           <Can key={a.href} permission={a.permission}>
@@ -1192,9 +1243,10 @@ const boqRevisionStatusTone: Record<BoqRevision["status"], "neutral" | "success"
 
 function BoqStatusCard({ revision, projectId }: { revision: BoqRevision | null; projectId: string }) {
   return (
-    <Panel>
+    <Panel tier="tertiary">
       <SectionHeader
         icon={IconClipboard}
+        tier="tertiary"
         title="حالة جدول الكميات"
         action={
           <Link to={`/projects/${projectId}/boq`} className="text-sm font-medium text-primary hover:underline">
