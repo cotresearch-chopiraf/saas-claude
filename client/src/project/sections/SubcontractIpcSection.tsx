@@ -41,14 +41,8 @@ import type {
   SubcontractIpcWithLines,
 } from "../../api/types";
 import { useProjectContext } from "../context";
+import { useTranslation } from "../../i18n/I18nProvider";
 
-const statusLabel: Record<SubcontractIpcStatus, string> = {
-  draft: "مسودة",
-  submitted: "بانتظار الاعتماد",
-  approved: "معتمدة (بانتظار التصديق)",
-  certified: "مصدَّقة",
-  rejected: "مرفوضة",
-};
 const statusTone: Record<SubcontractIpcStatus, "neutral" | "success" | "warning" | "info" | "danger"> = {
   draft: "warning",
   submitted: "info",
@@ -67,6 +61,7 @@ const EDITABLE_STATUSES: SubcontractIpcStatus[] = ["draft", "rejected"];
 // this is not a second subcontract-management workflow, commitment
 // creation/editing stays owned by ProcurementSection.
 export function SubcontractIpcSection() {
+  const { t, locale } = useTranslation();
   const { projectId } = useProjectContext();
   const { commitmentId } = useParams<{ commitmentId: string }>();
   const [commitment, setCommitment] = useState<CommitmentWithLines | null>(null);
@@ -86,7 +81,7 @@ export function SubcontractIpcSection() {
         setSuppliers(supplierRows);
         setIpcs(ipcRows.filter((i) => i.commitmentId === commitmentId));
       })
-      .catch((err) => setError(err instanceof Error ? err.message : "تعذّر تحميل شهادات الدفع للمقاول الباطن"));
+      .catch((err) => setError(err instanceof Error ? err.message : t("subcontractIpcPage.loadError")));
   }
   useEffect(load, [projectId, commitmentId]);
 
@@ -95,27 +90,27 @@ export function SubcontractIpcSection() {
   const supplierName = commitment ? (suppliers.find((s) => s.id === commitment.supplierId)?.name ?? "—") : "—";
 
   const columns: FinancialColumn<SubcontractIpc>[] = [
-    { key: "ipcNumber", header: "الرقم", render: (i) => `#${i.ipcNumber}` },
-    { key: "period", header: "الفترة", render: (i) => `${formatDate(i.periodStart)} — ${formatDate(i.periodEnd)}` },
-    { key: "status", header: "الحالة", render: (i) => <Badge tone={statusTone[i.status]}>{statusLabel[i.status]}</Badge> },
-    { key: "grossValue", header: "الإجمالي", align: "end", render: (i) => (i.grossValue !== null ? formatMoney(i.grossValue, commitment?.currency) : "—") },
-    { key: "retentionAmount", header: "الضمان المحتجز", align: "end", render: (i) => (i.retentionAmount !== null ? formatMoney(i.retentionAmount, commitment?.currency) : "—") },
-    { key: "netCertified", header: "الصافي المصدَّق", align: "end", render: (i) => (i.netCertified !== null ? formatMoney(i.netCertified, commitment?.currency) : "—") },
+    { key: "ipcNumber", header: t("subcontractIpcPage.columns.number"), render: (i) => `#${i.ipcNumber}` },
+    { key: "period", header: t("subcontractIpcPage.columns.period"), render: (i) => `${formatDate(i.periodStart, locale)} — ${formatDate(i.periodEnd, locale)}` },
+    { key: "status", header: t("subcontractIpcPage.columns.status"), render: (i) => <Badge tone={statusTone[i.status]}>{t(`ipcPage.status.${i.status}`)}</Badge> },
+    { key: "grossValue", header: t("subcontractIpcPage.columns.grossValue"), align: "end", render: (i) => (i.grossValue !== null ? formatMoney(i.grossValue, commitment?.currency, locale) : "—") },
+    { key: "retentionAmount", header: t("subcontractIpcPage.columns.retentionAmount"), align: "end", render: (i) => (i.retentionAmount !== null ? formatMoney(i.retentionAmount, commitment?.currency, locale) : "—") },
+    { key: "netCertified", header: t("subcontractIpcPage.columns.netCertified"), align: "end", render: (i) => (i.netCertified !== null ? formatMoney(i.netCertified, commitment?.currency, locale) : "—") },
   ];
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="شهادات الدفع للمقاول الباطن"
-        subtitle={commitment ? `عقد الباطن #${commitment.commitmentNumber} — ${supplierName}` : undefined}
+        title={t("subcontractIpcPage.title")}
+        subtitle={commitment ? t("subcontractIpcPage.subtitle", { number: commitment.commitmentNumber, supplier: supplierName }) : undefined}
         actions={
           <div className="flex items-center gap-2">
             <Link to={`/projects/${projectId}/procurement`} className="text-sm text-primary hover:underline">
-              العودة إلى المشتريات
+              {t("subcontractIpcPage.backToProcurement")}
             </Link>
             <Can permission="subcontractIpc.manage">
               <Button size="sm" onClick={() => setShowCreate((v) => !v)}>
-                {showCreate ? "إلغاء" : "+ شهادة جديدة"}
+                {showCreate ? t("common.cancel") : t("subcontractIpcPage.newIpc")}
               </Button>
             </Can>
           </div>
@@ -142,10 +137,10 @@ export function SubcontractIpcSection() {
         rowKey={(i) => i.id}
         error={error}
         onRetry={load}
-        emptyMessage="لا توجد شهادات دفع لهذا العقد بعد"
+        emptyMessage={t("subcontractIpcPage.emptyMessage")}
         rowActions={(i) => (
           <button type="button" onClick={() => setSelectedId(i.id)} className="text-sm text-primary hover:underline">
-            عرض
+            {t("subcontractIpcPage.view")}
           </button>
         )}
       />
@@ -166,6 +161,7 @@ function SubcontractIpcCreateForm({
   commitmentId: string;
   onCreated: (result: { id: string }) => void;
 }) {
+  const { t } = useTranslation();
   const [periodStart, setPeriodStart] = useState("");
   const [periodEnd, setPeriodEnd] = useState("");
   const [notes, setNotes] = useState("");
@@ -180,7 +176,7 @@ function SubcontractIpcCreateForm({
       const result = await createSubcontractIpc(projectId, { commitmentId, periodStart, periodEnd, notes: notes || undefined });
       onCreated(result);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر إنشاء الشهادة");
+      setError(err instanceof ApiError ? err.message : t("subcontractIpcPage.createForm.genericError"));
     } finally {
       setSubmitting(false);
     }
@@ -195,7 +191,7 @@ function SubcontractIpcCreateForm({
           </div>
         )}
         <label className="text-sm text-stone-600">
-          بداية الفترة
+          {t("subcontractIpcPage.createForm.periodStart")}
           <input
             required
             type="date"
@@ -205,7 +201,7 @@ function SubcontractIpcCreateForm({
           />
         </label>
         <label className="text-sm text-stone-600">
-          نهاية الفترة
+          {t("subcontractIpcPage.createForm.periodEnd")}
           <input
             required
             type="date"
@@ -215,13 +211,13 @@ function SubcontractIpcCreateForm({
           />
         </label>
         <input
-          placeholder="ملاحظات (اختياري)"
+          placeholder={t("subcontractIpcPage.createForm.notesPlaceholder")}
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
         />
         <Button type="submit" disabled={submitting} className="sm:col-span-3">
-          {submitting ? "جارٍ الحفظ..." : "إنشاء الشهادة"}
+          {submitting ? t("subcontractIpcPage.createForm.saving") : t("subcontractIpcPage.createForm.create")}
         </Button>
       </form>
     </Card>
@@ -230,25 +226,28 @@ function SubcontractIpcCreateForm({
 
 type PendingAction = "submit" | "approve" | "certify" | null;
 
-const confirmCopy: Record<Exclude<PendingAction, null>, { title: string; message: string; confirmLabel: string; destructive?: boolean }> = {
-  submit: {
-    title: "إرسال الشهادة للاعتماد",
-    message: "بعد الإرسال لن يمكن إضافة أو حذف بنود هذه الشهادة إلا إذا تم رفضها. هل تريد المتابعة؟",
-    confirmLabel: "إرسال",
-  },
-  approve: {
-    title: "اعتماد الشهادة",
-    message: "هذه مراجعة تحريرية أولية فقط، ولا تُصدِّق القيم بعد — التصديق الفعلي خطوة منفصلة لاحقة. هل تريد المتابعة؟",
-    confirmLabel: "اعتماد",
-  },
-  certify: {
-    title: "تصديق الشهادة",
-    message:
-      "بعد التصديق تصبح القيم المالية لهذه الشهادة (الإجمالي والاستقطاع والصافي) نهائية ومجمَّدة، ولا يمكن التراجع عن هذا الإجراء.",
-    confirmLabel: "تصديق",
-    destructive: true,
-  },
-};
+function confirmCopyFor(
+  t: (key: string) => string,
+): Record<Exclude<PendingAction, null>, { title: string; message: string; confirmLabel: string; destructive?: boolean }> {
+  return {
+    submit: {
+      title: t("subcontractIpcPage.confirm.submitTitle"),
+      message: t("subcontractIpcPage.confirm.submitMessage"),
+      confirmLabel: t("subcontractIpcPage.confirm.submitLabel"),
+    },
+    approve: {
+      title: t("subcontractIpcPage.confirm.approveTitle"),
+      message: t("subcontractIpcPage.confirm.approveMessage"),
+      confirmLabel: t("subcontractIpcPage.confirm.approveLabel"),
+    },
+    certify: {
+      title: t("subcontractIpcPage.confirm.certifyTitle"),
+      message: t("subcontractIpcPage.confirm.certifyMessage"),
+      confirmLabel: t("subcontractIpcPage.confirm.certifyLabel"),
+      destructive: true,
+    },
+  };
+}
 
 function SubcontractIpcDetail({
   projectId,
@@ -261,6 +260,8 @@ function SubcontractIpcDetail({
   commitment: CommitmentWithLines;
   onChanged: () => void;
 }) {
+  const { t, locale } = useTranslation();
+  const confirmCopy = confirmCopyFor(t);
   const [ipc, setIpc] = useState<SubcontractIpcWithLines | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showAddLine, setShowAddLine] = useState(false);
@@ -273,7 +274,7 @@ function SubcontractIpcDetail({
     setIpc(null);
     getSubcontractIpc(projectId, ipcId)
       .then(setIpc)
-      .catch((err) => setError(err instanceof Error ? err.message : "تعذّر تحميل تفاصيل الشهادة"));
+      .catch((err) => setError(err instanceof Error ? err.message : t("subcontractIpcPage.detail.loadError")));
   }
   useEffect(load, [projectId, ipcId]);
 
@@ -290,7 +291,7 @@ function SubcontractIpcDetail({
       load();
       onChanged();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر تنفيذ الإجراء");
+      setError(err instanceof ApiError ? err.message : t("subcontractIpcPage.detail.actionError"));
       setPendingAction(null);
     } finally {
       setActingBusy(false);
@@ -302,7 +303,7 @@ function SubcontractIpcDetail({
       await deleteSubcontractIpcLine(projectId, ipcId, lineId);
       load();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر حذف البند");
+      setError(err instanceof ApiError ? err.message : t("subcontractIpcPage.detail.deleteLineError"));
     }
   }
 
@@ -319,49 +320,49 @@ function SubcontractIpcDetail({
   const isApproved = ipc.status === "approved";
 
   const lineColumns: FinancialColumn<SubcontractIpcLine>[] = [
-    { key: "commitmentLine", header: "بند الالتزام", render: (l) => commitmentLineLabel(l.commitmentLineId) },
-    { key: "currentQuantity", header: "الكمية الحالية", align: "end", render: (l) => (l.currentQuantity !== null ? formatQuantity(l.currentQuantity) : "—") },
-    { key: "rate", header: "السعر", align: "end", render: (l) => (l.rate !== null ? formatMoney(l.rate, commitment.currency) : "—") },
-    { key: "currentValue", header: "القيمة الحالية", align: "end", render: (l) => formatMoney(l.currentValue, commitment.currency) },
-    { key: "cumulativeQuantity", header: "الكمية التراكمية", align: "end", render: (l) => (l.cumulativeQuantity !== null ? formatQuantity(l.cumulativeQuantity) : "—") },
-    { key: "cumulativeValue", header: "القيمة التراكمية", align: "end", render: (l) => (l.cumulativeValue !== null ? formatMoney(l.cumulativeValue, commitment.currency) : "—") },
+    { key: "commitmentLine", header: t("subcontractIpcPage.detail.lineColumns.commitmentLine"), render: (l) => commitmentLineLabel(l.commitmentLineId) },
+    { key: "currentQuantity", header: t("subcontractIpcPage.detail.lineColumns.currentQuantity"), align: "end", render: (l) => (l.currentQuantity !== null ? formatQuantity(l.currentQuantity, null, locale) : "—") },
+    { key: "rate", header: t("subcontractIpcPage.detail.lineColumns.rate"), align: "end", render: (l) => (l.rate !== null ? formatMoney(l.rate, commitment.currency, locale) : "—") },
+    { key: "currentValue", header: t("subcontractIpcPage.detail.lineColumns.currentValue"), align: "end", render: (l) => formatMoney(l.currentValue, commitment.currency, locale) },
+    { key: "cumulativeQuantity", header: t("subcontractIpcPage.detail.lineColumns.cumulativeQuantity"), align: "end", render: (l) => (l.cumulativeQuantity !== null ? formatQuantity(l.cumulativeQuantity, null, locale) : "—") },
+    { key: "cumulativeValue", header: t("subcontractIpcPage.detail.lineColumns.cumulativeValue"), align: "end", render: (l) => (l.cumulativeValue !== null ? formatMoney(l.cumulativeValue, commitment.currency, locale) : "—") },
   ];
 
   return (
     <Card className="p-5">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <h2 className="font-semibold text-stone-800">شهادة #{ipc.ipcNumber}</h2>
-          <Badge tone={statusTone[ipc.status]}>{statusLabel[ipc.status]}</Badge>
+          <h2 className="font-semibold text-stone-800">{t("subcontractIpcPage.detail.header", { number: ipc.ipcNumber })}</h2>
+          <Badge tone={statusTone[ipc.status]}>{t(`ipcPage.status.${ipc.status}`)}</Badge>
         </div>
         {/* Every mutation here requires subcontractIpc.manage (owner-only). */}
         <Can permission="subcontractIpc.manage">
           <div className="flex flex-wrap gap-2">
             {isEditable && (
               <Button size="sm" variant="secondary" onClick={() => setShowAddLine((v) => !v)}>
-                {showAddLine ? "إلغاء" : "+ بند"}
+                {showAddLine ? t("common.cancel") : t("subcontractIpcPage.detail.addLine")}
               </Button>
             )}
             {isEditable && (
               <Button size="sm" disabled={ipc.lines.length === 0} onClick={() => setPendingAction("submit")}>
-                إرسال للاعتماد
+                {t("subcontractIpcPage.detail.submitForApproval")}
               </Button>
             )}
             {isSubmitted && (
               <Button size="sm" onClick={() => setPendingAction("approve")}>
-                اعتماد
+                {t("subcontractIpcPage.detail.approve")}
               </Button>
             )}
             {isSubmitted && (
               <Button size="sm" variant="danger" onClick={() => setShowReject((v) => !v)}>
-                {showReject ? "إلغاء" : "رفض"}
+                {showReject ? t("common.cancel") : t("subcontractIpcPage.detail.reject")}
               </Button>
             )}
             {isApproved && (
               // Certify finalizes/approves — a positive terminal action, not
               // a destructive one; see IpcSection.tsx's identical fix.
               <Button size="sm" onClick={() => setPendingAction("certify")}>
-                تصديق
+                {t("subcontractIpcPage.detail.certify")}
               </Button>
             )}
           </div>
@@ -375,29 +376,29 @@ function SubcontractIpcDetail({
       )}
 
       <dl className="mb-5 grid grid-cols-1 gap-x-8 gap-y-3 text-sm sm:grid-cols-2">
-        <Field label="بداية الفترة" value={formatDate(ipc.periodStart)} />
-        <Field label="نهاية الفترة" value={formatDate(ipc.periodEnd)} />
-        <Field label="ملاحظات" value={ipc.notes ?? "—"} />
-        <Field label="العملة" value={ipc.currency} />
-        <Field label="تاريخ الإرسال للاعتماد" value={formatDateTime(ipc.submittedAt)} />
-        <Field label="تاريخ الاعتماد" value={formatDateTime(ipc.approvedAt)} />
-        <Field label="تاريخ التصديق" value={formatDateTime(ipc.certifiedAt)} />
+        <Field label={t("subcontractIpcPage.detail.periodStart")} value={formatDate(ipc.periodStart, locale)} />
+        <Field label={t("subcontractIpcPage.detail.periodEnd")} value={formatDate(ipc.periodEnd, locale)} />
+        <Field label={t("subcontractIpcPage.detail.notes")} value={ipc.notes ?? "—"} />
+        <Field label={t("subcontractIpcPage.detail.currency")} value={ipc.currency} />
+        <Field label={t("subcontractIpcPage.detail.submittedAt")} value={formatDateTime(ipc.submittedAt, locale)} />
+        <Field label={t("subcontractIpcPage.detail.approvedAt")} value={formatDateTime(ipc.approvedAt, locale)} />
+        <Field label={t("subcontractIpcPage.detail.certifiedAt")} value={formatDateTime(ipc.certifiedAt, locale)} />
         {ipc.status === "rejected" && (
           <>
-            <Field label="تاريخ الرفض" value={formatDateTime(ipc.rejectedAt)} />
-            <Field label="سبب الرفض" value={ipc.rejectionReason ?? "—"} />
+            <Field label={t("subcontractIpcPage.detail.rejectedAt")} value={formatDateTime(ipc.rejectedAt, locale)} />
+            <Field label={t("subcontractIpcPage.detail.rejectionReason")} value={ipc.rejectionReason ?? "—"} />
           </>
         )}
       </dl>
 
       <div className="mb-5 grid gap-4 sm:grid-cols-3 lg:grid-cols-5">
-        <MetricCard label="الإجمالي (Gross)" value={ipc.grossValue !== null ? formatMoney(ipc.grossValue, ipc.currency) : "—"} />
-        <MetricCard label="نسبة الضمان" value={ipc.retentionPercent !== null ? `${ipc.retentionPercent}%` : "—"} />
-        <MetricCard label="الضمان المحتجز" value={ipc.retentionAmount !== null ? formatMoney(ipc.retentionAmount, ipc.currency) : "—"} />
-        <MetricCard label="خصومات أخرى" value={ipc.otherDeductions !== null ? formatMoney(ipc.otherDeductions, ipc.currency) : "—"} />
+        <MetricCard label={t("subcontractIpcPage.detail.metrics.gross")} value={ipc.grossValue !== null ? formatMoney(ipc.grossValue, ipc.currency, locale) : "—"} />
+        <MetricCard label={t("subcontractIpcPage.detail.metrics.retentionPercent")} value={ipc.retentionPercent !== null ? `${ipc.retentionPercent}%` : "—"} />
+        <MetricCard label={t("subcontractIpcPage.detail.metrics.retentionAmount")} value={ipc.retentionAmount !== null ? formatMoney(ipc.retentionAmount, ipc.currency, locale) : "—"} />
+        <MetricCard label={t("subcontractIpcPage.detail.metrics.otherDeductions")} value={ipc.otherDeductions !== null ? formatMoney(ipc.otherDeductions, ipc.currency, locale) : "—"} />
         <MetricCard
-          label="الصافي المصدَّق"
-          value={ipc.netCertified !== null ? formatMoney(ipc.netCertified, ipc.currency) : "—"}
+          label={t("subcontractIpcPage.detail.metrics.netCertified")}
+          value={ipc.netCertified !== null ? formatMoney(ipc.netCertified, ipc.currency, locale) : "—"}
           tone={ipc.netCertified !== null ? "success" : "default"}
         />
       </div>
@@ -436,13 +437,13 @@ function SubcontractIpcDetail({
         columns={lineColumns}
         rows={ipc.lines}
         rowKey={(l) => l.id}
-        emptyMessage="لا توجد بنود في هذه الشهادة بعد"
+        emptyMessage={t("subcontractIpcPage.detail.emptyMessage")}
         rowActions={
           isEditable
             ? (line) => (
                 <Can permission="subcontractIpc.manage">
                   <button type="button" onClick={() => onDeleteLine(line.id)} className="text-sm text-danger-600 hover:underline">
-                    حذف
+                    {t("subcontractIpcPage.detail.deleteLine")}
                   </button>
                 </Can>
               )
@@ -458,7 +459,7 @@ function SubcontractIpcDetail({
         open={pendingAction !== null}
         title={pendingAction ? confirmCopy[pendingAction].title : ""}
         message={pendingAction ? confirmCopy[pendingAction].message : ""}
-        confirmLabel={actingBusy ? "جارٍ التنفيذ..." : pendingAction ? confirmCopy[pendingAction].confirmLabel : ""}
+        confirmLabel={actingBusy ? t("subcontractIpcPage.confirm.executing") : pendingAction ? confirmCopy[pendingAction].confirmLabel : ""}
         destructive={pendingAction ? confirmCopy[pendingAction].destructive : undefined}
         onConfirm={onConfirmAction}
         onCancel={() => setPendingAction(null)}
@@ -489,6 +490,7 @@ const EVIDENCE_MAX_SIZE = 10 * 1024 * 1024;
 const EVIDENCE_ACCEPT_ATTR = ".pdf,.png,.jpg,.jpeg,.webp,.doc,.docx,.xls,.xlsx";
 
 function SubcontractIpcEvidence({ projectId, ipcId }: { projectId: string; ipcId: string }) {
+  const { t, locale } = useTranslation();
   const [documents, setDocuments] = useState<SubcontractIpcDocument[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -502,7 +504,7 @@ function SubcontractIpcEvidence({ projectId, ipcId }: { projectId: string; ipcId
     setDocuments(null);
     listSubcontractIpcDocuments(projectId, ipcId)
       .then(setDocuments)
-      .catch((err) => setError(err instanceof Error ? err.message : "تعذّر تحميل مرفقات الشهادة"));
+      .catch((err) => setError(err instanceof Error ? err.message : t("subcontractIpcPage.evidence.loadError")));
   }
   useEffect(load, [projectId, ipcId]);
 
@@ -515,11 +517,11 @@ function SubcontractIpcEvidence({ projectId, ipcId }: { projectId: string; ipcId
       return;
     }
     if (!EVIDENCE_ALLOWED_MIME_TYPES.has(file.type)) {
-      setValidationError("نوع الملف غير مسموح به. الأنواع المسموحة: PDF، صور (PNG, JPEG, WEBP)، مستندات Word أو Excel");
+      setValidationError(t("subcontractIpcPage.evidence.invalidType"));
       return;
     }
     if (file.size > EVIDENCE_MAX_SIZE) {
-      setValidationError("حجم الملف يتجاوز الحد الأقصى المسموح به (10 ميجابايت)");
+      setValidationError(t("subcontractIpcPage.evidence.tooLarge"));
       return;
     }
     setValidationError(null);
@@ -535,7 +537,7 @@ function SubcontractIpcEvidence({ projectId, ipcId }: { projectId: string; ipcId
       if (fileInputRef.current) fileInputRef.current.value = "";
       load();
     } catch (err) {
-      setUploadError(err instanceof ApiError ? err.message : "تعذّر رفع الملف");
+      setUploadError(err instanceof ApiError ? err.message : t("subcontractIpcPage.evidence.uploadError"));
     } finally {
       setUploading(false);
     }
@@ -544,21 +546,21 @@ function SubcontractIpcEvidence({ projectId, ipcId }: { projectId: string; ipcId
   const columns: FinancialColumn<SubcontractIpcDocument>[] = [
     {
       key: "fileName",
-      header: "اسم الملف",
+      header: t("subcontractIpcPage.evidence.columns.fileName"),
       render: (d) => (
         <span className="block max-w-xs truncate" title={d.fileName}>
           {d.fileName}
         </span>
       ),
     },
-    { key: "size", header: "الحجم", align: "end", render: (d) => formatFileSize(d.size) },
-    { key: "uploadedAt", header: "تاريخ الرفع", render: (d) => formatDate(d.uploadedAt) },
-    { key: "uploadedByName", header: "بواسطة", render: (d) => d.uploadedByName ?? "—" },
+    { key: "size", header: t("subcontractIpcPage.evidence.columns.size"), align: "end", render: (d) => formatFileSize(d.size, locale) },
+    { key: "uploadedAt", header: t("subcontractIpcPage.evidence.columns.uploadedAt"), render: (d) => formatDate(d.uploadedAt, locale) },
+    { key: "uploadedByName", header: t("subcontractIpcPage.evidence.columns.uploadedBy"), render: (d) => d.uploadedByName ?? "—" },
   ];
 
   return (
     <div>
-      <h3 className="mb-3 font-semibold text-stone-800">مرفقات الشهادة</h3>
+      <h3 className="mb-3 font-semibold text-stone-800">{t("subcontractIpcPage.evidence.heading")}</h3>
 
       <Can permission="subcontractIpc.manage">
         <div className="mb-4 rounded-md border border-stone-200 p-3">
@@ -568,10 +570,10 @@ function SubcontractIpcEvidence({ projectId, ipcId }: { projectId: string; ipcId
               type="file"
               accept={EVIDENCE_ACCEPT_ATTR}
               onChange={onFileChange}
-              className="text-sm text-stone-600 file:mr-3 file:rounded-md file:border-0 file:bg-stone-100 file:px-3 file:py-1.5 file:text-sm file:text-stone-700"
+              className="text-sm text-stone-600 file:me-3 file:rounded-md file:border-0 file:bg-stone-100 file:px-3 file:py-1.5 file:text-sm file:text-stone-700"
             />
             <Button size="sm" onClick={onUpload} disabled={!selectedFile || !!validationError || uploading}>
-              {uploading ? "جارٍ الرفع..." : "رفع مرفق"}
+              {uploading ? t("subcontractIpcPage.evidence.uploading") : t("subcontractIpcPage.evidence.upload")}
             </Button>
           </div>
           {validationError && <p className="mt-2 text-xs text-danger-600">{validationError}</p>}
@@ -589,14 +591,14 @@ function SubcontractIpcEvidence({ projectId, ipcId }: { projectId: string; ipcId
         rowKey={(d) => d.id}
         error={documents === null ? error : null}
         onRetry={load}
-        emptyMessage="لا توجد مرفقات لهذه الشهادة بعد"
+        emptyMessage={t("subcontractIpcPage.evidence.emptyMessage")}
         rowActions={(d) => (
           <button
             type="button"
             onClick={() => downloadSubcontractIpcDocument(projectId, ipcId, d.id, d.fileName)}
             className="text-sm text-primary hover:underline"
           >
-            تنزيل
+            {t("subcontractIpcPage.evidence.download")}
           </button>
         )}
       />
@@ -623,6 +625,7 @@ function SubcontractIpcLineForm({
   commitmentLines: CommitmentLine[];
   onSubmit: (input: { commitmentLineId: string; currentQuantity?: number; currentValue?: number; description?: string }) => Promise<void>;
 }) {
+  const { t, locale } = useTranslation();
   const [commitmentLineId, setCommitmentLineId] = useState(commitmentLines[0]?.id ?? "");
   const [currentQuantity, setCurrentQuantity] = useState("");
   const [currentValue, setCurrentValue] = useState("");
@@ -648,7 +651,7 @@ function SubcontractIpcLineForm({
       // Surfaces the backend's own message verbatim — e.g. an overrun
       // against the commitment line's own remaining ceiling. This form
       // never recreates that check itself.
-      setError(err instanceof ApiError ? err.message : "تعذّر حفظ البند");
+      setError(err instanceof ApiError ? err.message : t("subcontractIpcPage.lineForm.genericError"));
     } finally {
       setSubmitting(false);
     }
@@ -667,7 +670,7 @@ function SubcontractIpcLineForm({
         onChange={(e) => setCommitmentLineId(e.target.value)}
         className="rounded-md border border-stone-300 px-3 py-2 text-sm sm:col-span-2"
       >
-        {commitmentLines.length === 0 && <option value="">لا توجد بنود في هذا الالتزام</option>}
+        {commitmentLines.length === 0 && <option value="">{t("subcontractIpcPage.lineForm.noLinesOption")}</option>}
         {commitmentLines.map((l) => (
           <option key={l.id} value={l.id}>
             {l.description}
@@ -678,14 +681,17 @@ function SubcontractIpcLineForm({
       {selectedLine && isQuantityRateLine && (
         <>
           <div className="text-sm text-stone-500 sm:col-span-1">
-            الكمية المتعاقد عليها: {formatQuantity(selectedLine.quantity!)} — السعر: {formatMoney(selectedLine.rate!)}
+            {t("subcontractIpcPage.lineForm.contractedQuantityRate", {
+              quantity: formatQuantity(selectedLine.quantity!, null, locale),
+              rate: formatMoney(selectedLine.rate!, undefined, locale),
+            })}
           </div>
           <input
             required
             type="number"
             min="0"
             step="0.001"
-            placeholder="الكمية الحالية"
+            placeholder={t("subcontractIpcPage.lineForm.quantityPlaceholder")}
             value={currentQuantity}
             onChange={(e) => setCurrentQuantity(e.target.value)}
             className="rounded-md border border-stone-300 px-3 py-2 text-sm"
@@ -695,13 +701,15 @@ function SubcontractIpcLineForm({
 
       {selectedLine && !isQuantityRateLine && (
         <>
-          <div className="text-sm text-stone-500 sm:col-span-1">المبلغ المتعاقد عليه: {formatMoney(selectedLine.amount)}</div>
+          <div className="text-sm text-stone-500 sm:col-span-1">
+            {t("subcontractIpcPage.lineForm.contractedAmount", { amount: formatMoney(selectedLine.amount, undefined, locale) })}
+          </div>
           <input
             required
             type="number"
             min="0"
             step="0.01"
-            placeholder="قيمة التصديق الحالية"
+            placeholder={t("subcontractIpcPage.lineForm.valuePlaceholder")}
             value={currentValue}
             onChange={(e) => setCurrentValue(e.target.value)}
             className="rounded-md border border-stone-300 px-3 py-2 text-sm"
@@ -710,13 +718,14 @@ function SubcontractIpcLineForm({
       )}
 
       <Button type="submit" size="sm" disabled={submitting || !commitmentLineId} className="sm:col-span-4">
-        {submitting ? "جارٍ الحفظ..." : "إضافة البند"}
+        {submitting ? t("subcontractIpcPage.lineForm.saving") : t("subcontractIpcPage.lineForm.submit")}
       </Button>
     </form>
   );
 }
 
 function RejectForm({ onReject }: { onReject: (reason: string) => Promise<void> }) {
+  const { t } = useTranslation();
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -728,7 +737,7 @@ function RejectForm({ onReject }: { onReject: (reason: string) => Promise<void> 
     try {
       await onReject(reason);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر رفض الشهادة");
+      setError(err instanceof ApiError ? err.message : t("subcontractIpcPage.rejectForm.genericError"));
     } finally {
       setSubmitting(false);
     }
@@ -739,14 +748,14 @@ function RejectForm({ onReject }: { onReject: (reason: string) => Promise<void> 
       {error && <ErrorState message={error} />}
       <textarea
         required
-        placeholder="سبب الرفض"
+        placeholder={t("subcontractIpcPage.rejectForm.reasonPlaceholder")}
         value={reason}
         onChange={(e) => setReason(e.target.value)}
         className="rounded-md border border-stone-300 px-3 py-2 text-sm"
         rows={2}
       />
       <Button type="submit" size="sm" variant="danger" disabled={submitting || !reason.trim()}>
-        {submitting ? "جارٍ الرفض..." : "تأكيد الرفض"}
+        {submitting ? t("subcontractIpcPage.rejectForm.rejecting") : t("subcontractIpcPage.rejectForm.submit")}
       </Button>
     </form>
   );

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "../../auth/AuthContext";
+import { I18nProvider } from "../../i18n/I18nProvider";
 import { SubcontractIpcSection } from "./SubcontractIpcSection";
 import type { CommitmentWithLines, SubcontractIpcDocument, Supplier, SubcontractIpc, SubcontractIpcWithLines } from "../../api/types";
 
@@ -239,13 +240,15 @@ beforeEach(() => {
 
 function renderSection() {
   return render(
-    <MemoryRouter initialEntries={["/projects/p1/subcontract-ipcs/commit-1"]}>
-      <AuthProvider>
-        <Routes>
-          <Route path="/projects/:id/subcontract-ipcs/:commitmentId" element={<SubcontractIpcSection />} />
-        </Routes>
-      </AuthProvider>
-    </MemoryRouter>,
+    <I18nProvider>
+      <MemoryRouter initialEntries={["/projects/p1/subcontract-ipcs/commit-1"]}>
+        <AuthProvider>
+          <Routes>
+            <Route path="/projects/:id/subcontract-ipcs/:commitmentId" element={<SubcontractIpcSection />} />
+          </Routes>
+        </AuthProvider>
+      </MemoryRouter>
+    </I18nProvider>,
   );
 }
 
