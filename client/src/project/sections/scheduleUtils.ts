@@ -99,14 +99,12 @@ export interface MonthMarker {
   offsetDays: number;
 }
 
-const ARABIC_MONTHS = [
-  "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
-  "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر",
-];
-
 // One marker per calendar month boundary inside the range, for the
-// timeline's header row.
-export function computeMonthMarkers(range: TimelineRange): MonthMarker[] {
+// timeline's header row. Month names come from Intl.DateTimeFormat for
+// the active locale — the same approach formatDate/formatMoney already
+// use — rather than a hardcoded Arabic-only name list.
+export function computeMonthMarkers(range: TimelineRange, locale: string = "ar"): MonthMarker[] {
+  const monthFormatter = new Intl.DateTimeFormat(locale, { month: "long", timeZone: "UTC" });
   const markers: MonthMarker[] = [];
   const startDate = parseDateOnly(range.start);
   let cursor = new Date(Date.UTC(startDate.getUTCFullYear(), startDate.getUTCMonth(), 1));
@@ -114,7 +112,7 @@ export function computeMonthMarkers(range: TimelineRange): MonthMarker[] {
   const endDate = parseDateOnly(range.end);
   while (cursor <= endDate) {
     const cursorStr = cursor.toISOString().slice(0, 10);
-    markers.push({ label: ARABIC_MONTHS[cursor.getUTCMonth()], offsetDays: dayDiff(range.start, cursorStr) });
+    markers.push({ label: monthFormatter.format(cursor), offsetDays: dayDiff(range.start, cursorStr) });
     cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 1));
   }
   return markers;

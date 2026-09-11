@@ -987,6 +987,7 @@ const fr = {
     allProjects: "Tous les projets",
     client: "Client",
     openSectionsMenu: "Ouvrir le menu des sections du projet",
+    sectionsMenuTitle: "Sections du projet",
     groups: {
       overview: "Aperçu",
       commercial: "Commercial",

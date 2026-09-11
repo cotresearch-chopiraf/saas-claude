@@ -987,6 +987,7 @@ const en = {
     allProjects: "All projects",
     client: "Client",
     openSectionsMenu: "Open project sections menu",
+    sectionsMenuTitle: "Project sections",
     groups: {
       overview: "Overview",
       commercial: "Commercial",

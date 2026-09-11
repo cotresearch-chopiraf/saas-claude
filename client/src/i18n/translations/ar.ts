@@ -986,6 +986,7 @@ const ar = {
     allProjects: "كل المشاريع",
     client: "العميل",
     openSectionsMenu: "فتح قائمة أقسام المشروع",
+    sectionsMenuTitle: "أقسام المشروع",
     groups: {
       overview: "نظرة عامة",
       commercial: "التجاري",

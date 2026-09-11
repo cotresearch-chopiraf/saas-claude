@@ -244,9 +244,9 @@ function GanttChart({
   onEdit: (task: ProjectTask) => void;
   onDelete: (task: ProjectTask) => void;
 }) {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const range = useMemo(() => computeTimelineRange(rows.map((r) => r.task)), [rows]);
-  const monthMarkers = useMemo(() => computeMonthMarkers(range), [range]);
+  const monthMarkers = useMemo(() => computeMonthMarkers(range, locale), [range, locale]);
   const pxPerDay = ZOOM_PX_PER_DAY[zoom];
   const today = todayDateOnly();
   const todayOffsetDays = today >= range.start && today <= range.end ? dayDiff(range.start, today) : null;

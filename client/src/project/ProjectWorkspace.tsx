@@ -6,6 +6,7 @@ import { apiFetch } from "../api/client";
 import type { Project } from "../api/types";
 import { ProjectHeader } from "./ProjectHeader";
 import { ProjectSidebarDesktop, ProjectSidebarMobile } from "./ProjectSidebar";
+import { useTranslation } from "../i18n/I18nProvider";
 
 // Replaces the old ProjectDetail.tsx's mixed
 // project-info+legacy-tabs+local-state component with a composed shell:
@@ -16,6 +17,7 @@ import { ProjectSidebarDesktop, ProjectSidebarMobile } from "./ProjectSidebar";
 // only owns the project record itself (needed by the header) and the
 // mobile menu's open/closed state.
 export function ProjectWorkspace() {
+  const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const [project, setProject] = useState<Project | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -38,7 +40,7 @@ export function ProjectWorkspace() {
         </div>
       </div>
 
-      <Modal open={mobileMenuOpen} onClose={() => setMobileMenuOpen(false)} align="end" className="w-72 max-w-[85vw]" title="أقسام المشروع">
+      <Modal open={mobileMenuOpen} onClose={() => setMobileMenuOpen(false)} align="end" className="w-72 max-w-[85vw]" title={t("project.sectionsMenuTitle")}>
         <ProjectSidebarMobile projectId={id} onNavigate={() => setMobileMenuOpen(false)} />
       </Modal>
     </Layout>
