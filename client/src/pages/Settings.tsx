@@ -7,8 +7,10 @@ import { Badge } from "../ui/Badge";
 import { Button } from "../ui/Button";
 import { ErrorState } from "../ui/ErrorState";
 import type { CompanySettings } from "../api/types";
+import { useTranslation } from "../i18n/I18nProvider";
 
 export function Settings() {
+  const { t } = useTranslation();
   const [settings, setSettings] = useState<CompanySettings | null>(null);
   const [address, setAddress] = useState("");
   const [taxId, setTaxId] = useState("");
@@ -38,10 +40,10 @@ export function Settings() {
         method: "PATCH",
         body: JSON.stringify({ address, taxId, phone, defaultTaxRatePercent: taxRate }),
       });
-      setNotice("تم حفظ معلومات الشركة");
+      setNotice(t("settingsPage.profileSaved"));
       load();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر الحفظ");
+      setError(err instanceof ApiError ? err.message : t("settingsPage.saveError"));
     }
   }
 
@@ -66,11 +68,11 @@ export function Settings() {
         body: form,
       });
       const body = await res.json();
-      if (!res.ok) throw new Error(body.error ?? "تعذّر رفع الشعار");
-      setNotice("تم رفع الشعار — سيظهر تلقائياً على كل عروض الأسعار والفواتير");
+      if (!res.ok) throw new Error(body.error ?? t("settingsPage.logoUploadError"));
+      setNotice(t("settingsPage.logoUploadedNotice"));
       load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "تعذّر رفع الشعار");
+      setError(err instanceof Error ? err.message : t("settingsPage.logoUploadError"));
     } finally {
       setUploading(false);
     }
@@ -80,7 +82,7 @@ export function Settings() {
 
   return (
     <Layout>
-      <PageHeader title="إعدادات الشركة" subtitle="الشعار، معلومات الشركة، والميزات الاختيارية." />
+      <PageHeader title={t("settingsPage.title")} subtitle={t("settingsPage.subtitle")} />
 
       {error && (
         <div className="mb-4">
@@ -90,13 +92,13 @@ export function Settings() {
       {notice && <p className="mb-4 rounded-md bg-success-50 px-3 py-2 text-sm text-success-700">{notice}</p>}
 
       <Card className="mb-6 p-5">
-        <h3 className="mb-3 font-semibold text-stone-700">شعار الشركة (يظهر تلقائياً في ترويسة كل مستند)</h3>
+        <h3 className="mb-3 font-semibold text-stone-700">{t("settingsPage.logo.heading")}</h3>
         <div className="flex items-center gap-4">
           {settings.logoPath && (
-            <img src={settings.logoPath} alt="الشعار الحالي" className="h-16 w-auto rounded border border-stone-200 p-1" />
+            <img src={settings.logoPath} alt={t("settingsPage.logo.currentAlt")} className="h-16 w-auto rounded border border-stone-200 p-1" />
           )}
           <label className="cursor-pointer rounded-md border border-stone-300 px-4 py-2 text-sm text-stone-600 hover:border-primary">
-            {uploading ? "جارٍ الرفع..." : "اختيار صورة"}
+            {uploading ? t("settingsPage.logo.uploading") : t("settingsPage.logo.chooseImage")}
             <input
               type="file"
               accept="image/png,image/jpeg,image/webp,image/svg+xml"
@@ -110,29 +112,29 @@ export function Settings() {
 
       <form onSubmit={saveProfile} className="mb-6">
         <Card className="space-y-3 p-5">
-        <h3 className="font-semibold text-stone-700">معلومات الشركة (تُملأ تلقائياً في كل عرض سعر وفاتورة)</h3>
+        <h3 className="font-semibold text-stone-700">{t("settingsPage.profile.heading")}</h3>
         <input
-          placeholder="العنوان"
+          placeholder={t("settingsPage.profile.addressPlaceholder")}
           value={address}
           onChange={(e) => setAddress(e.target.value)}
           className="w-full rounded-md border border-stone-300 px-3 py-2 text-sm"
         />
         <div className="grid gap-3 sm:grid-cols-2">
           <input
-            placeholder="الرقم الضريبي / السجل التجاري"
+            placeholder={t("settingsPage.profile.taxIdPlaceholder")}
             value={taxId}
             onChange={(e) => setTaxId(e.target.value)}
             className="rounded-md border border-stone-300 px-3 py-2 text-sm"
           />
           <input
-            placeholder="الهاتف"
+            placeholder={t("settingsPage.profile.phonePlaceholder")}
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
             className="rounded-md border border-stone-300 px-3 py-2 text-sm"
           />
         </div>
         <label className="block text-sm text-stone-600">
-          نسبة الضريبة الافتراضية (%) — تُطبَّق تلقائياً على كل فاتورة وعرض سعر جديد
+          {t("settingsPage.profile.taxRateLabel")}
           <input
             type="number"
             min="0"
@@ -143,21 +145,26 @@ export function Settings() {
             className="mt-1 w-40 rounded-md border border-stone-300 px-3 py-2 text-sm"
           />
         </label>
-        <Button type="submit">حفظ</Button>
+        <Button type="submit">{t("common.save")}</Button>
         </Card>
       </form>
 
       <Card className="p-5">
-        <h3 className="mb-1 font-semibold text-stone-700">الميزات الاختيارية</h3>
-        <p className="mb-3 text-sm text-stone-500">فعّلي أو عطّلي أي ميزة حسب حاجة شركتك — لا حاجة لاستخدام ما لا تريدين.</p>
+        <h3 className="mb-1 font-semibold text-stone-700">{t("settingsPage.features.heading")}</h3>
+        <p className="mb-3 text-sm text-stone-500">{t("settingsPage.features.subtitle")}</p>
         <div className="flex items-center justify-between rounded-md border border-stone-200 p-3">
           <div>
-            <p className="text-sm font-medium text-stone-800">الفوترة</p>
-            <p className="text-xs text-stone-500">إنشاء فواتير رسمية بترقيم وضريبة تلقائيين</p>
+            <p className="text-sm font-medium text-stone-800">{t("settingsPage.features.invoicing")}</p>
+            <p className="text-xs text-stone-500">{t("settingsPage.features.invoicingDescription")}</p>
           </div>
-          <button onClick={toggleInvoicing} aria-label={`تبديل ميزة الفوترة، الحالة الحالية: ${settings.featureFlags.invoicing ? "مُفعَّلة" : "معطَّلة"}`}>
+          <button
+            onClick={toggleInvoicing}
+            aria-label={t("settingsPage.features.toggleAriaLabel", {
+              status: settings.featureFlags.invoicing ? t("settingsPage.features.enabled") : t("settingsPage.features.disabled"),
+            })}
+          >
             <Badge tone={settings.featureFlags.invoicing ? "success" : "neutral"}>
-              {settings.featureFlags.invoicing ? "مُفعَّلة" : "معطَّلة"}
+              {settings.featureFlags.invoicing ? t("settingsPage.features.enabled") : t("settingsPage.features.disabled")}
             </Badge>
           </button>
         </div>
