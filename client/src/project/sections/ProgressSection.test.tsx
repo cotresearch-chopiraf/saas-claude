@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { AuthProvider } from "../../auth/AuthContext";
+import { I18nProvider } from "../../i18n/I18nProvider";
 import { ProgressSection } from "./ProgressSection";
 import type { Measurement, MeasurementWithLines, Contract, BoqRevision, BoqRevisionWithItems } from "../../api/types";
 
@@ -151,9 +152,11 @@ function mockApi(role: "owner" | "member", measurementDetail: MeasurementWithLin
 
 function renderSection() {
   return render(
-    <AuthProvider>
-      <ProgressSection />
-    </AuthProvider>,
+    <I18nProvider>
+      <AuthProvider>
+        <ProgressSection />
+      </AuthProvider>
+    </I18nProvider>,
   );
 }
 

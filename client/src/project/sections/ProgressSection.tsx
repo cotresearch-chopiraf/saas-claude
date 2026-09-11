@@ -32,13 +32,8 @@ import type {
   MeasurementWithLines,
 } from "../../api/types";
 import { useProjectContext } from "../context";
+import { useTranslation } from "../../i18n/I18nProvider";
 
-const statusLabel: Record<MeasurementStatus, string> = {
-  draft: "مسودة",
-  submitted: "بانتظار الاعتماد",
-  approved: "معتمد",
-  rejected: "مرفوض",
-};
 const statusTone: Record<MeasurementStatus, "neutral" | "success" | "warning" | "info" | "danger"> = {
   draft: "warning",
   submitted: "info",
@@ -54,6 +49,7 @@ const EDITABLE_STATUSES: MeasurementStatus[] = ["draft", "rejected"];
 // reflects what it returns. Non-financial: never a certification or
 // payment value — that is IPC's job, deliberately out of scope here.
 export function ProgressSection() {
+  const { t, locale } = useTranslation();
   const { projectId } = useProjectContext();
   const [measurements, setMeasurements] = useState<Measurement[] | null>(null);
   const [contracts, setContracts] = useState<Contract[]>([]);
@@ -71,7 +67,7 @@ export function ProgressSection() {
         setContracts(contractRows);
         setPublishedRevisions(revisionRows.filter((r) => r.status === "published"));
       })
-      .catch((err) => setError(err instanceof Error ? err.message : "تعذّر تحميل القياسات"));
+      .catch((err) => setError(err instanceof Error ? err.message : t("progress.loadError")));
   }
   useEffect(load, [projectId]);
 
@@ -81,25 +77,25 @@ export function ProgressSection() {
   };
 
   const columns: FinancialColumn<Measurement>[] = [
-    { key: "measurementDate", header: "تاريخ القياس", render: (m) => formatDate(m.measurementDate) },
-    { key: "contract", header: "العقد", render: (m) => contractLabel(m.contractId) },
-    { key: "description", header: "الوصف", render: (m) => m.description ?? "—" },
-    { key: "status", header: "الحالة", render: (m) => <Badge tone={statusTone[m.status]}>{statusLabel[m.status]}</Badge> },
+    { key: "measurementDate", header: t("progress.columns.measurementDate"), render: (m) => formatDate(m.measurementDate, locale) },
+    { key: "contract", header: t("progress.columns.contract"), render: (m) => contractLabel(m.contractId) },
+    { key: "description", header: t("progress.columns.description"), render: (m) => m.description ?? "—" },
+    { key: "status", header: t("progress.columns.status"), render: (m) => <Badge tone={statusTone[m.status]}>{t(`progress.status.${m.status}`)}</Badge> },
   ];
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="القياسات"
+        title={t("progress.title")}
         actions={
           <Button size="sm" onClick={() => setShowCreate((v) => !v)} disabled={contracts.length === 0}>
-            {showCreate ? "إلغاء" : "+ قياس جديد"}
+            {showCreate ? t("common.cancel") : t("progress.newMeasurement")}
           </Button>
         }
       />
 
       {contracts.length === 0 && measurements !== null && (
-        <p className="text-sm text-stone-400">يجب إضافة عقد أولاً من قسم "العقد" قبل تسجيل قياس.</p>
+        <p className="text-sm text-stone-400">{t("progress.needsContractFirst")}</p>
       )}
 
       {showCreate && (
@@ -121,10 +117,10 @@ export function ProgressSection() {
         rowKey={(m) => m.id}
         error={error}
         onRetry={load}
-        emptyMessage="لا توجد قياسات بعد"
+        emptyMessage={t("progress.emptyMessage")}
         rowActions={(m) => (
           <button type="button" onClick={() => setSelectedId(m.id)} className="text-sm text-primary hover:underline">
-            عرض
+            {t("progress.view")}
           </button>
         )}
       />
@@ -147,6 +143,7 @@ function MeasurementCreateForm({
   publishedRevisions: BoqRevision[];
   onCreated: (measurement: Measurement) => void;
 }) {
+  const { t } = useTranslation();
   const [contractId, setContractId] = useState(contracts[0]?.id ?? "");
   const [measurementDate, setMeasurementDate] = useState("");
   const [description, setDescription] = useState("");
@@ -172,7 +169,7 @@ function MeasurementCreateForm({
       });
       onCreated(measurement);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر إنشاء القياس");
+      setError(err instanceof ApiError ? err.message : t("progress.createForm.genericError"));
     } finally {
       setSubmitting(false);
     }
@@ -206,18 +203,16 @@ function MeasurementCreateForm({
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
         />
         <input
-          placeholder="الوصف (اختياري)"
+          placeholder={t("progress.createForm.descriptionPlaceholder")}
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
         />
         {!revision && contractId && (
-          <p className="text-sm text-danger-600 sm:col-span-3">
-            هذا العقد لا يحتوي على نسخة منشورة من جدول الكميات — يجب نشر جدول الكميات أولاً قبل تسجيل قياس عليه.
-          </p>
+          <p className="text-sm text-danger-600 sm:col-span-3">{t("progress.createForm.noPublishedBoq")}</p>
         )}
         <Button type="submit" disabled={submitting || !revision} className="sm:col-span-3">
-          {submitting ? "جارٍ الحفظ..." : "إنشاء القياس"}
+          {submitting ? t("progress.createForm.saving") : t("progress.createForm.create")}
         </Button>
       </form>
     </Card>
@@ -226,18 +221,20 @@ function MeasurementCreateForm({
 
 type PendingAction = "submit" | "approve" | null;
 
-const confirmCopy: Record<Exclude<PendingAction, null>, { title: string; message: string; confirmLabel: string }> = {
-  submit: {
-    title: "إرسال القياس للاعتماد",
-    message: "بعد الإرسال لن يمكن إضافة أو حذف بنود هذا القياس إلا إذا تم رفضه. هل تريد المتابعة؟",
-    confirmLabel: "إرسال",
-  },
-  approve: {
-    title: "اعتماد القياس",
-    message: "بعد الاعتماد تصبح كمياته جزءاً من التقدّم المعتمد تراكمياً لبنود جدول الكميات المرتبطة، ولا يمكن التراجع عن ذلك. هل تريد المتابعة؟",
-    confirmLabel: "اعتماد",
-  },
-};
+function confirmCopyFor(t: (key: string) => string): Record<Exclude<PendingAction, null>, { title: string; message: string; confirmLabel: string }> {
+  return {
+    submit: {
+      title: t("progress.confirm.submitTitle"),
+      message: t("progress.confirm.submitMessage"),
+      confirmLabel: t("progress.confirm.submitLabel"),
+    },
+    approve: {
+      title: t("progress.confirm.approveTitle"),
+      message: t("progress.confirm.approveMessage"),
+      confirmLabel: t("progress.confirm.approveLabel"),
+    },
+  };
+}
 
 function MeasurementDetail({
   projectId,
@@ -250,6 +247,8 @@ function MeasurementDetail({
   contracts: Contract[];
   onChanged: () => void;
 }) {
+  const { t, locale } = useTranslation();
+  const confirmCopy = confirmCopyFor(t);
   const [measurement, setMeasurement] = useState<MeasurementWithLines | null>(null);
   const [boqItems, setBoqItems] = useState<BoqItem[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -271,7 +270,7 @@ function MeasurementDetail({
           setBoqItems(rev.items.filter((i) => i.itemType === "item" && i.quantity !== null));
         });
       })
-      .catch((err) => setError(err instanceof Error ? err.message : "تعذّر تحميل تفاصيل القياس"));
+      .catch((err) => setError(err instanceof Error ? err.message : t("progress.detail.loadError")));
   }
   useEffect(load, [projectId, measurementId]);
 
@@ -285,7 +284,7 @@ function MeasurementDetail({
       load();
       onChanged();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر تنفيذ الإجراء");
+      setError(err instanceof ApiError ? err.message : t("progress.detail.actionError"));
       setPendingAction(null);
     } finally {
       setActingBusy(false);
@@ -297,7 +296,7 @@ function MeasurementDetail({
       await deleteMeasurementLine(projectId, measurementId, lineId);
       load();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر حذف البند");
+      setError(err instanceof ApiError ? err.message : t("progress.detail.deleteLineError"));
     }
   }
 
@@ -314,18 +313,18 @@ function MeasurementDetail({
   const isSubmitted = measurement.status === "submitted";
 
   const lineColumns: FinancialColumn<MeasurementLine>[] = [
-    { key: "boqItem", header: "بند جدول الكميات", render: (l) => boqItemLabel(l.boqItemId) },
-    { key: "measuredQuantity", header: "الكمية المقاسة", align: "end", render: (l) => formatQuantity(l.measuredQuantity) },
-    { key: "value", header: "القيمة", align: "end", render: (l) => (l.value !== null ? formatMoney(l.value) : "—") },
-    { key: "notes", header: "ملاحظات", render: (l) => l.notes ?? "—" },
+    { key: "boqItem", header: t("progress.detail.lineColumns.boqItem"), render: (l) => boqItemLabel(l.boqItemId) },
+    { key: "measuredQuantity", header: t("progress.detail.lineColumns.measuredQuantity"), align: "end", render: (l) => formatQuantity(l.measuredQuantity, null, locale) },
+    { key: "value", header: t("progress.detail.lineColumns.value"), align: "end", render: (l) => (l.value !== null ? formatMoney(l.value, "SAR", locale) : "—") },
+    { key: "notes", header: t("progress.detail.lineColumns.notes"), render: (l) => l.notes ?? "—" },
   ];
 
   return (
     <Card className="p-5">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <h2 className="font-semibold text-stone-800">قياس {formatDate(measurement.measurementDate)}</h2>
-          <Badge tone={statusTone[measurement.status]}>{statusLabel[measurement.status]}</Badge>
+          <h2 className="font-semibold text-stone-800">{t("progress.detail.title", { date: formatDate(measurement.measurementDate, locale) })}</h2>
+          <Badge tone={statusTone[measurement.status]}>{t(`progress.status.${measurement.status}`)}</Badge>
         </div>
         <div className="flex flex-wrap gap-2">
           {/* Deliberately ungated (no <Can/>): create/add-line/remove-line/
@@ -334,23 +333,23 @@ function MeasurementDetail({
               posture already established for Actual Cost's expense CRUD. */}
           {isEditable && (
             <Button size="sm" variant="secondary" onClick={() => setShowAddLine((v) => !v)}>
-              {showAddLine ? "إلغاء" : "+ بند"}
+              {showAddLine ? t("common.cancel") : t("progress.detail.addLine")}
             </Button>
           )}
           {isEditable && (
             <Button size="sm" disabled={measurement.lines.length === 0} onClick={() => setPendingAction("submit")}>
-              إرسال للاعتماد
+              {t("progress.detail.submitForApproval")}
             </Button>
           )}
           <Can permission="measurement.approve">
             {isSubmitted && (
               <Button size="sm" onClick={() => setPendingAction("approve")}>
-                اعتماد
+                {t("progress.detail.approve")}
               </Button>
             )}
             {isSubmitted && (
               <Button size="sm" variant="danger" onClick={() => setShowReject((v) => !v)}>
-                {showReject ? "إلغاء" : "رفض"}
+                {showReject ? t("common.cancel") : t("progress.detail.reject")}
               </Button>
             )}
           </Can>
@@ -364,15 +363,15 @@ function MeasurementDetail({
       )}
 
       <dl className="mb-5 grid grid-cols-1 gap-x-8 gap-y-3 text-sm sm:grid-cols-2">
-        <Field label="العقد" value={contractLabel} />
-        <Field label="تاريخ القياس" value={formatDate(measurement.measurementDate)} />
-        <Field label="الوصف" value={measurement.description ?? "—"} />
-        <Field label="تاريخ الإرسال للاعتماد" value={formatDateTime(measurement.submittedAt)} />
-        <Field label="تاريخ الاعتماد" value={formatDateTime(measurement.approvedAt)} />
+        <Field label={t("progress.detail.fields.contract")} value={contractLabel} />
+        <Field label={t("progress.detail.fields.measurementDate")} value={formatDate(measurement.measurementDate, locale)} />
+        <Field label={t("progress.detail.fields.description")} value={measurement.description ?? "—"} />
+        <Field label={t("progress.detail.fields.submittedAt")} value={formatDateTime(measurement.submittedAt, locale)} />
+        <Field label={t("progress.detail.fields.approvedAt")} value={formatDateTime(measurement.approvedAt, locale)} />
         {measurement.status === "rejected" && (
           <>
-            <Field label="تاريخ الرفض" value={formatDateTime(measurement.rejectedAt)} />
-            <Field label="سبب الرفض" value={measurement.rejectionReason ?? "—"} />
+            <Field label={t("progress.detail.fields.rejectedAt")} value={formatDateTime(measurement.rejectedAt, locale)} />
+            <Field label={t("progress.detail.fields.rejectionReason")} value={measurement.rejectionReason ?? "—"} />
           </>
         )}
       </dl>
@@ -409,12 +408,12 @@ function MeasurementDetail({
         columns={lineColumns}
         rows={measurement.lines}
         rowKey={(l) => l.id}
-        emptyMessage="لا توجد بنود في هذا القياس بعد"
+        emptyMessage={t("progress.detail.emptyLines")}
         rowActions={
           isEditable
             ? (line) => (
                 <button type="button" onClick={() => onDeleteLine(line.id)} className="text-sm text-danger-600 hover:underline">
-                  حذف
+                  {t("common.delete")}
                 </button>
               )
             : undefined
@@ -425,7 +424,7 @@ function MeasurementDetail({
         open={pendingAction !== null}
         title={pendingAction ? confirmCopy[pendingAction].title : ""}
         message={pendingAction ? confirmCopy[pendingAction].message : ""}
-        confirmLabel={actingBusy ? "جارٍ التنفيذ..." : pendingAction ? confirmCopy[pendingAction].confirmLabel : ""}
+        confirmLabel={actingBusy ? t("progress.confirm.executing") : pendingAction ? confirmCopy[pendingAction].confirmLabel : ""}
         onConfirm={onConfirmAction}
         onCancel={() => setPendingAction(null)}
       />
@@ -449,6 +448,7 @@ function MeasurementLineForm({
   boqItems: BoqItem[];
   onSubmit: (input: { boqItemId: string; measuredQuantity: number; notes?: string }) => Promise<void>;
 }) {
+  const { t } = useTranslation();
   const [boqItemId, setBoqItemId] = useState(boqItems[0]?.id ?? "");
   const [measuredQuantity, setMeasuredQuantity] = useState("");
   const [notes, setNotes] = useState("");
@@ -462,7 +462,7 @@ function MeasurementLineForm({
     try {
       await onSubmit({ boqItemId, measuredQuantity: Number(measuredQuantity), notes: notes || undefined });
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر حفظ البند");
+      setError(err instanceof ApiError ? err.message : t("progress.lineForm.genericError"));
     } finally {
       setSubmitting(false);
     }
@@ -481,7 +481,7 @@ function MeasurementLineForm({
         onChange={(e) => setBoqItemId(e.target.value)}
         className="rounded-md border border-stone-300 px-3 py-2 text-sm sm:col-span-2"
       >
-        {boqItems.length === 0 && <option value="">لا توجد بنود قابلة للقياس</option>}
+        {boqItems.length === 0 && <option value="">{t("progress.lineForm.noItems")}</option>}
         {boqItems.map((i) => (
           <option key={i.id} value={i.id}>
             {i.code ? `${i.code} — ${i.description}` : i.description}
@@ -493,19 +493,19 @@ function MeasurementLineForm({
         type="number"
         min="0"
         step="0.001"
-        placeholder="الكمية المقاسة"
+        placeholder={t("progress.lineForm.quantityPlaceholder")}
         value={measuredQuantity}
         onChange={(e) => setMeasuredQuantity(e.target.value)}
         className="rounded-md border border-stone-300 px-3 py-2 text-sm"
       />
       <input
-        placeholder="ملاحظات (اختياري)"
+        placeholder={t("progress.lineForm.notesPlaceholder")}
         value={notes}
         onChange={(e) => setNotes(e.target.value)}
         className="rounded-md border border-stone-300 px-3 py-2 text-sm"
       />
       <Button type="submit" size="sm" disabled={submitting || !boqItemId} className="sm:col-span-4">
-        {submitting ? "جارٍ الحفظ..." : "إضافة البند"}
+        {submitting ? t("progress.lineForm.saving") : t("progress.lineForm.addItem")}
       </Button>
     </form>
   );
@@ -515,6 +515,7 @@ function MeasurementLineForm({
 // small form rather than ConfirmDialog's plain message, since this action
 // needs to collect that text before it can be confirmed at all.
 function RejectForm({ onReject }: { onReject: (reason: string) => Promise<void> }) {
+  const { t } = useTranslation();
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -526,7 +527,7 @@ function RejectForm({ onReject }: { onReject: (reason: string) => Promise<void> 
     try {
       await onReject(reason);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر رفض القياس");
+      setError(err instanceof ApiError ? err.message : t("progress.rejectForm.genericError"));
     } finally {
       setSubmitting(false);
     }
@@ -537,14 +538,14 @@ function RejectForm({ onReject }: { onReject: (reason: string) => Promise<void> 
       {error && <ErrorState message={error} />}
       <textarea
         required
-        placeholder="سبب الرفض"
+        placeholder={t("progress.rejectForm.reasonPlaceholder")}
         value={reason}
         onChange={(e) => setReason(e.target.value)}
         className="rounded-md border border-stone-300 px-3 py-2 text-sm"
         rows={2}
       />
       <Button type="submit" size="sm" variant="danger" disabled={submitting || !reason.trim()}>
-        {submitting ? "جارٍ الرفض..." : "تأكيد الرفض"}
+        {submitting ? t("progress.rejectForm.rejecting") : t("progress.rejectForm.confirmReject")}
       </Button>
     </form>
   );
