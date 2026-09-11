@@ -274,76 +274,78 @@ export function OverviewSection() {
     measurementsHaveData: data.measurements.length > 0,
   });
 
-  // Executive Command Center composition: one 12-column grid, source order
-  // equal to reading/priority order on every breakpoint (project -> health
-  // -> financial -> cost-vs-progress -> needs attention -> progress/cash/
-  // procurement/commercial -> activity/actions), so no per-breakpoint
-  // `order-N` overrides are needed the way the previous single-column
-  // layout required. Column spans create the asymmetric zones the brief
-  // calls for; below `md` every zone is simply full width in this same
-  // order, which is already the requested mobile priority sequence.
+  // Executive Command Center composition: Identity, then four Zones (each
+  // one Card holding a related pair split by an internal divider — see
+  // the `Zone` component), then two low-priority full-width strips.
+  // Source order equals reading/priority order on every breakpoint, so
+  // the same JSX collapses to that exact sequence on mobile with no
+  // per-breakpoint `order-N` overrides needed. The asymmetric widths
+  // (Health 5 / Financial 7, Cost-vs-Progress 7 / Needs Attention 5) live
+  // inside each Zone's own basis split, not in an outer grid — below
+  // `xl` every Zone stacks its two halves vertically with a horizontal
+  // divider instead of splitting columns.
   return (
-    <div className="grid grid-cols-1 gap-5 xl:grid-cols-12 lg:gap-6">
-      <div className="xl:col-span-12">
-        <IdentityStrip project={project} contract={mainContract} avgProgress={avgProgress} activity={data.activity} />
-      </div>
+    <div className="flex flex-col gap-5 lg:gap-6">
+      <IdentityStrip project={project} contract={mainContract} avgProgress={avgProgress} activity={data.activity} />
 
-      <div className="xl:col-span-5">
-        <HealthGrid health={health} projectId={projectId} />
-      </div>
-      <div className="xl:col-span-7">
-        <FinancialWaterfallCard contract={mainContract} forecast={data.forecast} projectId={projectId} revision={latestRevision} />
-      </div>
+      <Zone
+        tier="primary"
+        leftBasis="xl:basis-5/12"
+        left={<HealthGrid health={health} projectId={projectId} />}
+        rightBasis="xl:basis-7/12"
+        right={<FinancialWaterfallCard contract={mainContract} forecast={data.forecast} projectId={projectId} revision={latestRevision} />}
+      />
 
-      <div className="xl:col-span-7">
-        <CostVsProgressCard budget={data.budget} avgProgress={avgProgress} />
-      </div>
-      <div className="xl:col-span-5">
-        <NeedsAttentionCard items={needsAttention} />
-      </div>
+      <Zone
+        tier="primary"
+        leftBasis="xl:basis-7/12"
+        left={<CostVsProgressCard budget={data.budget} avgProgress={avgProgress} />}
+        rightBasis="xl:basis-5/12"
+        right={<NeedsAttentionCard items={needsAttention} />}
+      />
 
-      <div className="xl:col-span-6">
-        <ProgressScheduleCard
-          projectId={projectId}
-          tasks={data.tasks}
-          overdueTasks={overdueTasks}
-          nextMilestone={nextMilestone}
-          avgProgress={avgProgress}
-          measurementsAwaitingApproval={measurementsAwaitingApproval}
-        />
-      </div>
-      <div className="xl:col-span-6">
-        <CashFlowCard cashFlow={data.cashFlow} projectId={projectId} />
-      </div>
+      <Zone
+        tier="secondary"
+        left={
+          <ProgressScheduleCard
+            projectId={projectId}
+            tasks={data.tasks}
+            overdueTasks={overdueTasks}
+            nextMilestone={nextMilestone}
+            avgProgress={avgProgress}
+            measurementsAwaitingApproval={measurementsAwaitingApproval}
+          />
+        }
+        right={<CashFlowCard cashFlow={data.cashFlow} projectId={projectId} />}
+      />
 
-      <div className="xl:col-span-6">
-        <ProcurementCard
-          projectId={projectId}
-          totalCommitted={totalCommitted}
-          approvedCommitted={approvedCommitted}
-          pendingCommitted={pendingCommitted}
-          pendingCount={pendingCommitments.length}
-          currency={data.forecast.currency}
-        />
-      </div>
-      <div className="xl:col-span-6">
-        <CommercialExecutionCard
-          projectId={projectId}
-          awaitingCertification={ipcsAwaitingCertification.length}
-          awaitingApproval={ipcsAwaitingApproval.length}
-          certifiedTotal={certifiedTotal}
-          certifiedCount={certifiedIpcs.length}
-          currency={data.forecast.currency}
-          laborCost={data.laborCost}
-        />
-      </div>
+      <Zone
+        tier="secondary"
+        left={
+          <ProcurementCard
+            projectId={projectId}
+            totalCommitted={totalCommitted}
+            approvedCommitted={approvedCommitted}
+            pendingCommitted={pendingCommitted}
+            pendingCount={pendingCommitments.length}
+            currency={data.forecast.currency}
+          />
+        }
+        right={
+          <CommercialExecutionCard
+            projectId={projectId}
+            awaitingCertification={ipcsAwaitingCertification.length}
+            awaitingApproval={ipcsAwaitingApproval.length}
+            certifiedTotal={certifiedTotal}
+            certifiedCount={certifiedIpcs.length}
+            currency={data.forecast.currency}
+            laborCost={data.laborCost}
+          />
+        }
+      />
 
-      <div className="xl:col-span-12">
-        <ActivityFeedCard events={projectActivity} />
-      </div>
-      <div className="xl:col-span-12">
-        <QuickActionsCard projectId={projectId} />
-      </div>
+      <ActivityFeedCard events={projectActivity} />
+      <QuickActionsCard projectId={projectId} />
     </div>
   );
 }
@@ -501,18 +503,46 @@ function SectionHeader({
   );
 }
 
-// Shared elevated-card shell every section below uses — a subtle shadow +
-// refined border replaces the previous flat border-only Card usage,
-// consistently across the whole page. `tier` controls padding only: the
-// primary layer keeps the page's baseline spacing, secondary and tertiary
-// step down slightly so the primary layer reads as the anchor without
-// itself being inflated.
+// Shared elevated-card shell every standalone section below uses — a
+// subtle shadow + refined border replaces the previous flat border-only
+// Card usage. `tier` controls padding only. This is now used only for
+// sections that are NOT paired inside a Zone (Identity, Activity):
+// paired sections render inside one shared Zone card instead of their
+// own, so the page carries far fewer separate card boundaries overall.
 function Panel({ className = "", tier = "primary", children }: { className?: string; tier?: SectionTier; children: ReactNode }) {
   return (
     <Card
       className={`border-stone-200/80 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_1px_8px_rgba(15,23,42,0.03)] ${panelPaddingByTier[tier]} ${className}`}
     >
       {children}
+    </Card>
+  );
+}
+
+// A single Card boundary holding TWO related sections split by a subtle
+// internal divider — vertical on desktop, horizontal once stacked —
+// instead of two independent Cards sitting next to each other. This is
+// what actually collapses "cards in a grid" into genuine zones: the page
+// carries one visible boundary per related pair, not one per metric
+// group. `leftBasis`/`rightBasis` set the asymmetric split (e.g. Health
+// 5/12 next to Financial Control 7/12); both default to an even split.
+function Zone({
+  tier = "primary",
+  left,
+  leftBasis = "xl:basis-1/2",
+  right,
+  rightBasis = "xl:basis-1/2",
+}: {
+  tier?: SectionTier;
+  left: ReactNode;
+  leftBasis?: string;
+  right: ReactNode;
+  rightBasis?: string;
+}) {
+  return (
+    <Card className="flex flex-col divide-y divide-stone-200 border-stone-200/80 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_1px_8px_rgba(15,23,42,0.03)] xl:flex-row xl:divide-x xl:divide-y-0 xl:divide-x-reverse">
+      <div className={`${leftBasis} ${panelPaddingByTier[tier]}`}>{left}</div>
+      <div className={`${rightBasis} ${panelPaddingByTier[tier]}`}>{right}</div>
     </Card>
   );
 }
@@ -668,7 +698,7 @@ function computeHealth(input: {
 
 function HealthGrid({ health, projectId }: { health: HealthIndicator[]; projectId: string }) {
   return (
-    <Panel tier="primary">
+    <>
       <SectionHeader icon={IconShield} tier="primary" title="صحة المشروع" />
       {/* Capped at 2 columns, not 3 — this zone now lives in a permanently
           partial-width column (not full page width like before), so a 3rd
@@ -693,7 +723,7 @@ function HealthGrid({ health, projectId }: { health: HealthIndicator[]; projectI
           );
         })}
       </div>
-    </Panel>
+    </>
   );
 }
 
@@ -733,7 +763,7 @@ function FinancialWaterfallCard({
   ];
 
   return (
-    <Panel tier="primary">
+    <>
       <SectionHeader icon={IconMoney} tier="primary" title="المركز المالي" meta={`بتاريخ ${formatDate(forecast.asOfDate)}`} />
       <div className="space-y-1">
         {rows.map((group, gi) => (
@@ -778,7 +808,7 @@ function FinancialWaterfallCard({
           </Link>
         </p>
       )}
-    </Panel>
+    </>
   );
 }
 
@@ -808,7 +838,7 @@ function CostVsProgressCard({ budget, avgProgress }: { budget: BudgetSummary; av
           : "استهلاك التكلفة متوافق مع الإنجاز الفعلي للمشروع";
 
   return (
-    <Panel tier="primary">
+    <>
       <SectionHeader icon={IconBars} tier="primary" title="الإنجاز الفعلي مقابل استهلاك التكلفة" />
       <p
         className={`mb-5 flex items-center gap-2 text-base font-bold ${
@@ -833,7 +863,7 @@ function CostVsProgressCard({ budget, avgProgress }: { budget: BudgetSummary; av
           tone={overBudget ? "danger" : "default"}
         />
       </div>
-    </Panel>
+    </>
   );
 }
 
@@ -972,7 +1002,7 @@ function NeedsAttentionCard({ items }: { items: AttentionItem[] }) {
   };
 
   return (
-    <Panel tier="primary">
+    <>
       <SectionHeader
         icon={IconAlertTriangle}
         tone={counts.critical > 0 ? "danger" : counts.attention > 0 ? "warning" : "success"}
@@ -1014,7 +1044,7 @@ function NeedsAttentionCard({ items }: { items: AttentionItem[] }) {
           })}
         </ul>
       )}
-    </Panel>
+    </>
   );
 }
 
@@ -1035,7 +1065,7 @@ function ProgressScheduleCard({
   measurementsAwaitingApproval: Measurement[];
 }) {
   return (
-    <Panel tier="secondary">
+    <>
       <SectionHeader
         icon={IconCalendar}
         tier="secondary"
@@ -1072,14 +1102,14 @@ function ProgressScheduleCard({
           </Link>
         </p>
       )}
-    </Panel>
+    </>
   );
 }
 
 // ── LEVEL 7 — Cash Flow ──────────────────────────────────────────────────
 function CashFlowCard({ cashFlow, projectId }: { cashFlow: CashFlowResult; projectId: string }) {
   return (
-    <Panel tier="secondary">
+    <>
       <SectionHeader
         icon={IconWallet}
         tier="secondary"
@@ -1100,7 +1130,7 @@ function CashFlowCard({ cashFlow, projectId }: { cashFlow: CashFlowResult; proje
           tone={cashFlow.projected.net < 0 ? "danger" : "success"}
         />
       </div>
-    </Panel>
+    </>
   );
 }
 
@@ -1121,7 +1151,7 @@ function ProcurementCard({
   currency: string;
 }) {
   return (
-    <Panel tier="secondary">
+    <>
       <SectionHeader
         icon={IconPackage}
         tier="secondary"
@@ -1137,7 +1167,7 @@ function ProcurementCard({
         <MetricCard label="نشطة / منفَّذة" value={formatMoney(approvedCommitted, currency)} tone="success" />
         <MetricCard label={`بانتظار الاعتماد (${pendingCount})`} value={formatMoney(pendingCommitted, currency)} tone="warning" />
       </div>
-    </Panel>
+    </>
   );
 }
 
@@ -1165,7 +1195,7 @@ function CommercialExecutionCard({
   laborCost: ProjectLaborCost;
 }) {
   return (
-    <Panel tier="secondary">
+    <>
       <SectionHeader icon={IconClipboard} tier="secondary" title="التنفيذ التجاري" meta="شهادات الدفع وتكلفة العمالة" />
       <div>
         <div className="mb-2 flex items-center justify-between">
@@ -1199,7 +1229,7 @@ function CommercialExecutionCard({
           </Link>
         </div>
       </div>
-    </Panel>
+    </>
   );
 }
 
@@ -1258,28 +1288,29 @@ function QuickActionsCard({ projectId }: { projectId: string }) {
     { label: "مصروف", href: "actual-cost", permission: "budget.manage" },
     { label: "شهادة دفع", href: "ipc", permission: "ipc.manage" },
   ];
+  // A bare compact action bar, not a Card — Quick Actions is the lowest-
+  // priority section on the page and shouldn't carry the same card
+  // treatment as an executive zone. Just a top divider + a row of buttons.
   return (
-    <Panel tier="tertiary">
-      <SectionHeader icon={IconPlus} tone="neutral" tier="tertiary" title="إجراءات سريعة" />
-      <div className="flex flex-wrap gap-2">
-        {gatedActions.map((a) => (
-          <Can key={a.href} permission={a.permission}>
-            <Link to={`/projects/${projectId}/${a.href}`}>
-              <Button variant="secondary" size="sm" className="flex items-center gap-1.5">
-                <IconPlus width={14} height={14} />
-                {a.label}
-              </Button>
-            </Link>
-          </Can>
-        ))}
-        <Link to={`/projects/${projectId}/documents`}>
-          <Button variant="secondary" size="sm" className="flex items-center gap-1.5">
-            <IconPlus width={14} height={14} />
-            رفع مستند
-          </Button>
-        </Link>
-      </div>
-    </Panel>
+    <div className="flex flex-wrap items-center gap-2 border-t border-stone-200 pt-4">
+      <span className="text-xs font-semibold text-stone-400">إجراءات سريعة</span>
+      {gatedActions.map((a) => (
+        <Can key={a.href} permission={a.permission}>
+          <Link to={`/projects/${projectId}/${a.href}`}>
+            <Button variant="secondary" size="sm" className="flex items-center gap-1.5">
+              <IconPlus width={14} height={14} />
+              {a.label}
+            </Button>
+          </Link>
+        </Can>
+      ))}
+      <Link to={`/projects/${projectId}/documents`}>
+        <Button variant="secondary" size="sm" className="flex items-center gap-1.5">
+          <IconPlus width={14} height={14} />
+          رفع مستند
+        </Button>
+      </Link>
+    </div>
   );
 }
 
