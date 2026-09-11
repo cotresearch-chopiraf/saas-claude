@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { AuthProvider } from "../../auth/AuthContext";
+import { I18nProvider } from "../../i18n/I18nProvider";
 import { CostPlanSection } from "./CostPlanSection";
 import type { BudgetItem, BudgetRevision, BudgetSummary } from "../../api/types";
 
@@ -76,9 +77,11 @@ describe("<CostPlanSection/>", () => {
   it("renders the backend's authoritative planned/spent/remaining totals, never a client recomputation", async () => {
     mockApi("owner");
     render(
-      <AuthProvider>
-        <CostPlanSection />
-      </AuthProvider>,
+      <I18nProvider>
+        <AuthProvider>
+          <CostPlanSection />
+        </AuthProvider>
+      </I18nProvider>,
     );
     await waitFor(() => expect(screen.getByText("مواد البناء")).toBeInTheDocument());
     expect(screen.getAllByText(/1,000\.00/).length).toBeGreaterThan(0); // planned
@@ -94,9 +97,11 @@ describe("<CostPlanSection/>", () => {
   it("budget item CRUD controls are hidden from a member, matching the new backend RBAC gate", async () => {
     mockApi("member");
     render(
-      <AuthProvider>
-        <CostPlanSection />
-      </AuthProvider>,
+      <I18nProvider>
+        <AuthProvider>
+          <CostPlanSection />
+        </AuthProvider>
+      </I18nProvider>,
     );
     await waitFor(() => expect(screen.getByText("مواد البناء")).toBeInTheDocument());
     expect(screen.queryByText("+ إضافة بند")).not.toBeInTheDocument();
@@ -107,9 +112,11 @@ describe("<CostPlanSection/>", () => {
   it("budget item CRUD controls are shown to an owner", async () => {
     mockApi("owner");
     render(
-      <AuthProvider>
-        <CostPlanSection />
-      </AuthProvider>,
+      <I18nProvider>
+        <AuthProvider>
+          <CostPlanSection />
+        </AuthProvider>
+      </I18nProvider>,
     );
     await waitFor(() => expect(screen.getByText("مواد البناء")).toBeInTheDocument());
     expect(screen.getByText("+ إضافة بند")).toBeInTheDocument();
@@ -120,9 +127,11 @@ describe("<CostPlanSection/>", () => {
   it("renders the revisions tab from backend data", async () => {
     mockApi("owner");
     render(
-      <AuthProvider>
-        <CostPlanSection />
-      </AuthProvider>,
+      <I18nProvider>
+        <AuthProvider>
+          <CostPlanSection />
+        </AuthProvider>
+      </I18nProvider>,
     );
     await waitFor(() => expect(screen.getByText("مواد البناء")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("tab", { name: "المراجعات" }));
@@ -133,9 +142,11 @@ describe("<CostPlanSection/>", () => {
   it("hides owner-only revision actions (create/approve) from a member", async () => {
     mockApi("member");
     render(
-      <AuthProvider>
-        <CostPlanSection />
-      </AuthProvider>,
+      <I18nProvider>
+        <AuthProvider>
+          <CostPlanSection />
+        </AuthProvider>
+      </I18nProvider>,
     );
     await waitFor(() => expect(screen.getByText("مواد البناء")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("tab", { name: "المراجعات" }));
@@ -146,9 +157,11 @@ describe("<CostPlanSection/>", () => {
   it("shows owner-only revision actions (create) to an owner", async () => {
     mockApi("owner");
     render(
-      <AuthProvider>
-        <CostPlanSection />
-      </AuthProvider>,
+      <I18nProvider>
+        <AuthProvider>
+          <CostPlanSection />
+        </AuthProvider>
+      </I18nProvider>,
     );
     await waitFor(() => expect(screen.getByText("مواد البناء")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("tab", { name: "المراجعات" }));

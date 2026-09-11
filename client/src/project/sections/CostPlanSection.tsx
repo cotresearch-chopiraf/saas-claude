@@ -26,12 +26,8 @@ import {
 import { ApiError } from "../../api/client";
 import type { BudgetItem, BudgetRevision, BudgetRevisionStatus, BudgetRevisionWithItems, BudgetSummary, CostCode } from "../../api/types";
 import { useProjectContext } from "../context";
+import { useTranslation } from "../../i18n/I18nProvider";
 
-const revisionStatusLabel: Record<BudgetRevisionStatus, string> = {
-  draft: "مسودة",
-  approved: "معتمدة",
-  superseded: "مستبدَلة",
-};
 const revisionStatusTone: Record<BudgetRevisionStatus, "neutral" | "success" | "warning"> = {
   draft: "warning",
   approved: "success",
@@ -39,16 +35,17 @@ const revisionStatusTone: Record<BudgetRevisionStatus, "neutral" | "success" | "
 };
 
 export function CostPlanSection() {
+  const { t } = useTranslation();
   const { projectId } = useProjectContext();
   const [activeTab, setActiveTab] = useState<"plan" | "revisions">("plan");
 
   return (
     <div className="space-y-6">
-      <PageHeader title="خطة التكلفة" />
+      <PageHeader title={t("costPlan.title")} />
       <Tabs
         items={[
-          { key: "plan", label: "الخطة" },
-          { key: "revisions", label: "المراجعات" },
+          { key: "plan", label: t("costPlan.tabs.plan") },
+          { key: "revisions", label: t("costPlan.tabs.revisions") },
         ]}
         active={activeTab}
         onChange={(key) => setActiveTab(key as "plan" | "revisions")}
@@ -61,6 +58,7 @@ export function CostPlanSection() {
 // --- Plan tab -------------------------------------------------------------
 
 function PlanTab({ projectId }: { projectId: string }) {
+  const { t, locale } = useTranslation();
   const [summary, setSummary] = useState<BudgetSummary | null>(null);
   const [costCodes, setCostCodes] = useState<CostCode[]>([]);
   const [revisions, setRevisions] = useState<BudgetRevision[]>([]);
@@ -76,7 +74,7 @@ function PlanTab({ projectId }: { projectId: string }) {
         setCostCodes(codes);
         setRevisions(revs);
       })
-      .catch((err) => setError(err instanceof Error ? err.message : "تعذّر تحميل خطة التكلفة"));
+      .catch((err) => setError(err instanceof Error ? err.message : t("costPlan.loadError")));
   }
   useEffect(load, [projectId]);
 
@@ -100,35 +98,35 @@ function PlanTab({ projectId }: { projectId: string }) {
   const visibleItems = costCodeFilter ? summary.items.filter((i) => i.costCodeId === costCodeFilter) : summary.items;
 
   const columns: FinancialColumn<BudgetItem>[] = [
-    { key: "category", header: "البند", render: (i) => i.category },
-    { key: "costCode", header: "بند التكلفة", render: (i) => costCodeLabel(i.costCodeId) },
-    { key: "planned", header: "المخطَّط", align: "end", render: (i) => formatMoney(i.plannedAmount) },
-    { key: "spent", header: "المُنفَق", align: "end", render: (i) => formatMoney(i.spent) },
-    { key: "boq", header: "جدول الكميات", render: (i) => (i.boqItemId ? "مرتبط" : "—") },
-    { key: "revision", header: "المراجعة", render: (i) => revisionLabel(i.budgetRevisionId) },
+    { key: "category", header: t("costPlan.columns.category"), render: (i) => i.category },
+    { key: "costCode", header: t("costPlan.columns.costCode"), render: (i) => costCodeLabel(i.costCodeId) },
+    { key: "planned", header: t("costPlan.columns.planned"), align: "end", render: (i) => formatMoney(i.plannedAmount, "SAR", locale) },
+    { key: "spent", header: t("costPlan.columns.spent"), align: "end", render: (i) => formatMoney(i.spent, "SAR", locale) },
+    { key: "boq", header: t("costPlan.columns.boq"), render: (i) => (i.boqItemId ? t("costPlan.columns.boqLinked") : "—") },
+    { key: "revision", header: t("costPlan.columns.revision"), render: (i) => revisionLabel(i.budgetRevisionId) },
   ];
 
   return (
     <div className="space-y-6">
       <div className="grid gap-4 sm:grid-cols-3">
-        <MetricCard label="إجمالي المخطَّط" value={formatMoney(summary.totals.planned)} />
-        <MetricCard label="إجمالي المُنفَق" value={formatMoney(summary.totals.spent)} />
+        <MetricCard label={t("costPlan.metrics.totalPlanned")} value={formatMoney(summary.totals.planned, "SAR", locale)} />
+        <MetricCard label={t("costPlan.metrics.totalSpent")} value={formatMoney(summary.totals.spent, "SAR", locale)} />
         <MetricCard
-          label={summary.totals.remaining < 0 ? "تجاوز الميزانية" : "المتبقي"}
-          value={formatMoney(Math.abs(summary.totals.remaining))}
+          label={summary.totals.remaining < 0 ? t("costPlan.metrics.overBudget") : t("costPlan.metrics.remaining")}
+          value={formatMoney(Math.abs(summary.totals.remaining), "SAR", locale)}
           tone={summary.totals.remaining < 0 ? "danger" : "default"}
         />
       </div>
 
       {costCodes.length > 0 && (
         <div className="flex items-center gap-2">
-          <label className="text-sm text-stone-500">تصفية حسب بند التكلفة</label>
+          <label className="text-sm text-stone-500">{t("costPlan.filterByCostCode")}</label>
           <select
             value={costCodeFilter}
             onChange={(e) => setCostCodeFilter(e.target.value)}
             className="rounded-md border border-stone-300 px-3 py-2 text-sm"
           >
-            <option value="">الكل</option>
+            <option value="">{t("costPlan.all")}</option>
             {costCodes.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.code} — {c.name}
@@ -152,7 +150,7 @@ function PlanTab({ projectId }: { projectId: string }) {
         columns={columns}
         rows={visibleItems}
         rowKey={(i) => i.id}
-        emptyMessage="لا توجد بنود ميزانية بعد"
+        emptyMessage={t("costPlan.emptyItems")}
         rowActions={(i) => <BudgetItemRowActions projectId={projectId} item={i} onChanged={load} />}
       />
     </div>
@@ -160,6 +158,7 @@ function PlanTab({ projectId }: { projectId: string }) {
 }
 
 function BudgetItemForm({ projectId, onSaved }: { projectId: string; onSaved: () => void }) {
+  const { t } = useTranslation();
   const [category, setCategory] = useState("");
   const [plannedAmount, setPlannedAmount] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -175,7 +174,7 @@ function BudgetItemForm({ projectId, onSaved }: { projectId: string; onSaved: ()
       setPlannedAmount("");
       onSaved();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر إضافة بند الميزانية");
+      setError(err instanceof ApiError ? err.message : t("costPlan.itemForm.genericError"));
     } finally {
       setSubmitting(false);
     }
@@ -191,7 +190,7 @@ function BudgetItemForm({ projectId, onSaved }: { projectId: string; onSaved: ()
         )}
         <input
           required
-          placeholder="اسم البند"
+          placeholder={t("costPlan.itemForm.namePlaceholder")}
           value={category}
           onChange={(e) => setCategory(e.target.value)}
           className="flex-1 rounded-md border border-stone-300 px-3 py-2 text-sm"
@@ -201,13 +200,13 @@ function BudgetItemForm({ projectId, onSaved }: { projectId: string; onSaved: ()
           type="number"
           min="0"
           step="0.01"
-          placeholder="المبلغ المخطَّط"
+          placeholder={t("costPlan.itemForm.plannedAmountPlaceholder")}
           value={plannedAmount}
           onChange={(e) => setPlannedAmount(e.target.value)}
           className="w-40 rounded-md border border-stone-300 px-3 py-2 text-sm"
         />
         <Button type="submit" size="sm" disabled={submitting}>
-          {submitting ? "جارٍ الحفظ..." : "+ إضافة بند"}
+          {submitting ? t("costPlan.itemForm.saving") : t("costPlan.itemForm.addItem")}
         </Button>
       </form>
     </Card>
@@ -215,6 +214,7 @@ function BudgetItemForm({ projectId, onSaved }: { projectId: string; onSaved: ()
 }
 
 function BudgetItemRowActions({ projectId, item, onChanged }: { projectId: string; item: BudgetItem; onChanged: () => void }) {
+  const { t } = useTranslation();
   const [editing, setEditing] = useState(false);
   const [category, setCategory] = useState(item.category);
   const [plannedAmount, setPlannedAmount] = useState(item.plannedAmount);
@@ -229,7 +229,7 @@ function BudgetItemRowActions({ projectId, item, onChanged }: { projectId: strin
       setEditing(false);
       onChanged();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر حفظ التعديل");
+      setError(err instanceof ApiError ? err.message : t("costPlan.rowActions.saveError"));
     } finally {
       setBusy(false);
     }
@@ -241,7 +241,7 @@ function BudgetItemRowActions({ projectId, item, onChanged }: { projectId: strin
       await deleteBudgetItem(projectId, item.id);
       onChanged();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر حذف البند");
+      setError(err instanceof ApiError ? err.message : t("costPlan.rowActions.deleteError"));
       setBusy(false);
     }
   }
@@ -265,10 +265,10 @@ function BudgetItemRowActions({ projectId, item, onChanged }: { projectId: strin
             className="w-24 rounded-md border border-stone-300 px-2 py-1 text-xs"
           />
           <Button size="sm" onClick={onSave} disabled={busy}>
-            حفظ
+            {t("common.save")}
           </Button>
           <Button size="sm" variant="secondary" onClick={() => setEditing(false)} disabled={busy}>
-            إلغاء
+            {t("common.cancel")}
           </Button>
         </div>
       </div>
@@ -279,10 +279,10 @@ function BudgetItemRowActions({ projectId, item, onChanged }: { projectId: strin
     <Can permission="budget.manage">
       <div className="flex justify-end gap-3">
         <button type="button" onClick={() => setEditing(true)} className="text-sm text-primary hover:underline">
-          تعديل
+          {t("common.edit")}
         </button>
         <button type="button" onClick={onDelete} disabled={busy} className="text-sm text-danger-600 hover:underline">
-          حذف
+          {t("common.delete")}
         </button>
       </div>
     </Can>
@@ -292,6 +292,7 @@ function BudgetItemRowActions({ projectId, item, onChanged }: { projectId: strin
 // --- Revisions tab ----------------------------------------------------------
 
 function RevisionsTab({ projectId }: { projectId: string }) {
+  const { t, locale } = useTranslation();
   const [revisions, setRevisions] = useState<BudgetRevision[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -302,16 +303,16 @@ function RevisionsTab({ projectId }: { projectId: string }) {
     setRevisions(null);
     listBudgetRevisions(projectId)
       .then(setRevisions)
-      .catch((err) => setError(err instanceof Error ? err.message : "تعذّر تحميل مراجعات الميزانية"));
+      .catch((err) => setError(err instanceof Error ? err.message : t("costPlan.revisions.loadListError")));
   }
   useEffect(load, [projectId]);
 
   const columns: FinancialColumn<BudgetRevision>[] = [
-    { key: "revisionNumber", header: "رقم المراجعة", render: (r) => `#${r.revisionNumber}` },
-    { key: "status", header: "الحالة", render: (r) => <Badge tone={revisionStatusTone[r.status]}>{revisionStatusLabel[r.status]}</Badge> },
-    { key: "reason", header: "السبب", render: (r) => r.reason ?? "—" },
-    { key: "createdAt", header: "تاريخ الإنشاء", render: (r) => formatDate(r.createdAt) },
-    { key: "approvedAt", header: "تاريخ الاعتماد", render: (r) => formatDate(r.approvedAt) },
+    { key: "revisionNumber", header: t("costPlan.revisions.columns.revisionNumber"), render: (r) => `#${r.revisionNumber}` },
+    { key: "status", header: t("costPlan.revisions.columns.status"), render: (r) => <Badge tone={revisionStatusTone[r.status]}>{t(`costPlan.revisions.status.${r.status}`)}</Badge> },
+    { key: "reason", header: t("costPlan.revisions.columns.reason"), render: (r) => r.reason ?? "—" },
+    { key: "createdAt", header: t("costPlan.revisions.columns.createdAt"), render: (r) => formatDate(r.createdAt, locale) },
+    { key: "approvedAt", header: t("costPlan.revisions.columns.approvedAt"), render: (r) => formatDate(r.approvedAt, locale) },
   ];
 
   return (
@@ -319,7 +320,7 @@ function RevisionsTab({ projectId }: { projectId: string }) {
       <div className="flex justify-end">
         <Can permission="budgetRevision.manage">
           <Button size="sm" onClick={() => setShowCreate((v) => !v)}>
-            {showCreate ? "إلغاء" : "+ مراجعة جديدة"}
+            {showCreate ? t("common.cancel") : t("costPlan.revisions.newRevision")}
           </Button>
         </Can>
       </div>
@@ -343,10 +344,10 @@ function RevisionsTab({ projectId }: { projectId: string }) {
         rowKey={(r) => r.id}
         error={error}
         onRetry={load}
-        emptyMessage="لا توجد مراجعات ميزانية بعد"
+        emptyMessage={t("costPlan.revisions.emptyMessage")}
         rowActions={(r) => (
           <button type="button" onClick={() => setSelectedId(r.id)} className="text-sm text-primary hover:underline">
-            عرض
+            {t("costPlan.revisions.view")}
           </button>
         )}
       />
@@ -357,6 +358,7 @@ function RevisionsTab({ projectId }: { projectId: string }) {
 }
 
 function RevisionCreateForm({ projectId, onCreated }: { projectId: string; onCreated: (revision: BudgetRevision) => void }) {
+  const { t } = useTranslation();
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -369,7 +371,7 @@ function RevisionCreateForm({ projectId, onCreated }: { projectId: string; onCre
       const revision = await createBudgetRevision(projectId, { reason: reason || undefined });
       onCreated(revision);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر إنشاء مراجعة جديدة");
+      setError(err instanceof ApiError ? err.message : t("costPlan.revisions.createForm.genericError"));
     } finally {
       setSubmitting(false);
     }
@@ -384,13 +386,13 @@ function RevisionCreateForm({ projectId, onCreated }: { projectId: string; onCre
           </div>
         )}
         <input
-          placeholder="سبب المراجعة (اختياري)"
+          placeholder={t("costPlan.revisions.createForm.reasonPlaceholder")}
           value={reason}
           onChange={(e) => setReason(e.target.value)}
           className="flex-1 rounded-md border border-stone-300 px-3 py-2 text-sm"
         />
         <Button type="submit" disabled={submitting}>
-          {submitting ? "جارٍ الحفظ..." : "إنشاء مراجعة"}
+          {submitting ? t("costPlan.revisions.createForm.saving") : t("costPlan.revisions.createForm.create")}
         </Button>
       </form>
     </Card>
@@ -398,6 +400,7 @@ function RevisionCreateForm({ projectId, onCreated }: { projectId: string; onCre
 }
 
 function RevisionDetail({ projectId, revisionId, onChanged }: { projectId: string; revisionId: string; onChanged: () => void }) {
+  const { t, locale } = useTranslation();
   const [revision, setRevision] = useState<BudgetRevisionWithItems | null>(null);
   const [unassignedItems, setUnassignedItems] = useState<BudgetItem[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -413,7 +416,7 @@ function RevisionDetail({ projectId, revisionId, onChanged }: { projectId: strin
         setRevision(rev);
         setUnassignedItems(budget.items.filter((i) => i.budgetRevisionId !== revisionId));
       })
-      .catch((err) => setError(err instanceof Error ? err.message : "تعذّر تحميل تفاصيل المراجعة"));
+      .catch((err) => setError(err instanceof Error ? err.message : t("costPlan.revisions.detail.loadError")));
   }
   useEffect(load, [projectId, revisionId]);
 
@@ -425,7 +428,7 @@ function RevisionDetail({ projectId, revisionId, onChanged }: { projectId: strin
       load();
       onChanged();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر اعتماد المراجعة");
+      setError(err instanceof ApiError ? err.message : t("costPlan.revisions.detail.approveError"));
       setConfirmingApprove(false);
     } finally {
       setApproving(false);
@@ -442,27 +445,27 @@ function RevisionDetail({ projectId, revisionId, onChanged }: { projectId: strin
   // GET /budget synthesizes — showing a fabricated or stale spent value
   // here would be worse than not showing one.
   const columns: FinancialColumn<BudgetItem>[] = [
-    { key: "category", header: "البند", render: (i) => i.category },
-    { key: "planned", header: "المخطَّط", align: "end", render: (i) => formatMoney(i.plannedAmount) },
+    { key: "category", header: t("costPlan.columns.category"), render: (i) => i.category },
+    { key: "planned", header: t("costPlan.columns.planned"), align: "end", render: (i) => formatMoney(i.plannedAmount, "SAR", locale) },
   ];
 
   return (
     <Card className="p-5">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <h2 className="font-semibold text-stone-800">مراجعة #{revision.revisionNumber}</h2>
-          <Badge tone={revisionStatusTone[revision.status]}>{revisionStatusLabel[revision.status]}</Badge>
+          <h2 className="font-semibold text-stone-800">{t("costPlan.revisions.detail.title", { number: revision.revisionNumber })}</h2>
+          <Badge tone={revisionStatusTone[revision.status]}>{t(`costPlan.revisions.status.${revision.status}`)}</Badge>
         </div>
         <div className="flex gap-2">
           {isDraft && (
             <Button size="sm" variant="secondary" onClick={() => setShowAssign((v) => !v)}>
-              {showAssign ? "إلغاء" : "+ إسناد بند"}
+              {showAssign ? t("common.cancel") : t("costPlan.revisions.detail.assignItem")}
             </Button>
           )}
           <Can permission="budgetRevision.manage">
             {isDraft && (
               <Button size="sm" onClick={() => setConfirmingApprove(true)}>
-                اعتماد المراجعة
+                {t("costPlan.revisions.detail.approveRevision")}
               </Button>
             )}
           </Can>
@@ -490,13 +493,13 @@ function RevisionDetail({ projectId, revisionId, onChanged }: { projectId: strin
         </div>
       )}
 
-      <FinancialTable columns={columns} rows={revision.items} rowKey={(i) => i.id} emptyMessage="لا توجد بنود مُسندة لهذه المراجعة بعد" />
+      <FinancialTable columns={columns} rows={revision.items} rowKey={(i) => i.id} emptyMessage={t("costPlan.revisions.detail.emptyAssigned")} />
 
       <ConfirmDialog
         open={confirmingApprove}
-        title="اعتماد مراجعة الميزانية"
-        message="بعد الاعتماد لا يمكن تعديل بنود هذه المراجعة. هل تريد المتابعة؟"
-        confirmLabel={approving ? "جارٍ الاعتماد..." : "اعتماد"}
+        title={t("costPlan.revisions.detail.confirmApproveTitle")}
+        message={t("costPlan.revisions.detail.confirmApproveMessage")}
+        confirmLabel={approving ? t("costPlan.revisions.detail.approving") : t("costPlan.revisions.detail.confirmApproveLabel")}
         destructive
         onConfirm={onApprove}
         onCancel={() => setConfirmingApprove(false)}
@@ -516,6 +519,7 @@ function AssignItemForm({
   candidates: BudgetItem[];
   onAssigned: () => void;
 }) {
+  const { t } = useTranslation();
   const [itemId, setItemId] = useState(candidates[0]?.id ?? "");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -529,14 +533,14 @@ function AssignItemForm({
       await assignBudgetItemToRevision(projectId, revisionId, itemId, {});
       onAssigned();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر إسناد البند");
+      setError(err instanceof ApiError ? err.message : t("costPlan.revisions.assignForm.genericError"));
     } finally {
       setSubmitting(false);
     }
   }
 
   if (candidates.length === 0) {
-    return <p className="text-sm text-stone-400">لا توجد بنود ميزانية أخرى يمكن إسنادها.</p>;
+    return <p className="text-sm text-stone-400">{t("costPlan.revisions.assignForm.noCandidates")}</p>;
   }
 
   return (
@@ -558,7 +562,7 @@ function AssignItemForm({
         ))}
       </select>
       <Button type="submit" size="sm" disabled={submitting}>
-        {submitting ? "جارٍ الإسناد..." : "إسناد"}
+        {submitting ? t("costPlan.revisions.assignForm.assigning") : t("costPlan.revisions.assignForm.assign")}
       </Button>
     </form>
   );
