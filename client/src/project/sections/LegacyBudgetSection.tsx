@@ -2,6 +2,7 @@ import { PageHeader } from "../../ui/PageHeader";
 import { BudgetPanel } from "../../components/BudgetPanel";
 import { ChangeOrdersPanel } from "../../components/ChangeOrdersPanel";
 import { useProjectContext } from "../context";
+import { useTranslation } from "../../i18n/I18nProvider";
 
 // The pre-MIDAD flat budget/expense + change-order UI (BudgetPanel.tsx,
 // ChangeOrdersPanel.tsx — both untouched here), kept fully reachable so no
@@ -11,13 +12,13 @@ import { useProjectContext } from "../context";
 // budget-revision linkage the real Cost Plan screen (UI-01) will have, and
 // must never be mistaken for it once that screen exists.
 export function LegacyBudgetSection() {
+  const { t } = useTranslation();
   const { projectId } = useProjectContext();
   return (
     <div>
-      <PageHeader title="الميزانية والمصروفات (النموذج السابق)" />
+      <PageHeader title={t("project.legacyBudget")} />
       <div className="mb-6 rounded-md border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-800">
-        هذا العرض هو النموذج المالي السابق لمشروع MIDAD. خطة التكلفة الجديدة المرتبطة بجدول الكميات وبنود التكلفة ستحل
-        محله في قسم "خطة التكلفة" عند توفره.
+        {t("legacyBudgetPage.notice")}
       </div>
       <div className="space-y-8">
         <BudgetPanel projectId={projectId} />

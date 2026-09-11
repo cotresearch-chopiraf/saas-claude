@@ -9,6 +9,7 @@ import { formatMoney, formatDate } from "../../lib/format";
 import { getCashFlow } from "../../api/cashflow";
 import type { CashFlowResult } from "../../api/types";
 import { useProjectContext } from "../context";
+import { useTranslation } from "../../i18n/I18nProvider";
 
 // Cash Flow (UI-06) — the frontend for the existing, fully-tested
 // server/src/routes/cashflow.ts. Every figure is computed exclusively by
@@ -20,6 +21,7 @@ import { useProjectContext } from "../context";
 // server-side; EAC is deliberately never part of this response (see
 // docs/MIDAD_CASHFLOW_MODEL.md) and is never displayed here either.
 export function CashFlowSection() {
+  const { t, locale } = useTranslation();
   const { projectId } = useProjectContext();
   const [cashFlow, setCashFlow] = useState<CashFlowResult | null>(null);
   const [asOfDateInput, setAsOfDateInput] = useState("");
@@ -30,7 +32,7 @@ export function CashFlowSection() {
     setCashFlow(null);
     getCashFlow(projectId, asOfDate)
       .then(setCashFlow)
-      .catch((err) => setError(err instanceof Error ? err.message : "تعذّر تحميل التدفق النقدي"));
+      .catch((err) => setError(err instanceof Error ? err.message : t("cashFlowPage.loadError")));
   }
   useEffect(() => load(), [projectId]);
 
@@ -42,7 +44,7 @@ export function CashFlowSection() {
   if (error && !cashFlow) {
     return (
       <div className="space-y-6">
-        <PageHeader title="التدفق النقدي" />
+        <PageHeader title={t("cashFlowPage.title")} />
         <ErrorState message={error} onRetry={() => load(asOfDateInput || undefined)} />
       </div>
     );
@@ -50,7 +52,7 @@ export function CashFlowSection() {
   if (!cashFlow) {
     return (
       <div className="space-y-6">
-        <PageHeader title="التدفق النقدي" />
+        <PageHeader title={t("cashFlowPage.title")} />
         <Skeleton rows={6} />
       </div>
     );
@@ -60,7 +62,7 @@ export function CashFlowSection() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="التدفق النقدي" subtitle={`بتاريخ ${formatDate(cashFlow.asOfDate)}`} />
+      <PageHeader title={t("cashFlowPage.title")} subtitle={t("cashFlowPage.asOf", { date: formatDate(cashFlow.asOfDate, locale) })} />
 
       {error && (
         <div>
@@ -73,7 +75,7 @@ export function CashFlowSection() {
       <Card className="p-4">
         <form onSubmit={onDateSubmit} className="flex flex-wrap items-end gap-2">
           <label className="text-sm text-stone-600">
-            عرض التدفق النقدي كما في تاريخ
+            {t("cashFlowPage.asOfDateLabel")}
             <input
               type="date"
               value={asOfDateInput}
@@ -83,67 +85,69 @@ export function CashFlowSection() {
             />
           </label>
           <Button type="submit" size="sm" variant="secondary">
-            تحديث
+            {t("cashFlowPage.refresh")}
           </Button>
         </form>
       </Card>
 
       {cashFlow.excludedForeignCurrencyCommitmentIds.length > 0 && (
         <p className="text-sm text-warning-700">
-          تم استبعاد {cashFlow.excludedForeignCurrencyCommitmentIds.length} التزام(ات) بعملة مختلفة عن عملة المشروع
-          ({cashFlow.currency}) من الالتزامات التعاقدية — لم يتم جمعها كوحدة واحدة.
+          {t("cashFlowPage.excludedForeignCurrency", {
+            count: cashFlow.excludedForeignCurrencyCommitmentIds.length,
+            currency: cashFlow.currency,
+          })}
         </p>
       )}
 
       <section>
-        <h2 className="mb-2 text-sm font-semibold text-stone-600">فعلي (محقَّق)</h2>
+        <h2 className="mb-2 text-sm font-semibold text-stone-600">{t("cashFlowPage.actual.title")}</h2>
         <div className="grid gap-4 sm:grid-cols-2">
-          <MetricCard label="المبلغ المُحصَّل فعلياً" value={formatMoney(cashFlow.historical.cashReceived, cashFlow.currency)} />
-          <MetricCard label="التكلفة المتكبَّدة فعلياً" value={formatMoney(cashFlow.historical.incurredCost, cashFlow.currency)} />
+          <MetricCard label={t("cashFlowPage.actual.collected")} value={formatMoney(cashFlow.historical.cashReceived, cashFlow.currency, locale)} />
+          <MetricCard label={t("cashFlowPage.actual.incurredCost")} value={formatMoney(cashFlow.historical.incurredCost, cashFlow.currency, locale)} />
         </div>
       </section>
 
       <section>
-        <h2 className="mb-2 text-sm font-semibold text-stone-600">متوقَّع (لم يتحقق بعد)</h2>
+        <h2 className="mb-2 text-sm font-semibold text-stone-600">{t("cashFlowPage.projected.title")}</h2>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <MetricCard label="المستحقات المتوقعة (فواتير مرسلة غير مسددة)" value={formatMoney(cashFlow.projected.receivables, cashFlow.currency)} />
-          <MetricCard label="التحصيل المتوقع من الشهادات المعتمدة" value={formatMoney(cashFlow.projected.certifiedExpectedCollection, cashFlow.currency)} />
-          <MetricCard label="الالتزامات التعاقدية" value={formatMoney(cashFlow.projected.commitments, cashFlow.currency)} />
+          <MetricCard label={t("cashFlowPage.projected.receivables")} value={formatMoney(cashFlow.projected.receivables, cashFlow.currency, locale)} />
+          <MetricCard label={t("cashFlowPage.projected.certifiedExpectedCollection")} value={formatMoney(cashFlow.projected.certifiedExpectedCollection, cashFlow.currency, locale)} />
+          <MetricCard label={t("cashFlowPage.projected.commitments")} value={formatMoney(cashFlow.projected.commitments, cashFlow.currency, locale)} />
           <MetricCard
-            label="صافي التدفق المتوقع"
-            value={formatMoney(cashFlow.projected.net, cashFlow.currency)}
+            label={t("cashFlowPage.projected.net")}
+            value={formatMoney(cashFlow.projected.net, cashFlow.currency, locale)}
             tone={netTone}
-            hint="المستحقات + التحصيل المتوقع − الالتزامات"
+            hint={t("cashFlowPage.projected.netHint")}
           />
         </div>
       </section>
 
       <section>
-        <h2 className="mb-2 text-sm font-semibold text-stone-600">غير مؤرَّخ (لا يوجد آلية توقيت في النظام الحالي)</h2>
+        <h2 className="mb-2 text-sm font-semibold text-stone-600">{t("cashFlowPage.undated.title")}</h2>
         <div className="grid gap-4 sm:grid-cols-3">
-          <MetricCard label="المتبقي لإنجاز العمل (ETC)" value={formatMoney(cashFlow.undated.etc, cashFlow.currency)} />
-          <MetricCard label="الضمان المحتجز" value={formatMoney(cashFlow.undated.retentionToBeReleased, cashFlow.currency)} hint="لا يوجد تاريخ إفراج مسجَّل" />
-          <MetricCard label="الدفعة المقدَّمة" value="غير مدعومة" hint={cashFlow.undated.advance.reason} />
+          <MetricCard label={t("cashFlowPage.undated.etc")} value={formatMoney(cashFlow.undated.etc, cashFlow.currency, locale)} />
+          <MetricCard label={t("cashFlowPage.undated.retention")} value={formatMoney(cashFlow.undated.retentionToBeReleased, cashFlow.currency, locale)} hint={t("cashFlowPage.undated.retentionHint")} />
+          <MetricCard label={t("cashFlowPage.undated.advance")} value={t("cashFlowPage.undated.advanceUnsupported")} hint={cashFlow.undated.advance.reason} />
         </div>
       </section>
 
       <Card className="p-4">
-        <h2 className="mb-2 text-sm font-semibold text-stone-600">افتراضات الحساب</h2>
+        <h2 className="mb-2 text-sm font-semibold text-stone-600">{t("cashFlowPage.assumptions.title")}</h2>
         <dl className="space-y-2 text-xs text-stone-500">
           <div>
-            <dt className="font-medium text-stone-600">طريقة التوقعات المستخدَمة</dt>
+            <dt className="font-medium text-stone-600">{t("cashFlowPage.assumptions.forecastMethod")}</dt>
             <dd>{cashFlow.assumptions.forecastMethod}</dd>
           </div>
           <div>
-            <dt className="font-medium text-stone-600">أساس القيمة المعتمَدة</dt>
+            <dt className="font-medium text-stone-600">{t("cashFlowPage.assumptions.certifiedValueBasis")}</dt>
             <dd>{cashFlow.assumptions.certifiedValueBasis}</dd>
           </div>
           <div>
-            <dt className="font-medium text-stone-600">مطابقة الالتزامات مع المصروفات</dt>
+            <dt className="font-medium text-stone-600">{t("cashFlowPage.assumptions.commitmentExpenseReconciliation")}</dt>
             <dd>{cashFlow.assumptions.commitmentExpenseReconciliation}</dd>
           </div>
           <div>
-            <dt className="font-medium text-stone-600">مطابقة الشهادات المعتمدة مع الفواتير</dt>
+            <dt className="font-medium text-stone-600">{t("cashFlowPage.assumptions.ipcInvoiceReconciliation")}</dt>
             <dd>{cashFlow.assumptions.ipcInvoiceReconciliation}</dd>
           </div>
         </dl>
