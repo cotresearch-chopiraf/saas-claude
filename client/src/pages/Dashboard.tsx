@@ -15,6 +15,7 @@ import { listBudgetAlerts } from "../api/budgetAlerts";
 import { getComplianceDashboard } from "../api/workforceCompliance";
 import { formatDate } from "../lib/format";
 import type { BudgetAlert, BudgetAlertSeverity, ComplianceDashboard, Customer, Project } from "../api/types";
+import { useTranslation } from "../i18n/I18nProvider";
 
 // MIDAD Phase F — Dashboard redesigned as an Executive Command Center: a
 // bounded KPI row, a "Needs Attention" section surfacing real cross-project
@@ -29,17 +30,11 @@ import type { BudgetAlert, BudgetAlertSeverity, ComplianceDashboard, Customer, P
 // POST_AUDIT_BACKLOG.md). A manager gets that financial depth one click
 // away, inside each project's own Overview.
 
-const statusLabel: Record<Project["status"], string> = {
-  active: "نشط",
-  on_hold: "متوقف مؤقتاً",
-  completed: "مكتمل",
-};
 const statusTone: Record<Project["status"], "success" | "warning" | "neutral"> = {
   active: "success",
   on_hold: "warning",
   completed: "neutral",
 };
-const severityLabel: Record<BudgetAlertSeverity, string> = { info: "معلومات", warning: "تحذير", critical: "حرج" };
 const severityTone: Record<BudgetAlertSeverity, "info" | "warning" | "danger"> = { info: "info", warning: "warning", critical: "danger" };
 const severityRank: Record<BudgetAlertSeverity, number> = { critical: 0, warning: 1, info: 2 };
 
@@ -52,6 +47,7 @@ interface AttentionItem {
 }
 
 export function Dashboard() {
+  const { t, locale } = useTranslation();
   const [projects, setProjects] = useState<Project[] | null>(null);
   const [projectsError, setProjectsError] = useState<string | null>(null);
   const [alerts, setAlerts] = useState<BudgetAlert[] | null>(null);
@@ -74,13 +70,13 @@ export function Dashboard() {
     setProjectsError(null);
     apiFetch<Project[]>("/projects")
       .then(setProjects)
-      .catch((err) => setProjectsError(err instanceof ApiError ? err.message : "تعذّر تحميل المشاريع"));
+      .catch((err) => setProjectsError(err instanceof ApiError ? err.message : t("dashboardPage.loadProjectsError")));
   }
   function loadAlerts() {
     setAlertsError(null);
     listBudgetAlerts()
       .then(setAlerts)
-      .catch((err) => setAlertsError(err instanceof ApiError ? err.message : "تعذّر تحميل تنبيهات الميزانية"));
+      .catch((err) => setAlertsError(err instanceof ApiError ? err.message : t("dashboardPage.loadAlertsError")));
   }
   function loadCompliance() {
     getComplianceDashboard()
@@ -101,7 +97,7 @@ export function Dashboard() {
     const items: AttentionItem[] = activeAlerts.map((a) => ({
       key: `alert-${a.id}`,
       severity: a.severity,
-      title: `${a.project?.name ?? "مشروع"} — ${a.title}`,
+      title: `${a.project?.name ?? t("dashboardPage.needsAttention.defaultProjectName")} — ${a.title}`,
       detail: a.recommendedAction,
       href: `/budget-alerts?projectId=${a.projectId}`,
     }));
@@ -109,16 +105,16 @@ export function Dashboard() {
       items.push({
         key: "compliance-exceptions",
         severity: compliance.exceptions.highOrCritical > 0 ? "critical" : "warning",
-        title: "استثناءات امتثال العمالة",
+        title: t("dashboardPage.needsAttention.complianceExceptionsTitle"),
         detail:
           compliance.exceptions.highOrCritical > 0
-            ? `${compliance.exceptions.open} استثناء مفتوح، منها ${compliance.exceptions.highOrCritical} عالية الأولوية`
-            : `${compliance.exceptions.open} استثناء مفتوح`,
+            ? t("dashboardPage.needsAttention.complianceExceptionsHighPriority", { open: compliance.exceptions.open, highPriority: compliance.exceptions.highOrCritical })
+            : t("dashboardPage.needsAttention.complianceExceptionsOpen", { open: compliance.exceptions.open }),
         href: "/labor-compliance",
       });
     }
     return items.sort((a, b) => severityRank[a.severity] - severityRank[b.severity]).slice(0, 5);
-  }, [activeAlerts, compliance]);
+  }, [activeAlerts, compliance, t]);
   const attentionLoading = alerts === null;
 
   const filteredProjects = useMemo(() => {
@@ -136,9 +132,9 @@ export function Dashboard() {
     return [...filtered].sort((a, b) => {
       switch (sort.key) {
         case "name":
-          return a.name.localeCompare(b.name, "ar") * dir;
+          return a.name.localeCompare(b.name, locale) * dir;
         case "client":
-          return (a.clientName ?? "").localeCompare(b.clientName ?? "", "ar") * dir;
+          return (a.clientName ?? "").localeCompare(b.clientName ?? "", locale) * dir;
         case "status":
           return a.status.localeCompare(b.status) * dir;
         case "createdAt":
@@ -146,7 +142,7 @@ export function Dashboard() {
           return (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0) * dir;
       }
     });
-  }, [projects, search, statusFilter, sort]);
+  }, [projects, search, statusFilter, sort, locale]);
 
   function toggleSort(key: string) {
     setSort((prev) => (prev.key === key ? { key, direction: prev.direction === "asc" ? "desc" : "asc" } : { key, direction: "asc" }));
@@ -155,7 +151,7 @@ export function Dashboard() {
   const columns: FinancialColumn<Project>[] = [
     {
       key: "name",
-      header: "المشروع",
+      header: t("dashboardPage.projectsSection.columns.name"),
       sortable: true,
       render: (p) => (
         <Link to={`/projects/${p.id}`} className="font-medium text-stone-800 hover:text-primary">
@@ -163,24 +159,24 @@ export function Dashboard() {
         </Link>
       ),
     },
-    { key: "client", header: "العميل", sortable: true, render: (p) => p.clientName ?? "—" },
+    { key: "client", header: t("dashboardPage.projectsSection.columns.client"), sortable: true, render: (p) => p.clientName ?? "—" },
     {
       key: "status",
-      header: "الحالة",
+      header: t("dashboardPage.projectsSection.columns.status"),
       sortable: true,
-      render: (p) => <Badge tone={statusTone[p.status]}>{statusLabel[p.status]}</Badge>,
+      render: (p) => <Badge tone={statusTone[p.status]}>{t(`dashboard.status.${p.status}`)}</Badge>,
     },
-    { key: "createdAt", header: "تاريخ الإنشاء", sortable: true, render: (p) => formatDate(p.createdAt) },
+    { key: "createdAt", header: t("dashboardPage.projectsSection.columns.createdAt"), sortable: true, render: (p) => formatDate(p.createdAt, locale) },
   ];
 
   return (
     <Layout>
       <PageHeader
-        title="نظرة عامة"
-        subtitle="ملخص تنفيذي لحالة الشركة ومشاريعها."
+        title={t("dashboardPage.title")}
+        subtitle={t("dashboardPage.subtitle")}
         actions={
           <Button size="sm" onClick={() => setShowForm((v) => !v)}>
-            {showForm ? "إلغاء" : "+ مشروع جديد"}
+            {showForm ? t("common.cancel") : t("dashboardPage.newProject")}
           </Button>
         }
       />
@@ -197,19 +193,19 @@ export function Dashboard() {
       )}
 
       <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <MetricCard label="مشاريع نشطة" value={String(activeCount)} />
-        <MetricCard label="متوقفة مؤقتاً" value={String(onHoldCount)} tone={onHoldCount > 0 ? "warning" : "default"} />
-        <MetricCard label="تنبيهات حرجة" value={String(criticalCount)} tone={criticalCount > 0 ? "danger" : "default"} />
-        <MetricCard label="تنبيهات تحذيرية" value={String(warningCount)} tone={warningCount > 0 ? "warning" : "default"} />
+        <MetricCard label={t("dashboardPage.metrics.activeProjects")} value={String(activeCount)} />
+        <MetricCard label={t("dashboardPage.metrics.onHold")} value={String(onHoldCount)} tone={onHoldCount > 0 ? "warning" : "default"} />
+        <MetricCard label={t("dashboardPage.metrics.criticalAlerts")} value={String(criticalCount)} tone={criticalCount > 0 ? "danger" : "default"} />
+        <MetricCard label={t("dashboardPage.metrics.warningAlerts")} value={String(warningCount)} tone={warningCount > 0 ? "warning" : "default"} />
       </div>
 
       <div className="mb-6">
-        <h2 className="mb-3 font-semibold text-stone-800">يحتاج إلى انتباه</h2>
+        <h2 className="mb-3 font-semibold text-stone-800">{t("dashboardPage.needsAttention.heading")}</h2>
         {alertsError && <ErrorState message={alertsError} onRetry={loadAlerts} />}
         {!alertsError && attentionLoading && <Skeleton rows={2} />}
         {!alertsError && !attentionLoading && attentionItems.length === 0 && (
           <Card className="p-5">
-            <p className="text-sm text-stone-400">لا توجد حالياً مؤشرات مالية تتجاوز قواعد التنبيه المحددة.</p>
+            <p className="text-sm text-stone-400">{t("dashboardPage.needsAttention.noIssues")}</p>
           </Card>
         )}
         {!alertsError && attentionItems.length > 0 && (
@@ -217,20 +213,20 @@ export function Dashboard() {
             {attentionItems.map((item) => (
               <Card key={item.key} className="flex items-start justify-between gap-3 p-4">
                 <div className="flex items-start gap-3">
-                  <Badge tone={severityTone[item.severity]}>{severityLabel[item.severity]}</Badge>
+                  <Badge tone={severityTone[item.severity]}>{t(`dashboardPage.severity.${item.severity}`)}</Badge>
                   <div>
                     <p className="text-sm font-medium text-stone-800">{item.title}</p>
                     <p className="mt-0.5 text-xs text-stone-500">{item.detail}</p>
                   </div>
                 </div>
                 <Link to={item.href} className="shrink-0 text-sm text-primary hover:underline">
-                  مراجعة
+                  {t("dashboardPage.needsAttention.review")}
                 </Link>
               </Card>
             ))}
             <div className="text-end">
               <Link to="/budget-alerts" className="text-sm text-primary hover:underline">
-                عرض جميع التنبيهات
+                {t("dashboardPage.needsAttention.viewAll")}
               </Link>
             </div>
           </div>
@@ -238,17 +234,17 @@ export function Dashboard() {
       </div>
 
       <div>
-        <h2 className="mb-3 font-semibold text-stone-800">المشاريع</h2>
+        <h2 className="mb-3 font-semibold text-stone-800">{t("dashboardPage.projectsSection.heading")}</h2>
         {projects && projects.length === 0 && !projectsError ? (
           <Card className="p-8 text-center">
-            <p className="text-stone-500">لا توجد مشاريع بعد. أنشئ أول مشروع لبدء تتبع الميزانية والتقدم.</p>
+            <p className="text-stone-500">{t("dashboardPage.projectsSection.noProjectsYet")}</p>
           </Card>
         ) : (
           <>
             <div className="mb-3 flex flex-wrap items-center gap-3">
               <input
                 type="text"
-                placeholder="البحث بالاسم أو العميل"
+                placeholder={t("dashboardPage.projectsSection.searchPlaceholder")}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="w-full max-w-xs rounded-md border border-stone-300 px-3 py-2 text-sm"
@@ -265,7 +261,7 @@ export function Dashboard() {
                         : "border-stone-300 text-stone-500 hover:bg-stone-50"
                     }`}
                   >
-                    {s === "all" ? "الكل" : statusLabel[s]}
+                    {s === "all" ? t("dashboardPage.projectsSection.filterAll") : t(`dashboard.status.${s}`)}
                   </button>
                 ))}
               </div>
@@ -276,7 +272,7 @@ export function Dashboard() {
               rowKey={(p) => p.id}
               error={projectsError}
               onRetry={loadProjects}
-              emptyMessage={projects && projects.length > 0 ? "لا نتائج مطابقة للبحث" : "لا توجد مشاريع بعد"}
+              emptyMessage={projects && projects.length > 0 ? t("dashboardPage.projectsSection.noSearchResults") : t("dashboardPage.projectsSection.emptyMessage")}
               sort={sort}
               onSort={toggleSort}
             />
@@ -288,6 +284,7 @@ export function Dashboard() {
 }
 
 function NewProjectForm({ onCreated }: { onCreated: () => void }) {
+  const { t } = useTranslation();
   const [name, setName] = useState("");
   const [clientName, setClientName] = useState("");
   // MIDAD Phase A' — an entirely optional, independent link to a
@@ -314,7 +311,7 @@ function NewProjectForm({ onCreated }: { onCreated: () => void }) {
       });
       onCreated();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "تعذّر إنشاء المشروع");
+      setError(err instanceof Error ? err.message : t("dashboardPage.newProjectForm.genericError"));
     }
   }
 
@@ -324,13 +321,13 @@ function NewProjectForm({ onCreated }: { onCreated: () => void }) {
         {error && <div className="col-span-3 rounded-md bg-danger-50 px-3 py-2 text-sm text-danger-700">{error}</div>}
         <input
           required
-          placeholder="اسم المشروع"
+          placeholder={t("dashboardPage.newProjectForm.namePlaceholder")}
           value={name}
           onChange={(e) => setName(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
         />
         <input
-          placeholder="اسم العميل"
+          placeholder={t("dashboardPage.newProjectForm.clientNamePlaceholder")}
           value={clientName}
           onChange={(e) => setClientName(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
@@ -340,7 +337,7 @@ function NewProjectForm({ onCreated }: { onCreated: () => void }) {
           onChange={(e) => setCustomerId(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
         >
-          <option value="">ربط بعميل (اختياري)</option>
+          <option value="">{t("dashboardPage.newProjectForm.linkCustomerOption")}</option>
           {customers.map((c) => (
             <option key={c.id} value={c.id}>
               {c.name}
@@ -350,13 +347,13 @@ function NewProjectForm({ onCreated }: { onCreated: () => void }) {
         <input
           type="number"
           min="0"
-          placeholder="الميزانية الإجمالية ($)"
+          placeholder={t("dashboardPage.newProjectForm.budgetTotalPlaceholder")}
           value={budgetTotal}
           onChange={(e) => setBudgetTotal(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
         />
         <Button type="submit" className="sm:col-span-1">
-          حفظ المشروع
+          {t("dashboardPage.newProjectForm.save")}
         </Button>
       </form>
     </Card>
