@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { AuthProvider } from "../../auth/AuthContext";
+import { I18nProvider } from "../../i18n/I18nProvider";
 import { ForecastSection } from "./ForecastSection";
 import type { ForecastCalculation, ForecastResult, ForecastSnapshot } from "../../api/types";
 
@@ -121,9 +122,11 @@ function mockApi(
 
 function renderSection() {
   return render(
-    <AuthProvider>
-      <ForecastSection />
-    </AuthProvider>,
+    <I18nProvider>
+      <AuthProvider>
+        <ForecastSection />
+      </AuthProvider>
+    </I18nProvider>,
   );
 }
 

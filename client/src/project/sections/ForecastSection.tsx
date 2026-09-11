@@ -12,11 +12,8 @@ import { getForecast, listForecastSnapshots, createForecastSnapshot } from "../.
 import { ApiError } from "../../api/client";
 import type { ForecastCalculation, ForecastMethod, ForecastResult, ForecastSnapshot } from "../../api/types";
 import { useProjectContext } from "../context";
+import { useTranslation } from "../../i18n/I18nProvider";
 
-const methodLabel: Record<ForecastMethod, string> = {
-  cost_to_complete: "الطريقة المحافظة (تجاهل الالتزامات)",
-  commitment_aware: "الطريقة الواعية بالالتزامات",
-};
 const methods: ForecastMethod[] = ["cost_to_complete", "commitment_aware"];
 
 // Forecast (UI-05) — the frontend for the existing, fully-tested
@@ -29,6 +26,7 @@ const methods: ForecastMethod[] = ["cost_to_complete", "commitment_aware"];
 // domain's own calculation, per routes/cashflow.ts) is deliberately out
 // of scope here.
 export function ForecastSection() {
+  const { t, locale } = useTranslation();
   const { projectId } = useProjectContext();
   const [forecast, setForecast] = useState<ForecastResult | null>(null);
   const [snapshots, setSnapshots] = useState<ForecastSnapshot[] | null>(null);
@@ -44,14 +42,14 @@ export function ForecastSection() {
         setForecast(forecastResult);
         setSnapshots(snapshotRows);
       })
-      .catch((err) => setError(err instanceof Error ? err.message : "تعذّر تحميل التوقعات المالية"));
+      .catch((err) => setError(err instanceof Error ? err.message : t("forecastPage.loadError")));
   }
   useEffect(load, [projectId]);
 
   if (error && !forecast) {
     return (
       <div className="space-y-6">
-        <PageHeader title="التوقعات المالية" />
+        <PageHeader title={t("forecastPage.title")} />
         <ErrorState message={error} onRetry={load} />
       </div>
     );
@@ -59,35 +57,35 @@ export function ForecastSection() {
   if (!forecast) {
     return (
       <div className="space-y-6">
-        <PageHeader title="التوقعات المالية" />
+        <PageHeader title={t("forecastPage.title")} />
         <Skeleton rows={6} />
       </div>
     );
   }
 
   const snapshotColumns: FinancialColumn<ForecastSnapshot>[] = [
-    { key: "asOfDate", header: "بتاريخ", render: (s) => formatDate(s.asOfDate) },
-    { key: "method", header: "الطريقة", render: (s) => methodLabel[s.method] },
-    { key: "eac", header: "EAC", align: "end", render: (s) => formatMoney(s.eac, s.currency) },
-    { key: "etc", header: "ETC", align: "end", render: (s) => formatMoney(s.etc, s.currency) },
+    { key: "asOfDate", header: t("forecastPage.snapshotColumns.asOfDate"), render: (s) => formatDate(s.asOfDate, locale) },
+    { key: "method", header: t("forecastPage.snapshotColumns.method"), render: (s) => t(`forecastPage.method.${s.method}`) },
+    { key: "eac", header: "EAC", align: "end", render: (s) => formatMoney(s.eac, s.currency, locale) },
+    { key: "etc", header: "ETC", align: "end", render: (s) => formatMoney(s.etc, s.currency, locale) },
     {
       key: "variancePercent",
-      header: "الانحراف",
+      header: t("forecastPage.snapshotColumns.variance"),
       align: "end",
-      render: (s) => formatPercent(s.variancePercent === null ? null : Number(s.variancePercent)),
+      render: (s) => formatPercent(s.variancePercent === null ? null : Number(s.variancePercent), 1, locale),
     },
-    { key: "notes", header: "ملاحظات", render: (s) => s.notes ?? "—" },
-    { key: "createdAt", header: "تاريخ الإنشاء", render: (s) => formatDateTime(s.createdAt) },
+    { key: "notes", header: t("forecastPage.snapshotColumns.notes"), render: (s) => s.notes ?? "—" },
+    { key: "createdAt", header: t("forecastPage.snapshotColumns.createdAt"), render: (s) => formatDateTime(s.createdAt, locale) },
   ];
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="التوقعات المالية"
+        title={t("forecastPage.title")}
         actions={
           <Can permission="forecast.manage">
             <Button size="sm" onClick={() => setShowCreate((v) => !v)}>
-              {showCreate ? "إلغاء" : "+ إنشاء لقطة توقعات"}
+              {showCreate ? t("common.cancel") : t("forecastPage.newSnapshot")}
             </Button>
           </Can>
         }
@@ -105,20 +103,22 @@ export function ForecastSection() {
           only (see docs/MIDAD_FORECAST_MODEL.md §5) — never blended into
           either method's ETC/EAC. */}
       <div className="grid gap-4 sm:grid-cols-4">
-        <MetricCard label="خطة التكلفة (BAC)" value={formatMoney(forecast.methods.cost_to_complete.costPlan, forecast.currency)} />
-        <MetricCard label="التكلفة الفعلية (AC)" value={formatMoney(forecast.methods.cost_to_complete.actualCost, forecast.currency)} />
-        <MetricCard label="التكلفة الملتزم بها" value={formatMoney(forecast.methods.cost_to_complete.committedCost, forecast.currency)} />
+        <MetricCard label={t("forecastPage.inputs.costPlan")} value={formatMoney(forecast.methods.cost_to_complete.costPlan, forecast.currency, locale)} />
+        <MetricCard label={t("forecastPage.inputs.actualCost")} value={formatMoney(forecast.methods.cost_to_complete.actualCost, forecast.currency, locale)} />
+        <MetricCard label={t("forecastPage.inputs.committedCost")} value={formatMoney(forecast.methods.cost_to_complete.committedCost, forecast.currency, locale)} />
         <MetricCard
-          label="التقدّم المعتمَد (سياقي)"
-          value={formatMoney(forecast.methods.cost_to_complete.certifiedValue, forecast.currency)}
-          hint="للسياق فقط — لا يدخل في حساب ETC/EAC"
+          label={t("forecastPage.inputs.certifiedValue")}
+          value={formatMoney(forecast.methods.cost_to_complete.certifiedValue, forecast.currency, locale)}
+          hint={t("forecastPage.inputs.certifiedValueHint")}
         />
       </div>
 
       {forecast.excludedForeignCurrencyCommitmentIds.length > 0 && (
         <p className="text-sm text-warning-700">
-          تم استبعاد {forecast.excludedForeignCurrencyCommitmentIds.length} التزام(ات) بعملة مختلفة عن عملة المشروع
-          ({forecast.currency}) من التكلفة الملتزم بها — لم يتم جمعها كوحدة واحدة.
+          {t("forecastPage.excludedForeignCurrency", {
+            count: forecast.excludedForeignCurrencyCommitmentIds.length,
+            currency: forecast.currency,
+          })}
         </p>
       )}
 
@@ -138,22 +138,23 @@ export function ForecastSection() {
         columns={snapshotColumns}
         rows={snapshots}
         rowKey={(s) => s.id}
-        emptyMessage="لا توجد لقطات توقعات محفوظة بعد"
+        emptyMessage={t("forecastPage.emptySnapshots")}
       />
     </div>
   );
 }
 
 function MethodCard({ calc, currency }: { calc: ForecastCalculation; currency: string }) {
+  const { t, locale } = useTranslation();
   const varianceTone = calc.variance >= 0 ? "success" : "danger";
   return (
     <Card className="p-5">
-      <h3 className="mb-3 font-semibold text-stone-800">{methodLabel[calc.method]}</h3>
+      <h3 className="mb-3 font-semibold text-stone-800">{t(`forecastPage.method.${calc.method}`)}</h3>
       <dl className="space-y-3 text-sm">
-        <Field label="المتبقي لإنجاز العمل (ETC)" value={formatMoney(calc.etc, currency)} />
-        <Field label="التكلفة المتوقعة عند الإنجاز (EAC)" value={formatMoney(calc.eac, currency)} />
-        <Field label="الانحراف" value={formatMoney(calc.variance, currency)} tone={varianceTone} />
-        <Field label="نسبة الانحراف" value={formatPercent(calc.variancePercent)} tone={varianceTone} />
+        <Field label={t("forecastPage.methodCard.etc")} value={formatMoney(calc.etc, currency, locale)} />
+        <Field label={t("forecastPage.methodCard.eac")} value={formatMoney(calc.eac, currency, locale)} />
+        <Field label={t("forecastPage.methodCard.variance")} value={formatMoney(calc.variance, currency, locale)} tone={varianceTone} />
+        <Field label={t("forecastPage.methodCard.variancePercent")} value={formatPercent(calc.variancePercent, 1, locale)} tone={varianceTone} />
       </dl>
     </Card>
   );
@@ -170,6 +171,7 @@ function Field({ label, value, tone }: { label: string; value: string; tone?: "s
 }
 
 function SnapshotCreateForm({ projectId, onCreated }: { projectId: string; onCreated: () => void }) {
+  const { t } = useTranslation();
   const [method, setMethod] = useState<ForecastMethod>("commitment_aware");
   const [asOfDate, setAsOfDate] = useState("");
   const [notes, setNotes] = useState("");
@@ -189,7 +191,7 @@ function SnapshotCreateForm({ projectId, onCreated }: { projectId: string; onCre
       setNotes("");
       onCreated();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر إنشاء لقطة التوقعات");
+      setError(err instanceof ApiError ? err.message : t("forecastPage.createForm.genericError"));
     } finally {
       setSubmitting(false);
     }
@@ -210,7 +212,7 @@ function SnapshotCreateForm({ projectId, onCreated }: { projectId: string; onCre
         >
           {methods.map((m) => (
             <option key={m} value={m}>
-              {methodLabel[m]}
+              {t(`forecastPage.method.${m}`)}
             </option>
           ))}
         </select>
@@ -221,13 +223,13 @@ function SnapshotCreateForm({ projectId, onCreated }: { projectId: string; onCre
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
         />
         <input
-          placeholder="ملاحظات (اختياري)"
+          placeholder={t("forecastPage.createForm.notesPlaceholder")}
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
         />
         <Button type="submit" size="sm" disabled={submitting} className="sm:col-span-4">
-          {submitting ? "جارٍ الحفظ..." : "إنشاء اللقطة"}
+          {submitting ? t("forecastPage.createForm.saving") : t("forecastPage.createForm.create")}
         </Button>
       </form>
     </Card>
