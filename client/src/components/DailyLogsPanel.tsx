@@ -7,10 +7,12 @@ import { EmptyState } from "../ui/EmptyState";
 import { Button } from "../ui/Button";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { Can } from "../auth/Can";
+import { useTranslation } from "../i18n/I18nProvider";
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
 export function DailyLogsPanel({ projectId }: { projectId: string }) {
+  const { t } = useTranslation();
   const [logs, setLogs] = useState<DailyLog[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState("");
@@ -21,7 +23,7 @@ export function DailyLogsPanel({ projectId }: { projectId: string }) {
     setError(null);
     apiFetch<DailyLog[]>(`/projects/${projectId}/daily-logs`)
       .then(setLogs)
-      .catch((err) => setError(err instanceof ApiError ? err.message : "تعذّر تحميل السجلات اليومية"));
+      .catch((err) => setError(err instanceof ApiError ? err.message : t("operations.dailyLogsPanel.loadError")));
   }
 
   useEffect(load, [projectId]);
@@ -58,16 +60,16 @@ export function DailyLogsPanel({ projectId }: { projectId: string }) {
         />
         <input
           required
-          placeholder="ماذا حدث في الموقع اليوم؟"
+          placeholder={t("operations.dailyLogsPanel.notePlaceholder")}
           value={note}
           onChange={(e) => setNote(e.target.value)}
           className="flex-1 rounded-md border border-stone-300 px-3 py-2 text-sm"
         />
-        <Button type="submit">تسجيل</Button>
+        <Button type="submit">{t("operations.dailyLogsPanel.record")}</Button>
       </form>
 
       {logs.length === 0 ? (
-        <EmptyState message="لا توجد سجلات يومية بعد" />
+        <EmptyState message={t("operations.dailyLogsPanel.emptyMessage")} />
       ) : (
         <ul className="space-y-2">
           {logs.map((log) => (
@@ -80,7 +82,7 @@ export function DailyLogsPanel({ projectId }: { projectId: string }) {
                 <button
                   onClick={() => setPendingDelete(log)}
                   className="text-stone-300 hover:text-red-500"
-                  aria-label="حذف السجل"
+                  aria-label={t("operations.dailyLogsPanel.deleteAriaLabel")}
                 >
                   ✕
                 </button>
@@ -92,8 +94,8 @@ export function DailyLogsPanel({ projectId }: { projectId: string }) {
 
       <ConfirmDialog
         open={pendingDelete !== null}
-        title="حذف السجل اليومي"
-        message="هل تريدين حذف هذا السجل؟ لا يمكن التراجع عن هذا الإجراء."
+        title={t("operations.dailyLogsPanel.deleteConfirm.title")}
+        message={t("operations.dailyLogsPanel.deleteConfirm.message")}
         destructive
         onConfirm={confirmRemove}
         onCancel={() => setPendingDelete(null)}

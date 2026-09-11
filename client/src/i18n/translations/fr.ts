@@ -309,6 +309,35 @@ const fr = {
   operations: {
     tasks: "Tâches",
     dailyLog: "Journal quotidien",
+    taskPanel: {
+      loadError: "Impossible de charger les tâches",
+      emptyMessage: "Aucune tâche pour l'instant",
+      status: {
+        todo: "Non commencée",
+        in_progress: "En cours",
+        done: "Terminée",
+      },
+      toggleStatusAriaLabel: "Changer le statut de la tâche, statut actuel : {{status}}",
+      deleteAriaLabel: "Supprimer la tâche",
+      newTaskPlaceholder: "Nouvelle tâche",
+      assigneePlaceholder: "Responsable",
+      add: "Ajouter",
+      deleteConfirm: {
+        title: "Supprimer la tâche",
+        message: 'Voulez-vous supprimer la tâche « {{title}} » ? Cette action est irréversible.',
+      },
+    },
+    dailyLogsPanel: {
+      loadError: "Impossible de charger les journaux quotidiens",
+      notePlaceholder: "Que s'est-il passé sur le chantier aujourd'hui ?",
+      record: "Enregistrer",
+      emptyMessage: "Aucun journal quotidien pour l'instant",
+      deleteAriaLabel: "Supprimer l'entrée",
+      deleteConfirm: {
+        title: "Supprimer l'entrée du journal",
+        message: "Voulez-vous supprimer cette entrée ? Cette action est irréversible.",
+      },
+    },
   },
   legacyBudgetPage: {
     notice: "Cette vue correspond à l'ancien modèle financier de MIDAD. Le nouveau plan de coûts, lié au bordereau de quantités et aux codes de coût, le remplacera dans la section « Plan de coûts » lorsqu'il sera disponible.",

@@ -8,12 +8,7 @@ import { Badge } from "../ui/Badge";
 import { Button } from "../ui/Button";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { Can } from "../auth/Can";
-
-const statusLabel: Record<TaskStatus, string> = {
-  todo: "لم تبدأ",
-  in_progress: "جارية",
-  done: "منتهية",
-};
+import { useTranslation } from "../i18n/I18nProvider";
 
 // Same neutral-for-not-active-work convention this app already uses for
 // project status (Dashboard's statusTone maps "completed" to "neutral", not
@@ -31,6 +26,7 @@ const nextStatus: Record<TaskStatus, TaskStatus> = {
 };
 
 export function TaskPanel({ projectId }: { projectId: string }) {
+  const { t } = useTranslation();
   // Slice AA — null means "not loaded yet" (distinct from an empty list),
   // matching the loading/error/empty-state pattern the rest of the
   // product already uses (FinancialTable.tsx).
@@ -44,7 +40,7 @@ export function TaskPanel({ projectId }: { projectId: string }) {
     setError(null);
     apiFetch<Task[]>(`/projects/${projectId}/tasks`)
       .then(setTasks)
-      .catch((err) => setError(err instanceof ApiError ? err.message : "تعذّر تحميل المهام"));
+      .catch((err) => setError(err instanceof ApiError ? err.message : t("operations.taskPanel.loadError")));
   }
 
   useEffect(load, [projectId]);
@@ -81,7 +77,7 @@ export function TaskPanel({ projectId }: { projectId: string }) {
   return (
     <div>
       {tasks.length === 0 ? (
-        <EmptyState message="لا توجد مهام بعد" />
+        <EmptyState message={t("operations.taskPanel.emptyMessage")} />
       ) : (
         <ul className="divide-y divide-stone-100 rounded-lg border border-stone-200 bg-white">
           {tasks.map((task) => (
@@ -93,14 +89,14 @@ export function TaskPanel({ projectId }: { projectId: string }) {
                 {task.assigneeName && <p className="text-xs text-stone-500">{task.assigneeName}</p>}
               </div>
               <div className="flex items-center gap-2">
-                <button onClick={() => cycleStatus(task)} aria-label={`تغيير حالة المهمة، الحالة الحالية: ${statusLabel[task.status]}`}>
-                  <Badge tone={statusTone[task.status]}>{statusLabel[task.status]}</Badge>
+                <button onClick={() => cycleStatus(task)} aria-label={t("operations.taskPanel.toggleStatusAriaLabel", { status: t(`operations.taskPanel.status.${task.status}`) })}>
+                  <Badge tone={statusTone[task.status]}>{t(`operations.taskPanel.status.${task.status}`)}</Badge>
                 </button>
                 <Can permission="task.delete">
                   <button
                     onClick={() => setPendingDelete(task)}
                     className="text-stone-300 hover:text-red-500"
-                    aria-label="حذف المهمة"
+                    aria-label={t("operations.taskPanel.deleteAriaLabel")}
                   >
                     ✕
                   </button>
@@ -114,24 +110,24 @@ export function TaskPanel({ projectId }: { projectId: string }) {
       <form onSubmit={addTask} className="mt-3 flex gap-2">
         <input
           required
-          placeholder="مهمة جديدة"
+          placeholder={t("operations.taskPanel.newTaskPlaceholder")}
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           className="flex-1 rounded-md border border-stone-300 px-3 py-2 text-sm"
         />
         <input
-          placeholder="المسؤول"
+          placeholder={t("operations.taskPanel.assigneePlaceholder")}
           value={assigneeName}
           onChange={(e) => setAssigneeName(e.target.value)}
           className="w-40 rounded-md border border-stone-300 px-3 py-2 text-sm"
         />
-        <Button type="submit">إضافة</Button>
+        <Button type="submit">{t("operations.taskPanel.add")}</Button>
       </form>
 
       <ConfirmDialog
         open={pendingDelete !== null}
-        title="حذف المهمة"
-        message={`هل تريدين حذف المهمة "${pendingDelete?.title ?? ""}"؟ لا يمكن التراجع عن هذا الإجراء.`}
+        title={t("operations.taskPanel.deleteConfirm.title")}
+        message={t("operations.taskPanel.deleteConfirm.message", { title: pendingDelete?.title ?? "" })}
         destructive
         onConfirm={confirmRemove}
         onCancel={() => setPendingDelete(null)}

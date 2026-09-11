@@ -308,6 +308,35 @@ const ar = {
   operations: {
     tasks: "المهام",
     dailyLog: "السجل اليومي",
+    taskPanel: {
+      loadError: "تعذّر تحميل المهام",
+      emptyMessage: "لا توجد مهام بعد",
+      status: {
+        todo: "لم تبدأ",
+        in_progress: "جارية",
+        done: "منتهية",
+      },
+      toggleStatusAriaLabel: "تغيير حالة المهمة، الحالة الحالية: {{status}}",
+      deleteAriaLabel: "حذف المهمة",
+      newTaskPlaceholder: "مهمة جديدة",
+      assigneePlaceholder: "المسؤول",
+      add: "إضافة",
+      deleteConfirm: {
+        title: "حذف المهمة",
+        message: 'هل تريدين حذف المهمة "{{title}}"؟ لا يمكن التراجع عن هذا الإجراء.',
+      },
+    },
+    dailyLogsPanel: {
+      loadError: "تعذّر تحميل السجلات اليومية",
+      notePlaceholder: "ماذا حدث في الموقع اليوم؟",
+      record: "تسجيل",
+      emptyMessage: "لا توجد سجلات يومية بعد",
+      deleteAriaLabel: "حذف السجل",
+      deleteConfirm: {
+        title: "حذف السجل اليومي",
+        message: "هل تريدين حذف هذا السجل؟ لا يمكن التراجع عن هذا الإجراء.",
+      },
+    },
   },
   legacyBudgetPage: {
     notice: 'هذا العرض هو النموذج المالي السابق لمشروع MIDAD. خطة التكلفة الجديدة المرتبطة بجدول الكميات وبنود التكلفة ستحل محله في قسم "خطة التكلفة" عند توفره.',

@@ -309,6 +309,35 @@ const en = {
   operations: {
     tasks: "Tasks",
     dailyLog: "Daily log",
+    taskPanel: {
+      loadError: "Couldn't load the tasks",
+      emptyMessage: "No tasks yet",
+      status: {
+        todo: "Not started",
+        in_progress: "In progress",
+        done: "Done",
+      },
+      toggleStatusAriaLabel: "Change task status, current status: {{status}}",
+      deleteAriaLabel: "Delete task",
+      newTaskPlaceholder: "New task",
+      assigneePlaceholder: "Assignee",
+      add: "Add",
+      deleteConfirm: {
+        title: "Delete task",
+        message: 'Delete the task "{{title}}"? This action cannot be undone.',
+      },
+    },
+    dailyLogsPanel: {
+      loadError: "Couldn't load the daily logs",
+      notePlaceholder: "What happened on site today?",
+      record: "Record",
+      emptyMessage: "No daily logs yet",
+      deleteAriaLabel: "Delete entry",
+      deleteConfirm: {
+        title: "Delete daily log entry",
+        message: "Delete this entry? This action cannot be undone.",
+      },
+    },
   },
   legacyBudgetPage: {
     notice: 'This view is MIDAD\'s previous financial model. The new cost plan, linked to the bill of quantities and cost codes, will replace it in the "Cost Plan" section once available.',
