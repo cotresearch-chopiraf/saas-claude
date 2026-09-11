@@ -5,6 +5,7 @@ import { ApiError } from "../api/client";
 import { listActivity } from "../api/auditEvents";
 import type { ActivityEvent } from "../api/types";
 import { formatDateTime } from "../lib/format";
+import { useTranslation } from "../i18n/I18nProvider";
 
 // MIDAD Phase C — Activity Timeline. Reads the canonical audit_events
 // table through GET /api/audit-events (server/src/routes/auditEvents.ts);
@@ -15,38 +16,42 @@ import { formatDateTime } from "../lib/format";
 // The real, verified set of entityType values this codebase's audit
 // writers actually use (grepped from every recordAuditEvent call site) —
 // never a guess, and never claims to be exhaustive of some future domain.
-const ENTITY_TYPE_LABELS: Record<string, string> = {
-  boq_revision: "نسخة جدول الكميات",
-  budget_item: "بند ميزانية",
-  budget_revision: "مراجعة ميزانية",
-  commitment: "التزام تعاقدي",
-  commitment_line: "بند التزام",
-  company_compliance_profile: "الملف الضريبي",
-  company_logo: "شعار الشركة",
-  company_tax_override: "استثناء ضريبي",
-  contract: "عقد",
-  cost_code: "بند تكلفة",
-  customer: "عميل",
-  expense: "مصروف",
-  forecast_snapshot: "لقطة توقع مالي",
-  invoice: "فاتورة",
-  ipc: "شهادة دفعة (مالك)",
-  ipc_line: "بند شهادة دفعة",
-  measurement: "كشف حصر",
-  measurement_line: "بند كشف حصر",
-  subcontract_ipc: "شهادة دفعة (مقاول باطن)",
-  subcontract_ipc_line: "بند شهادة دفعة مقاول باطن",
-  supplier: "مورد",
-  user: "مستخدم",
-};
+// Keys match activityPage.entityTypes.* in the translation dictionaries.
+const ENTITY_TYPES = [
+  "boq_revision",
+  "budget_item",
+  "budget_revision",
+  "commitment",
+  "commitment_line",
+  "company_compliance_profile",
+  "company_logo",
+  "company_tax_override",
+  "contract",
+  "cost_code",
+  "customer",
+  "expense",
+  "forecast_snapshot",
+  "invoice",
+  "ipc",
+  "ipc_line",
+  "measurement",
+  "measurement_line",
+  "subcontract_ipc",
+  "subcontract_ipc_line",
+  "supplier",
+  "user",
+] as const;
 
-function entityTypeLabel(entityType: string): string {
-  return ENTITY_TYPE_LABELS[entityType] ?? entityType;
+function entityTypeLabel(t: (key: string) => string, entityType: string): string {
+  return ENTITY_TYPES.includes(entityType as (typeof ENTITY_TYPES)[number])
+    ? t(`activityPage.entityTypes.${entityType}`)
+    : entityType;
 }
 
 const PAGE_SIZE = 20;
 
 export function Activity() {
+  const { t, locale } = useTranslation();
   const [events, setEvents] = useState<ActivityEvent[] | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -61,7 +66,7 @@ export function Activity() {
         setEvents(page.events);
         setHasMore(page.hasMore);
       })
-      .catch((err) => setError(err instanceof ApiError ? err.message : "تعذّر تحميل سجل النشاط"));
+      .catch((err) => setError(err instanceof ApiError ? err.message : t("activityPage.loadError")));
   }
 
   useEffect(() => load(entityType), [entityType]);
@@ -74,7 +79,7 @@ export function Activity() {
       setEvents([...events, ...page.events]);
       setHasMore(page.hasMore);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر تحميل المزيد");
+      setError(err instanceof ApiError ? err.message : t("activityPage.loadMoreError"));
     } finally {
       setLoadingMore(false);
     }
@@ -83,17 +88,17 @@ export function Activity() {
   return (
     <Layout>
       <PageHeader
-        title="سجل النشاط"
-        subtitle="من قام بماذا، وعلى ماذا، ومتى — لكل الشركة"
+        title={t("activityPage.title")}
+        subtitle={t("activityPage.subtitle")}
         actions={
           <select
             value={entityType}
             onChange={(e) => setEntityType(e.target.value)}
             className="rounded-md border border-stone-300 px-3 py-2 text-sm"
           >
-            <option value="">كل الأنواع</option>
-            {Object.entries(ENTITY_TYPE_LABELS).map(([value, label]) => (
-              <option key={value} value={value}>{label}</option>
+            <option value="">{t("activityPage.allTypes")}</option>
+            {ENTITY_TYPES.map((value) => (
+              <option key={value} value={value}>{entityTypeLabel(t, value)}</option>
             ))}
           </select>
         }
@@ -103,17 +108,17 @@ export function Activity() {
 
       {!error && !events && <Skeleton rows={6} />}
 
-      {!error && events && events.length === 0 && <EmptyState message="لا يوجد نشاط بعد." />}
+      {!error && events && events.length === 0 && <EmptyState message={t("activityPage.emptyMessage")} />}
 
       {!error && events && events.length > 0 && (
         <div className="space-y-3">
           {events.map((event) => (
-            <ActivityRow key={event.id} event={event} />
+            <ActivityRow key={event.id} event={event} locale={locale} />
           ))}
           {hasMore && (
             <div className="pt-2 text-center">
               <Button variant="secondary" size="sm" disabled={loadingMore} onClick={loadMore}>
-                {loadingMore ? "جارٍ التحميل..." : "تحميل المزيد"}
+                {loadingMore ? t("activityPage.loadingMore") : t("activityPage.loadMore")}
               </Button>
             </div>
           )}
@@ -123,22 +128,23 @@ export function Activity() {
   );
 }
 
-function ActivityRow({ event }: { event: ActivityEvent }) {
+function ActivityRow({ event, locale }: { event: ActivityEvent; locale: string }) {
+  const { t } = useTranslation();
   return (
     <Card className="p-4">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="text-sm text-stone-800">
-            <span className="font-medium">{event.actorName ?? "النظام"}</span>
+            <span className="font-medium">{event.actorName ?? t("activityPage.system")}</span>
             {" — "}
             <span className="font-mono text-stone-600">{event.action}</span>
           </p>
           <p className="mt-1 text-xs text-stone-500">
-            {entityTypeLabel(event.entityType)} · {event.entityId.slice(0, 8)}
+            {entityTypeLabel(t, event.entityType)} · {event.entityId.slice(0, 8)}
           </p>
-          {event.reason && <p className="mt-1 text-xs text-stone-500">السبب: {event.reason}</p>}
+          {event.reason && <p className="mt-1 text-xs text-stone-500">{t("activityPage.reasonLabel", { reason: event.reason })}</p>}
         </div>
-        <span className="shrink-0 text-xs text-stone-400">{formatDateTime(event.createdAt)}</span>
+        <span className="shrink-0 text-xs text-stone-400">{formatDateTime(event.createdAt, locale)}</span>
       </div>
     </Card>
   );
