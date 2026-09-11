@@ -647,25 +647,25 @@ describe("<OverviewSection/> (Executive Command Center)", () => {
     mockApi("member");
     renderSection();
     await waitFor(() => expect(screen.getByText("إجراءات سريعة")).toBeInTheDocument());
-    expect(screen.getByText("+ رفع مستند")).toBeInTheDocument();
+    expect(screen.getByText("رفع مستند")).toBeInTheDocument();
   });
 
   it("Quick Actions: owner-only actions are hidden for a member, matching each domain's own real permission", async () => {
     mockApi("member");
     renderSection();
     await waitFor(() => expect(screen.getByText("إجراءات سريعة")).toBeInTheDocument());
-    expect(screen.queryByText("+ بند جدول كميات")).not.toBeInTheDocument();
-    expect(screen.queryByText("+ التزام شراء")).not.toBeInTheDocument();
+    expect(screen.queryByText("بند جدول كميات")).not.toBeInTheDocument();
+    expect(screen.queryByText("التزام شراء")).not.toBeInTheDocument();
   });
 
   it("Quick Actions: owner sees every gated action", async () => {
     mockApi("owner");
     renderSection();
     await waitFor(() => expect(screen.getByText("إجراءات سريعة")).toBeInTheDocument());
-    expect(screen.getByText("+ بند جدول كميات")).toBeInTheDocument();
-    expect(screen.getByText("+ التزام شراء")).toBeInTheDocument();
-    expect(screen.getByText("+ مصروف")).toBeInTheDocument();
-    expect(screen.getByText("+ شهادة دفع")).toBeInTheDocument();
+    expect(screen.getByText("بند جدول كميات")).toBeInTheDocument();
+    expect(screen.getByText("التزام شراء")).toBeInTheDocument();
+    expect(screen.getByText("مصروف")).toBeInTheDocument();
+    expect(screen.getByText("شهادة دفع")).toBeInTheDocument();
   });
 
   it("Member read access: a member can render the full command center", async () => {
