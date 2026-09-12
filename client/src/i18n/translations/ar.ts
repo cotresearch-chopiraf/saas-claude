@@ -2358,6 +2358,9 @@ const ar = {
       noData: "لا توجد بيانات",
       fromSchedule: "من الجدول الزمني",
       lastUpdated: "آخر تحديث:",
+      startDate: "تاريخ البدء",
+      expectedCompletion: "التسليم المتوقع",
+      daysRemainingCount: "{{count}} يوم متبقٍ",
     },
     health: {
       title: "صحة المشروع",

@@ -2359,6 +2359,9 @@ const fr = {
       noData: "Aucune donnée",
       fromSchedule: "D'après le planning",
       lastUpdated: "Dernière mise à jour :",
+      startDate: "Date de début",
+      expectedCompletion: "Achèvement prévu",
+      daysRemainingCount: "{{count}} jour(s) restant(s)",
     },
     health: {
       title: "Santé du projet",

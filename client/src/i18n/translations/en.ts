@@ -2359,6 +2359,9 @@ const en = {
       noData: "No data",
       fromSchedule: "From the schedule",
       lastUpdated: "Last updated:",
+      startDate: "Start date",
+      expectedCompletion: "Expected completion",
+      daysRemainingCount: "{{count}} day(s) remaining",
     },
     health: {
       title: "Project health",

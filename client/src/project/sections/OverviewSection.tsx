@@ -275,6 +275,7 @@ export function OverviewSection() {
     <div className="flex flex-col gap-10 lg:gap-14">
       <VerdictBlock
         project={project}
+        contract={mainContract}
         verdict={verdict}
         insight={progressCostHeadline}
         progress={avgProgress}
@@ -364,11 +365,10 @@ function HeaderSkeleton({ project }: { project: Project | null }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// A deliberately small icon set — four line icons total, used only where
-// an icon carries real meaning (exception severity, the "+" on a quick
-// action). Every other section header on this page is plain typography,
-// no icon badge — this is the biggest single visual break from every
-// earlier version of this dashboard.
+// A small, consistent line-icon set — every icon here is a plain inline
+// SVG (no new dependency), one stroke weight, used only where it marks a
+// real domain or a real severity: the financial-flow stages, the health
+// strip's six domains, exception severity, and the "+" on a quick action.
 // ─────────────────────────────────────────────────────────────────────────
 type IconProps = SVGProps<SVGSVGElement>;
 const iconBase = { width: 15, height: 15, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.75, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
@@ -385,10 +385,53 @@ const IconInfo = (p: IconProps) => (
 const IconPlus = (p: IconProps) => (
   <svg {...iconBase} {...p}><path d="M12 5v14M5 12h14" /></svg>
 );
+const IconMoney = (p: IconProps) => (
+  <svg {...iconBase} {...p}><circle cx="12" cy="12" r="9" /><path d="M9 15c0 1.1 1.3 2 3 2s3-.9 3-2-1.3-1.6-3-2-3-.9-3-2 1.3-2 3-2 3 .9 3 2" /></svg>
+);
+const IconWallet = (p: IconProps) => (
+  <svg {...iconBase} {...p}><path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h11A2.5 2.5 0 0 1 20 7.5v9a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5z" /><path d="M15.5 12.5h2.5a1 1 0 0 0 0-2h-2.5a1 1 0 0 0 0 2z" /></svg>
+);
+const IconClipboard = (p: IconProps) => (
+  <svg {...iconBase} {...p}><rect x="5" y="4.5" width="14" height="17" rx="2" /><path d="M9 4V3.5A1.5 1.5 0 0 1 10.5 2h3A1.5 1.5 0 0 1 15 3.5V4M8.5 11h7M8.5 15h5" /></svg>
+);
+const IconPackage = (p: IconProps) => (
+  <svg {...iconBase} {...p}><path d="M21 8.5v7L12 20l-9-4.5v-7L12 4z" /><path d="M3.5 8.5L12 12l8.5-3.5M12 12v8" /></svg>
+);
+const IconBars = (p: IconProps) => (
+  <svg {...iconBase} {...p}><path d="M5 20V10M12 20V4M19 20v-7" /></svg>
+);
+const IconShield = (p: IconProps) => (
+  <svg {...iconBase} {...p}><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z" /></svg>
+);
+const IconCalendar = (p: IconProps) => (
+  <svg {...iconBase} {...p}><rect x="3.5" y="5" width="17" height="15.5" rx="2" /><path d="M3.5 9.5h17M8 3v4M16 3v4" /></svg>
+);
+const IconTrendUp = (p: IconProps) => (
+  <svg {...iconBase} {...p}><path d="M4 16l5-5 4 4 7-8" /><path d="M14 6h6v6" /></svg>
+);
+const IconChevron = (p: IconProps & { mirror?: boolean }) => {
+  const { mirror, ...rest } = p;
+  return (
+    <svg {...iconBase} {...rest} style={mirror ? { transform: "scaleX(-1)" } : undefined}>
+      <path d="M9 5l7 7-7 7" />
+    </svg>
+  );
+};
 
 // ── Verdict block — condition, one-line insight, three headline numbers ─
+// The hero: one bordered card (a defined surface, unlike every purely
+// typographic section below it) carrying the verdict, its one-line
+// insight, three headline stats each with its own thin progress bar, and
+// — on wide screens — a compact identity panel (dates, contract value,
+// an overall-progress ring) sharing the same card. Every figure here is
+// real: progress/costConsumption/variancePercent are the same values
+// already computed in OverviewSection(); startDate/endDate/daysRemaining
+// are read straight off the project/contract records (a plain date
+// subtraction for the day count, never a fabricated figure) and simply
+// omitted when the underlying record has none, never shown as a guess.
 function VerdictBlock({
   project,
+  contract,
   verdict,
   insight,
   progress,
@@ -398,6 +441,7 @@ function VerdictBlock({
   lastActivityAt,
 }: {
   project: Project;
+  contract: Contract | null;
   verdict: "healthy" | "watch" | "critical";
   insight: string;
   progress: number | null;
@@ -417,62 +461,154 @@ function VerdictBlock({
     watch: "bg-warning-500",
     critical: "bg-danger-500",
   };
+  const badgePillTone: Record<typeof verdict, string> = {
+    healthy: "bg-success-100 text-success-700",
+    watch: "bg-warning-100 text-warning-700",
+    critical: "bg-danger-100 text-danger-700",
+  };
+  const accentBorder: Record<typeof verdict, string> = {
+    healthy: "border-s-success-500",
+    watch: "border-s-warning-500",
+    critical: "border-s-danger-500",
+  };
+
+  const startDate = project.startDate ?? contract?.startDate ?? null;
+  const endDate = contract?.endDate ?? null;
+  const daysRemaining = endDate ? Math.ceil((new Date(endDate).getTime() - Date.now()) / 86400000) : null;
 
   return (
-    <div>
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-stone-400">
-        <span className="text-stone-500">{project.name}</span>
-        <span aria-hidden="true">·</span>
-        <span>{t(`dashboard.status.${project.status}`)}</span>
-        <span aria-hidden="true">·</span>
-        <span>
-          {t("dashboard.identity.lastUpdated")} {formatDateTime(lastActivityAt, locale)}
-        </span>
-      </div>
+    <div className={`rounded-xl border border-s-4 border-stone-200 bg-white p-5 sm:p-7 ${accentBorder[verdict]}`}>
+      {/* xl, not lg: the desktop sidebar (ProjectSidebar.tsx) also claims
+          its fixed width starting exactly at `lg` (1024px) — switching
+          this hero to a row layout at that same breakpoint left the ring
+          side-by-side with the 3-stat grid at the one width with the
+          least real room, and the stats visually overlapped (confirmed
+          live: "53%"/"62%"/"0%" rendered on top of each other at exactly
+          1024px). Every other multi-column switch on this page already
+          waits for `xl` for the same reason. */}
+      <div className="flex flex-col gap-7 xl:flex-row xl:items-start xl:justify-between">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+            <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${badgePillTone[verdict]}`}>
+              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotColor[verdict]}`} aria-hidden="true" />
+              {t(`dashboard.status.${project.status}`)}
+            </span>
+            <span className="truncate text-xs font-medium text-stone-400">{project.name}</span>
+          </div>
 
-      <div className="mt-3 flex items-center gap-3">
-        <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${dotColor[verdict]}`} aria-hidden="true" />
-        <h1 className={`text-2xl font-bold tracking-tight sm:text-3xl ${verdictColor[verdict]}`}>{t(`dashboard.verdict.${verdict}`)}</h1>
-      </div>
-      <p className="mt-2 max-w-2xl text-base text-stone-600">{insight}</p>
+          <h1 className={`mt-3 text-2xl font-bold tracking-tight sm:text-3xl ${verdictColor[verdict]}`}>{t(`dashboard.verdict.${verdict}`)}</h1>
+          <p className="mt-1.5 max-w-2xl text-sm text-stone-500">{insight}</p>
 
-      <div className="mt-8 flex flex-wrap divide-x divide-x-reverse divide-stone-200">
-        <HeadlineStat
-          label={t("dashboard.identity.progress")}
-          value={progress !== null ? formatPercent(progress, 1, locale) : "—"}
-          hint={progress === null ? t("dashboard.identity.noData") : undefined}
-        />
-        <HeadlineStat
-          label={t("dashboard.costProgress.costConsumption")}
-          value={costConsumption !== null ? formatPercent(costConsumption, 1, locale) : "—"}
-        />
-        <HeadlineStat
-          label={t("dashboard.financial.expectedVariance")}
-          value={variancePercent !== null ? formatPercent(variancePercent, 1, locale) : "—"}
-          tone={overBudget ? "danger" : "success"}
-        />
+          <div className="mt-7 grid grid-cols-1 gap-6 sm:grid-cols-3">
+            <HeroStat
+              label={t("dashboard.identity.progress")}
+              display={progress !== null ? formatPercent(progress, 1, locale) : "—"}
+              barValue={progress}
+              barColor="bg-primary"
+              hint={progress === null ? t("dashboard.identity.noData") : undefined}
+            />
+            <HeroStat
+              label={t("dashboard.costProgress.costConsumption")}
+              display={costConsumption !== null ? formatPercent(costConsumption, 1, locale) : "—"}
+              barValue={costConsumption}
+              barColor={overBudget ? "bg-danger-500" : "bg-success-500"}
+            />
+            <HeroStat
+              label={t("dashboard.financial.expectedVariance")}
+              display={variancePercent !== null ? formatPercent(variancePercent, 1, locale) : "—"}
+              tone={overBudget ? "danger" : "success"}
+            />
+          </div>
+        </div>
+
+        <div className="flex shrink-0 flex-row items-center gap-6 border-t border-stone-100 pt-6 xl:flex-col xl:items-stretch xl:border-t-0 xl:border-s xl:ps-7 xl:pt-0">
+          <ProgressRing value={progress} locale={locale} />
+          <div className="min-w-0 flex-1 space-y-2.5 text-xs">
+            {startDate && <InfoRow icon={IconCalendar} label={t("dashboard.identity.startDate")} value={formatDate(startDate, locale)} />}
+            {endDate && <InfoRow icon={IconCalendar} label={t("dashboard.identity.expectedCompletion")} value={formatDate(endDate, locale)} />}
+            {daysRemaining !== null && daysRemaining >= 0 && (
+              <InfoRow icon={IconClipboard} label={t("dashboard.identity.expectedCompletion")} value={t("dashboard.identity.daysRemainingCount", { count: daysRemaining })} />
+            )}
+            {contract && <InfoRow icon={IconMoney} label={t("dashboard.identity.contractValue")} value={formatMoney(contract.revisedValue, contract.currency, locale)} />}
+          </div>
+        </div>
       </div>
     </div>
   );
 }
 
-function HeadlineStat({
+function HeroStat({
   label,
-  value,
+  display,
   tone = "default",
+  barValue,
+  barColor,
   hint,
 }: {
   label: string;
-  value: string;
+  display: string;
   tone?: "default" | "success" | "danger";
+  barValue?: number | null;
+  barColor?: string;
   hint?: string;
 }) {
   const color = tone === "danger" ? "text-danger-700" : tone === "success" ? "text-success-700" : "text-stone-900";
+  const pct = barValue !== undefined && barValue !== null ? Math.min(100, Math.max(0, barValue)) : null;
   return (
-    <div className="min-w-0 flex-1 px-6 first:ps-0 last:pe-0">
-      <p className={`text-4xl font-extrabold tracking-tight tabular-nums sm:text-5xl ${color}`}>{value}</p>
-      <p className="mt-1.5 text-xs font-medium text-stone-500">{label}</p>
+    <div className="min-w-0">
+      <p className={`text-3xl font-extrabold tracking-tight tabular-nums sm:text-4xl ${color}`}>{display}</p>
+      <p className="mt-1 text-xs font-medium text-stone-500">{label}</p>
       {hint && <p className="mt-0.5 text-[11px] text-stone-400">{hint}</p>}
+      {barColor && (
+        <div className="mt-2.5 h-1.5 w-full overflow-hidden rounded-full bg-stone-100">
+          <div className={`h-full rounded-full ${barColor}`} style={{ width: `${pct ?? 0}%` }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// The one genuine chart element in the hero: a single real percentage
+// (avgProgress, already computed once in OverviewSection()) rendered as an
+// SVG ring — never a fabricated time series.
+function ProgressRing({ value, locale }: { value: number | null; locale: string }) {
+  const size = 84;
+  const stroke = 8;
+  const r = (size - stroke) / 2;
+  const circumference = 2 * Math.PI * r;
+  const pct = Math.min(100, Math.max(0, value ?? 0));
+  const offset = circumference * (1 - pct / 100);
+  return (
+    <div className="relative shrink-0" style={{ width: size, height: size }}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90">
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#f1f5f9" strokeWidth={stroke} />
+        {value !== null && (
+          <circle
+            cx={size / 2}
+            cy={size / 2}
+            r={r}
+            fill="none"
+            stroke="#0f766e"
+            strokeWidth={stroke}
+            strokeLinecap="round"
+            strokeDasharray={circumference}
+            strokeDashoffset={offset}
+          />
+        )}
+      </svg>
+      <div className="absolute inset-0 flex items-center justify-center">
+        <span className="text-base font-extrabold text-stone-900">{value !== null ? formatPercent(value, 0, locale) : "—"}</span>
+      </div>
+    </div>
+  );
+}
+
+function InfoRow({ icon: Icon, label, value }: { icon: (p: IconProps) => JSX.Element; label: string; value: string }) {
+  return (
+    <div className="flex items-center gap-2">
+      <Icon className="shrink-0 text-stone-300" />
+      <span className="min-w-0 flex-1 truncate text-stone-400">{label}</span>
+      <span className="shrink-0 whitespace-nowrap font-semibold text-stone-700">{value}</span>
     </div>
   );
 }
@@ -599,23 +735,41 @@ function deriveVerdict(health: HealthIndicator[]): "healthy" | "watch" | "critic
   return "healthy";
 }
 
+const healthIcon: Record<string, (p: IconProps) => JSX.Element> = {
+  cost: IconMoney,
+  schedule: IconCalendar,
+  cashflow: IconWallet,
+  procurement: IconPackage,
+  progress: IconBars,
+  compliance: IconShield,
+};
+const healthPillTone: Record<HealthTone, string> = {
+  healthy: "bg-success-50 text-success-700 border-success-200",
+  watch: "bg-warning-50 text-warning-700 border-warning-200",
+  critical: "bg-danger-50 text-danger-700 border-danger-200",
+  neutral: "bg-stone-50 text-stone-500 border-stone-200",
+};
+
 function HealthLine({ health, projectId }: { health: HealthIndicator[]; projectId: string }) {
   const { t } = useTranslation();
   return (
-    <div className="border-t border-stone-200 pt-5">
+    <div>
       <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-stone-400">{t("dashboard.health.title")}</p>
-      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
-        {health.map((h) => (
-          <Link
-            key={h.key}
-            to={h.href === "__company_compliance__" ? "/labor-compliance" : `/projects/${projectId}/${h.href}`}
-            className="flex items-center gap-1.5 transition hover:text-stone-900"
-          >
-            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${healthDotColor[h.tone]}`} aria-hidden="true" />
-            <span className="font-semibold text-stone-700">{h.label}</span>
-            <span className="text-stone-400">{h.statusText}</span>
-          </Link>
-        ))}
+      <div className="flex flex-wrap gap-2">
+        {health.map((h) => {
+          const Icon = healthIcon[h.key] ?? IconInfo;
+          return (
+            <Link
+              key={h.key}
+              to={h.href === "__company_compliance__" ? "/labor-compliance" : `/projects/${projectId}/${h.href}`}
+              className={`flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs transition hover:opacity-80 ${healthPillTone[h.tone]}`}
+            >
+              <Icon className="shrink-0" />
+              <span className="font-semibold">{h.label}</span>
+              <span className="opacity-80">{h.statusText}</span>
+            </Link>
+          );
+        })}
       </div>
     </div>
   );
@@ -650,17 +804,19 @@ function FinancialControl({
   const overBudget = m.variance < 0;
 
   // Every value read verbatim off forecast.methods.commitment_aware / the
-  // contract, never recomputed. No divider arrows (this app has no
-  // RTL-aware icon-mirroring convention) — a plain divide-x/
-  // divide-x-reverse rule between stages reads correctly in both
-  // directions with zero risk of a backwards arrow (the same pattern
-  // verified live in earlier rounds of this dashboard).
-  const stages: { label: string; value: number; href: string }[] = [
-    { label: t("dashboard.financial.contractValue"), value: contract ? Number(contract.revisedValue) : m.costPlan, href: "contract" },
-    { label: t("dashboard.financial.approvedBudget"), value: m.costPlan, href: "cost-plan" },
-    { label: t("dashboard.financial.actualCost"), value: m.actualCost, href: "actual-cost" },
-    { label: t("dashboard.financial.commitments"), value: m.committedCost, href: "procurement" },
-    { label: t("dashboard.financial.forecastAtCompletion"), value: m.eac, href: "forecast" },
+  // contract, never recomputed. Each stage is a self-sized chip (icon +
+  // label + value) in a flex-wrap row, never a forced equal-width column —
+  // an earlier equal-column attempt at this same five-stage row left too
+  // little room per figure and either broke a number mid-digit or hid it
+  // behind an ellipsis entirely (confirmed live, both worse than wrapping).
+  // A chip only ever wraps to its own next line; it never has to shrink
+  // below its own content width, so a money value here can never truncate.
+  const stages: { label: string; value: number; href: string; icon: (p: IconProps) => JSX.Element }[] = [
+    { label: t("dashboard.financial.contractValue"), value: contract ? Number(contract.revisedValue) : m.costPlan, href: "contract", icon: IconMoney },
+    { label: t("dashboard.financial.approvedBudget"), value: m.costPlan, href: "cost-plan", icon: IconClipboard },
+    { label: t("dashboard.financial.actualCost"), value: m.actualCost, href: "actual-cost", icon: IconWallet },
+    { label: t("dashboard.financial.commitments"), value: m.committedCost, href: "procurement", icon: IconPackage },
+    { label: t("dashboard.financial.forecastAtCompletion"), value: m.eac, href: "forecast", icon: IconBars },
   ];
 
   return (
@@ -670,42 +826,39 @@ function FinancialControl({
         <span className="text-xs text-stone-400">{t("dashboard.financial.asOf", { date: formatDate(forecast.asOfDate, locale) })}</span>
       </div>
 
-      {/* A vertical ledger, not a horizontal strip: with the desktop
-          sidebar (ProjectSidebar.tsx) plus the app's own outer nav both
-          claiming fixed width, this panel's real content width never
-          leaves enough room for five money figures across one row without
-          truncating them — confirmed live (an earlier horizontal attempt
-          rendered "SAR …" with the actual figure hidden entirely, strictly
-          worse than a wrap). Each row instead gets the full panel width,
-          so a value never competes for horizontal space; order down the
-          page still reads as the same Contract→Budget→Actual→Committed→
-          Forecast sequence. */}
-      <div className="mt-5 divide-y divide-stone-200 border-t border-stone-200">
+      <div className="mt-5 flex flex-wrap items-center gap-x-1 gap-y-4">
         {stages.map((s, i) => (
-          <Link
-            key={s.label}
-            to={`/projects/${projectId}/${s.href}`}
-            className="flex items-baseline justify-between gap-3 py-3 transition hover:bg-stone-50"
-          >
-            <span className="flex min-w-0 items-baseline gap-2.5 text-stone-500">
-              <span className="text-xs tabular-nums text-stone-300">{String(i + 1).padStart(2, "0")}</span>
-              <span className="truncate text-xs font-medium uppercase tracking-wide">{s.label}</span>
-            </span>
-            <span className="shrink-0 whitespace-nowrap text-base font-bold tabular-nums text-stone-900 xl:text-lg">
-              {formatMoney(s.value, forecast.currency, locale)}
-            </span>
-          </Link>
+          <div key={s.label} className="flex items-center gap-1">
+            {i > 0 && <span className="mx-1 hidden h-px w-4 shrink-0 bg-stone-200 sm:block" aria-hidden="true" />}
+            <Link
+              to={`/projects/${projectId}/${s.href}`}
+              className="flex items-center gap-2.5 rounded-lg border border-stone-200 px-3 py-2.5 transition hover:border-stone-300 hover:bg-stone-50"
+            >
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-stone-100 text-stone-500">
+                <s.icon />
+              </span>
+              <span className="min-w-0">
+                <span className="block whitespace-nowrap text-[11px] font-medium uppercase tracking-wide text-stone-400">{s.label}</span>
+                <span className="block whitespace-nowrap text-sm font-bold tabular-nums text-stone-900">{formatMoney(s.value, forecast.currency, locale)}</span>
+              </span>
+            </Link>
+          </div>
         ))}
-      </div>
-
-      <div className={`mt-5 flex flex-wrap items-baseline justify-between gap-2 border-t-2 pt-4 ${overBudget ? "border-danger-600" : "border-success-600"}`}>
-        <span className="text-sm font-semibold text-stone-600">
-          {t("dashboard.financial.expectedVariance")}
-          {overBudget ? t("dashboard.financial.overBudgetSuffix") : ""}
-        </span>
-        <span className={`text-2xl font-extrabold tabular-nums ${overBudget ? "text-danger-700" : "text-success-700"}`}>
-          {formatMoney(m.variance, forecast.currency, locale)} ({formatPercent(m.variancePercent, 1, locale)})
-        </span>
+        <span className="mx-1 hidden h-px w-4 shrink-0 bg-stone-200 sm:block" aria-hidden="true" />
+        <div className={`flex items-center gap-2.5 rounded-lg border px-3 py-2.5 ${overBudget ? "border-danger-200 bg-danger-50" : "border-success-200 bg-success-50"}`}>
+          <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${overBudget ? "bg-danger-100 text-danger-700" : "bg-success-100 text-success-700"}`}>
+            {overBudget ? <IconAlertTriangle /> : <IconTrendUp />}
+          </span>
+          <span className="min-w-0">
+            <span className={`block whitespace-nowrap text-[11px] font-medium uppercase tracking-wide ${overBudget ? "text-danger-600" : "text-success-600"}`}>
+              {t("dashboard.financial.expectedVariance")}
+              {overBudget ? t("dashboard.financial.overBudgetSuffix") : ""}
+            </span>
+            <span className={`block whitespace-nowrap text-sm font-extrabold tabular-nums ${overBudget ? "text-danger-700" : "text-success-700"}`}>
+              {formatMoney(m.variance, forecast.currency, locale)} ({formatPercent(m.variancePercent, 1, locale)})
+            </span>
+          </span>
+        </div>
       </div>
 
       {revision && (
@@ -813,26 +966,37 @@ const attentionAccent: Record<AttentionSeverity, string> = {
   info: "border-s-info-500 text-info-600",
 };
 
+const attentionBg: Record<AttentionSeverity, string> = {
+  critical: "bg-danger-50/60 hover:bg-danger-50",
+  attention: "bg-warning-50/60 hover:bg-warning-50",
+  info: "bg-info-50/60 hover:bg-info-50",
+};
+
 function ExceptionsPanel({ items }: { items: AttentionItem[] }) {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
+  const mirrorChevron = locale === "ar";
   return (
     <div>
       <h2 className="text-sm font-bold uppercase tracking-wide text-stone-900">{t("dashboard.needsAttention.title")}</h2>
       {items.length === 0 ? (
         <p className="mt-4 text-sm text-stone-400">{t("dashboard.needsAttention.empty")}</p>
       ) : (
-        <ul className="mt-4 divide-y divide-stone-200 border-t border-stone-200">
+        <ul className="mt-4 space-y-2">
           {items.map((item, i) => {
             const Icon = attentionIcon[item.severity];
             const [borderClass, colorClass] = attentionAccent[item.severity].split(" ");
             return (
               <li key={i}>
-                <Link to={item.href} className={`flex items-start gap-3 border-s-2 py-3 ps-3 transition hover:bg-stone-50 ${borderClass}`}>
-                  <Icon className={`mt-0.5 shrink-0 ${colorClass}`} />
+                <Link
+                  to={item.href}
+                  className={`flex items-center gap-3 rounded-lg border-s-4 py-2.5 ps-3 pe-2.5 transition ${borderClass} ${attentionBg[item.severity]}`}
+                >
+                  <Icon className={`shrink-0 ${colorClass}`} />
                   <span className="min-w-0 flex-1">
-                    <span className="block text-sm text-stone-700">{item.text}</span>
+                    <span className="block text-sm font-medium text-stone-700">{item.text}</span>
                     {item.metric && <span className="mt-0.5 block text-xs font-semibold text-stone-500">{item.metric}</span>}
                   </span>
+                  <IconChevron mirror={mirrorChevron} className="shrink-0 text-stone-300" />
                 </Link>
               </li>
             );
