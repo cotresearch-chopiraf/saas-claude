@@ -281,7 +281,6 @@ export function OverviewSection() {
         progress={avgProgress}
         costConsumption={costConsumption}
         variancePercent={forecastMethod.variancePercent}
-        overBudget={forecastMethod.variance < 0}
         lastActivityAt={data.activity[0]?.createdAt ?? project.createdAt}
       />
 
@@ -437,7 +436,6 @@ function VerdictBlock({
   progress,
   costConsumption,
   variancePercent,
-  overBudget,
   lastActivityAt,
 }: {
   project: Project;
@@ -447,7 +445,6 @@ function VerdictBlock({
   progress: number | null;
   costConsumption: number | null;
   variancePercent: number | null;
-  overBudget: boolean;
   lastActivityAt: string;
 }) {
   const { t, locale } = useTranslation();
@@ -503,20 +500,24 @@ function VerdictBlock({
             <HeroStat
               label={t("dashboard.identity.progress")}
               display={progress !== null ? formatPercent(progress, 1, locale) : "—"}
+              tone="success"
               barValue={progress}
-              barColor="bg-primary"
+              barColor="bg-success-500"
               hint={progress === null ? t("dashboard.identity.noData") : undefined}
             />
             <HeroStat
               label={t("dashboard.costProgress.costConsumption")}
               display={costConsumption !== null ? formatPercent(costConsumption, 1, locale) : "—"}
+              tone="info"
               barValue={costConsumption}
-              barColor={overBudget ? "bg-danger-500" : "bg-success-500"}
+              barColor="bg-sky-500"
             />
             <HeroStat
               label={t("dashboard.financial.expectedVariance")}
               display={variancePercent !== null ? formatPercent(variancePercent, 1, locale) : "—"}
-              tone={overBudget ? "danger" : "success"}
+              tone="purple"
+              barValue={variancePercent !== null ? Math.abs(variancePercent) : null}
+              barColor="bg-purple-500"
             />
           </div>
         </div>
@@ -547,12 +548,21 @@ function HeroStat({
 }: {
   label: string;
   display: string;
-  tone?: "default" | "success" | "danger";
+  tone?: "default" | "success" | "danger" | "info" | "purple";
   barValue?: number | null;
   barColor?: string;
   hint?: string;
 }) {
-  const color = tone === "danger" ? "text-danger-700" : tone === "success" ? "text-success-700" : "text-stone-900";
+  const color =
+    tone === "danger"
+      ? "text-danger-700"
+      : tone === "success"
+        ? "text-success-700"
+        : tone === "info"
+          ? "text-sky-700"
+          : tone === "purple"
+            ? "text-purple-700"
+            : "text-stone-900";
   const pct = barValue !== undefined && barValue !== null ? Math.min(100, Math.max(0, barValue)) : null;
   return (
     <div className="min-w-0">
@@ -811,12 +821,12 @@ function FinancialControl({
   // behind an ellipsis entirely (confirmed live, both worse than wrapping).
   // A chip only ever wraps to its own next line; it never has to shrink
   // below its own content width, so a money value here can never truncate.
-  const stages: { label: string; value: number; href: string; icon: (p: IconProps) => JSX.Element }[] = [
-    { label: t("dashboard.financial.contractValue"), value: contract ? Number(contract.revisedValue) : m.costPlan, href: "contract", icon: IconMoney },
-    { label: t("dashboard.financial.approvedBudget"), value: m.costPlan, href: "cost-plan", icon: IconClipboard },
-    { label: t("dashboard.financial.actualCost"), value: m.actualCost, href: "actual-cost", icon: IconWallet },
-    { label: t("dashboard.financial.commitments"), value: m.committedCost, href: "procurement", icon: IconPackage },
-    { label: t("dashboard.financial.forecastAtCompletion"), value: m.eac, href: "forecast", icon: IconBars },
+  const stages: { label: string; value: number; href: string; icon: (p: IconProps) => JSX.Element; iconTone: string }[] = [
+    { label: t("dashboard.financial.contractValue"), value: contract ? Number(contract.revisedValue) : m.costPlan, href: "contract", icon: IconMoney, iconTone: "bg-sky-100 text-sky-700" },
+    { label: t("dashboard.financial.approvedBudget"), value: m.costPlan, href: "cost-plan", icon: IconClipboard, iconTone: "bg-purple-100 text-purple-700" },
+    { label: t("dashboard.financial.actualCost"), value: m.actualCost, href: "actual-cost", icon: IconWallet, iconTone: "bg-warning-100 text-warning-700" },
+    { label: t("dashboard.financial.commitments"), value: m.committedCost, href: "procurement", icon: IconPackage, iconTone: "bg-success-100 text-success-700" },
+    { label: t("dashboard.financial.forecastAtCompletion"), value: m.eac, href: "forecast", icon: IconBars, iconTone: "bg-sky-100 text-sky-700" },
   ];
 
   return (
@@ -834,7 +844,7 @@ function FinancialControl({
               to={`/projects/${projectId}/${s.href}`}
               className="flex items-center gap-2.5 rounded-lg border border-stone-200 px-3 py-2.5 transition hover:border-stone-300 hover:bg-stone-50"
             >
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-stone-100 text-stone-500">
+              <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${s.iconTone}`}>
                 <s.icon />
               </span>
               <span className="min-w-0">
@@ -1336,10 +1346,10 @@ function QuickActionsRow({ projectId }: { projectId: string }) {
     <div>
       <h3 className="text-xs font-semibold uppercase tracking-wide text-stone-400">{t("dashboard.quickActions.title")}</h3>
       <div className="mt-2 flex flex-wrap gap-2">
-        {gatedActions.map((a) => (
+        {gatedActions.map((a, i) => (
           <Can key={a.href} permission={a.permission}>
             <Link to={`/projects/${projectId}/${a.href}`}>
-              <Button variant="secondary" size="sm" className="flex items-center gap-1.5">
+              <Button variant={i === 0 ? "primary" : "secondary"} size="sm" className="flex items-center gap-1.5">
                 <IconPlus width={14} height={14} />
                 {t(`dashboard.quickActions.${a.labelKey}`)}
               </Button>
