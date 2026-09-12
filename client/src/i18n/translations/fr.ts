@@ -1986,6 +1986,32 @@ const fr = {
     toAndIssueDate: "À : {{client}} · Date d'émission : {{date}}",
     taxWithPercent: "Taxe ({{percent}}%)",
   },
+  portalDashboardPage: {
+    loadError: "Impossible de charger les projets",
+    greeting: "Bonjour,",
+    yourProjects: "Vos projets",
+    emptyMessage: "Aucun projet disponible pour le moment. Vous n'avez pas encore reçu d'accès à un projet.",
+    startDate: "Date de début : {{date}}",
+    viewProject: "Voir le projet ←",
+  },
+  portalProjectDetailPage: {
+    loadError: "Impossible de charger le projet",
+    backToProjects: "Retour à vos projets",
+    notFound: "Projet introuvable",
+    projectInfoHeading: "Informations sur le projet",
+    fields: {
+      projectName: "Nom du projet",
+      client: "Client",
+      startDate: "Date de début",
+      location: "Emplacement",
+    },
+    documents: {
+      loadError: "Impossible de charger les documents",
+      heading: "Documents",
+      emptyMessage: "Aucun document disponible pour ce projet actuellement",
+      viewDownload: "Voir/télécharger",
+    },
+  },
   publicQuotePage: {
     nameRequiredError: "Veuillez saisir votre nom pour confirmer",
     genericError: "Impossible de finaliser l'action",

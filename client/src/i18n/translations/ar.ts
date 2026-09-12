@@ -1985,6 +1985,32 @@ const ar = {
     toAndIssueDate: "إلى: {{client}} · تاريخ الإصدار: {{date}}",
     taxWithPercent: "الضريبة ({{percent}}%)",
   },
+  portalDashboardPage: {
+    loadError: "تعذّر تحميل المشاريع",
+    greeting: "مرحباً،",
+    yourProjects: "مشاريعك",
+    emptyMessage: "لا توجد مشاريع متاحة حالياً. لم يتم منحك صلاحية الوصول إلى أي مشروع بعد.",
+    startDate: "تاريخ البدء: {{date}}",
+    viewProject: "عرض المشروع ←",
+  },
+  portalProjectDetailPage: {
+    loadError: "تعذّر تحميل المشروع",
+    backToProjects: "العودة إلى مشاريعك",
+    notFound: "المشروع غير موجود",
+    projectInfoHeading: "معلومات المشروع",
+    fields: {
+      projectName: "اسم المشروع",
+      client: "العميل",
+      startDate: "تاريخ البدء",
+      location: "الموقع",
+    },
+    documents: {
+      loadError: "تعذّر تحميل المستندات",
+      heading: "المستندات",
+      emptyMessage: "لا توجد مستندات متاحة لهذا المشروع حالياً",
+      viewDownload: "عرض/تحميل",
+    },
+  },
   publicQuotePage: {
     nameRequiredError: "الرجاء إدخال اسمك للتأكيد",
     genericError: "تعذّر إتمام الإجراء",

@@ -8,6 +8,7 @@ import { listPortalProjects } from "../api/portalProjects";
 import { useClientPortalAuth } from "../auth/ClientPortalAuthContext";
 import { portalStatusLabel, portalStatusTone } from "../lib/projectStatus";
 import type { PortalProject } from "../api/types";
+import { useTranslation } from "../../i18n/I18nProvider";
 
 // MIDAD Phase B2 — Client Portal Dashboard: the project list a Client
 // Portal User currently has an active, explicit grant for (see
@@ -16,6 +17,7 @@ import type { PortalProject } from "../api/types";
 // rows the server already resolved). No progress percentage, no
 // financial figure, no chart — exactly the fields the API returns.
 export function PortalDashboard() {
+  const { t, locale } = useTranslation();
   const { portalUser, logout } = useClientPortalAuth();
   const navigate = useNavigate();
   const [projects, setProjects] = useState<PortalProject[] | null>(null);
@@ -39,22 +41,22 @@ export function PortalDashboard() {
           navigate("/portal/login", { replace: true });
           return;
         }
-        setError(err instanceof ApiError ? err.message : "تعذّر تحميل المشاريع");
+        setError(err instanceof ApiError ? err.message : t("portalDashboardPage.loadError"));
       });
   }
   useEffect(load, []);
 
   return (
     <PortalLayout>
-      <p className="mb-1 text-sm text-stone-500">مرحباً،</p>
+      <p className="mb-1 text-sm text-stone-500">{t("portalDashboardPage.greeting")}</p>
       <h1 className="mb-6 text-xl font-bold text-stone-800">{portalUser?.name}</h1>
 
-      <h2 className="mb-3 font-semibold text-stone-800">مشاريعك</h2>
+      <h2 className="mb-3 font-semibold text-stone-800">{t("portalDashboardPage.yourProjects")}</h2>
 
       {error && <ErrorState message={error} onRetry={load} />}
       {!error && !projects && <Skeleton rows={3} />}
       {!error && projects && projects.length === 0 && (
-        <EmptyState message="لا توجد مشاريع متاحة حالياً. لم يتم منحك صلاحية الوصول إلى أي مشروع بعد." />
+        <EmptyState message={t("portalDashboardPage.emptyMessage")} />
       )}
       {!error && projects && projects.length > 0 && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -65,8 +67,8 @@ export function PortalDashboard() {
                 <div className="mb-3">
                   <Badge tone={portalStatusTone[project.status]}>{portalStatusLabel[project.status]}</Badge>
                 </div>
-                {project.startDate && <p className="text-sm text-stone-500">تاريخ البدء: {formatDate(project.startDate)}</p>}
-                <p className="mt-3 text-sm text-primary">عرض المشروع ←</p>
+                {project.startDate && <p className="text-sm text-stone-500">{t("portalDashboardPage.startDate", { date: formatDate(project.startDate, locale) })}</p>}
+                <p className="mt-3 text-sm text-primary">{t("portalDashboardPage.viewProject")}</p>
               </Card>
             </Link>
           ))}

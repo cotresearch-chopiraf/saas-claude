@@ -1986,6 +1986,32 @@ const en = {
     toAndIssueDate: "To: {{client}} · Issue date: {{date}}",
     taxWithPercent: "Tax ({{percent}}%)",
   },
+  portalDashboardPage: {
+    loadError: "Unable to load projects",
+    greeting: "Hello,",
+    yourProjects: "Your projects",
+    emptyMessage: "No projects available right now. You haven't been granted access to any project yet.",
+    startDate: "Start date: {{date}}",
+    viewProject: "View project ←",
+  },
+  portalProjectDetailPage: {
+    loadError: "Unable to load the project",
+    backToProjects: "Back to your projects",
+    notFound: "Project not found",
+    projectInfoHeading: "Project information",
+    fields: {
+      projectName: "Project name",
+      client: "Client",
+      startDate: "Start date",
+      location: "Location",
+    },
+    documents: {
+      loadError: "Unable to load documents",
+      heading: "Documents",
+      emptyMessage: "No documents available for this project right now",
+      viewDownload: "View/Download",
+    },
+  },
   publicQuotePage: {
     nameRequiredError: "Please enter your name to confirm",
     genericError: "Unable to complete the action",
