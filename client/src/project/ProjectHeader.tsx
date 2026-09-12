@@ -22,7 +22,7 @@ export function ProjectHeader({ project, onOpenMenu }: { project: Project | null
           type="button"
           onClick={onOpenMenu}
           aria-label={t("project.openSectionsMenu")}
-          className="rounded-md border border-stone-300 p-2 text-stone-600 lg:hidden"
+          className="rounded-md border border-stone-300 p-2 text-stone-600"
         >
           <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
             <path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />

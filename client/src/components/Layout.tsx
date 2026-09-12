@@ -128,35 +128,32 @@ const navGroups: NavGroup[] = [
   },
 ];
 
-function linkClass(isActive: boolean, collapsed: boolean) {
-  const base = collapsed ? "flex justify-center rounded-md p-2" : "block rounded-md px-3 py-1.5";
-  return `${base} text-sm ${isActive ? "bg-primary/10 font-medium text-primary" : "text-stone-600 hover:bg-stone-100"}`;
+function linkClass(isActive: boolean) {
+  return `block rounded-md px-3 py-1.5 text-sm ${isActive ? "bg-primary/10 font-medium text-primary" : "text-stone-600 hover:bg-stone-100"}`;
 }
 
-function SidebarNav({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: () => void }) {
+// One presentation now, not a permanent-column/collapsed-rail variant plus
+// a separate mobile one — the sidebar is always drawer content (see
+// Layout below), so there's no narrow "icon-only rail" state to design
+// for. The group icon sits next to its own heading instead of being the
+// collapsed state's only content, so the icons stay meaningfully used
+// rather than becoming dead code.
+function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   const { t } = useTranslation();
   return (
     <nav className="space-y-4">
       {navGroups.map((group) => (
         <div key={group.groupKey}>
-          {!collapsed && (
-            <p className="px-3 text-xs font-semibold uppercase tracking-wide text-stone-400">
-              {t(`nav.groups.${group.groupKey}`)}
-            </p>
-          )}
-          <div className={collapsed ? "mt-1 space-y-1" : "mt-1 space-y-0.5"}>
+          <p className="flex items-center gap-1.5 px-3 text-xs font-semibold uppercase tracking-wide text-stone-400">
+            <group.icon className="shrink-0" />
+            {t(`nav.groups.${group.groupKey}`)}
+          </p>
+          <div className="mt-1 space-y-0.5">
             {group.items.map((item) => {
               const label = t(`nav.items.${item.itemKey}`);
               return (
-                <NavLink
-                  key={item.to}
-                  to={item.to}
-                  end={item.to === "/"}
-                  onClick={onNavigate}
-                  title={collapsed ? label : undefined}
-                  className={({ isActive }) => linkClass(isActive, collapsed)}
-                >
-                  {collapsed ? <group.icon /> : label}
+                <NavLink key={item.to} to={item.to} end={item.to === "/"} onClick={onNavigate} className={({ isActive }) => linkClass(isActive)}>
+                  {label}
                 </NavLink>
               );
             })}
@@ -173,11 +170,19 @@ function SidebarNav({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?
 // page (Dashboard, Quotes, Invoices, Team, Settings) is unaffected — they
 // don't pass this prop, so they keep their exact previous content-column
 // width.
+// The sidebar is a drawer at every width now, not a permanent column that
+// only collapsed to icons or hid below `md` — it never reserves layout
+// space when closed, opening instead as a fixed overlay (Modal's
+// align="end", already RTL-correct: CSS `justify-content: flex-start` is
+// itself direction-aware for a row flex container, landing on the visual
+// right under `dir="rtl"` and the visual left under `dir="ltr"` with no
+// hardcoded physical side — this is the same primitive the project
+// sub-nav drawer below already used on mobile, just no longer limited to
+// mobile).
 export function Layout({ children, fullWidth = false }: { children: ReactNode; fullWidth?: boolean }) {
   const { user, company, logout } = useAuth();
-  const { t, direction } = useTranslation();
-  const [collapsed, setCollapsed] = useState(false);
-  const [mobileOpen, setMobileOpen] = useState(false);
+  const { t } = useTranslation();
+  const [navOpen, setNavOpen] = useState(false);
 
   // `children`'s position in the tree must stay structurally identical
   // regardless of `user` — react-router mounts a page's own Layout call
@@ -188,78 +193,45 @@ export function Layout({ children, fullWidth = false }: { children: ReactNode; f
   // depth in the tree between those two renders — React can no longer
   // match it up by position, so it unmounts the entire page subtree and
   // mounts a fresh one, silently resetting every bit of that page's own
-  // state right as the page loads. The sidebar/header markup below is
-  // therefore always rendered; only ITS CONTENTS are conditioned on
-  // `user`, never whether `children` itself is nested inside it.
+  // state right as the page loads. The header markup below is therefore
+  // always rendered; only ITS CONTENTS are conditioned on `user`, never
+  // whether `children` itself is nested inside it.
   return (
     <div className="min-h-screen bg-stone-50">
-      <div className="flex">
-        {user && (
-          <aside
-            className={`sticky top-0 hidden h-screen shrink-0 overflow-y-auto border-e border-stone-200 bg-white p-4 transition-all md:flex md:flex-col ${
-              collapsed ? "w-16" : "w-64"
-            }`}
-          >
-            <div className={`mb-5 flex items-center ${collapsed ? "justify-center" : "justify-between"}`}>
-              {!collapsed && (
-                <Link to="/" className="truncate text-lg font-bold text-primary">
-                  {company?.name ?? "MIDAD"}
-                </Link>
-              )}
+      {user && (
+        <header className="sticky top-0 z-10 border-b border-stone-200 bg-white">
+          <div className="flex items-center justify-between gap-3 px-4 py-3 lg:px-6">
+            <div className="flex items-center gap-3">
               <button
                 type="button"
-                onClick={() => setCollapsed((v) => !v)}
-                aria-label={collapsed ? t("nav.expandMenu") : t("nav.collapseMenu")}
-                title={collapsed ? t("nav.expandMenuShort") : t("nav.collapseMenuShort")}
-                className="rounded-md p-1.5 text-stone-400 hover:bg-stone-100 hover:text-stone-600"
+                onClick={() => setNavOpen(true)}
+                aria-label={t("nav.openNavMenu")}
+                className="rounded-md border border-stone-300 p-2 text-stone-600"
               >
-                <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true" style={{ transform: direction === "ltr" ? "scaleX(-1)" : undefined }}>
-                  <path d={collapsed ? "M7 5l5 5-5 5" : "M13 5l-5 5 5 5"} stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                <svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                  <path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
                 </svg>
               </button>
+              <Link to="/" className="text-base font-bold text-primary">
+                {company?.name ?? "MIDAD"}
+              </Link>
             </div>
-            <SidebarNav collapsed={collapsed} />
-          </aside>
-        )}
-
-        <div className="min-w-0 flex-1">
-          {user && (
-            <header className="sticky top-0 z-10 border-b border-stone-200 bg-white">
-              <div className="flex items-center justify-between gap-3 px-4 py-3 lg:px-6">
-                <div className="flex items-center gap-3 md:hidden">
-                  <button
-                    type="button"
-                    onClick={() => setMobileOpen(true)}
-                    aria-label={t("nav.openNavMenu")}
-                    className="rounded-md border border-stone-300 p-2 text-stone-600"
-                  >
-                    <svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                      <path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                    </svg>
-                  </button>
-                  <Link to="/" className="text-base font-bold text-primary">
-                    {company?.name ?? "MIDAD"}
-                  </Link>
-                </div>
-                <div className="hidden md:block" />
-                <div className="flex items-center gap-4 text-sm text-stone-600">
-                  <LanguageSwitcher />
-                  <NotificationBell />
-                  <span className="hidden sm:inline">{user.name}</span>
-                  <button onClick={logout} className="text-stone-400 hover:text-stone-700">
-                    {t("nav.logout")}
-                  </button>
-                </div>
-              </div>
-            </header>
-          )}
-          <main className={fullWidth ? "" : "mx-auto max-w-5xl px-6 py-8"}>{children}</main>
-        </div>
-      </div>
+            <div className="flex items-center gap-4 text-sm text-stone-600">
+              <LanguageSwitcher />
+              <NotificationBell />
+              <span className="hidden sm:inline">{user.name}</span>
+              <button onClick={logout} className="text-stone-400 hover:text-stone-700">
+                {t("nav.logout")}
+              </button>
+            </div>
+          </div>
+        </header>
+      )}
+      <main className={fullWidth ? "" : "mx-auto max-w-5xl px-6 py-8"}>{children}</main>
 
       {user && (
-        <Modal open={mobileOpen} onClose={() => setMobileOpen(false)} align="end" className="w-72 max-w-[85vw]" title={t("nav.navigationTitle")}>
-          <SidebarNav collapsed={false} onNavigate={() => setMobileOpen(false)} />
+        <Modal open={navOpen} onClose={() => setNavOpen(false)} align="end" className="w-72 max-w-[85vw]" title={t("nav.navigationTitle")}>
+          <SidebarNav onNavigate={() => setNavOpen(false)} />
         </Modal>
       )}
     </div>

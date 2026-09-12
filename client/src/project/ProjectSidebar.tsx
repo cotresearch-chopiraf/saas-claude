@@ -49,21 +49,14 @@ function NavItems({ projectId, onNavigate }: { projectId: string; onNavigate?: (
   );
 }
 
-// Desktop: a fixed-width sidebar, placed first in DOM so it renders on the
-// visual right under the app's RTL direction (matching every other
-// right-anchored nav in this app), always visible at lg+ widths.
-export function ProjectSidebarDesktop({ projectId }: { projectId: string }) {
-  return (
-    <aside className="hidden w-64 shrink-0 border-e border-stone-200 bg-white p-4 lg:block">
-      <NavItems projectId={projectId} />
-    </aside>
-  );
-}
-
-// Mobile: the same nav rendered inside the header's drawer overlay (see
-// ProjectHeader.tsx) — one nav definition, two presentations, so the
-// section list is never duplicated.
-export function ProjectSidebarMobile({ projectId, onNavigate }: { projectId: string; onNavigate: () => void }) {
+// The project sub-nav is drawer content at every width now, not a
+// permanent column reserved next to the Dashboard — see
+// ProjectWorkspace.tsx, which renders this inside the same Modal overlay
+// (align="end") regardless of viewport. Kept as `ProjectSidebarDesktop`
+// (rather than renamed) because ProjectSidebar.test.tsx renders it
+// directly; there is no longer a separate "desktop" presentation to
+// distinguish it from.
+export function ProjectSidebarDesktop({ projectId, onNavigate }: { projectId: string; onNavigate?: () => void }) {
   return (
     <div className="p-2">
       <NavItems projectId={projectId} onNavigate={onNavigate} />
