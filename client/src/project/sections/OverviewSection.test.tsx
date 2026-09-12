@@ -465,9 +465,11 @@ describe("<OverviewSection/> (Executive Command Center)", () => {
     mockApi("owner", { tasks: [{ ...fixtureOverdueTask, progressPercent: 60 }] });
     renderSection();
     await waitFor(() => expect(screen.getByText("نشط")).toBeInTheDocument());
-    // The contract value legitimately appears twice (identity strip +
-    // financial waterfall) — both are the same real figure, by design.
-    expect(screen.getAllByText(/251,975\.42|251975\.42/).length).toBeGreaterThanOrEqual(2);
+    // Dashboard 3.0: the contract value now renders once, in the Financial
+    // Control flow — the Verdict block's headline numbers are progress /
+    // cost consumption / variance, not contract value, so this real figure
+    // is no longer duplicated on purpose.
+    expect(screen.getAllByText(/251,975\.42|251975\.42/).length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText(/5,000\.00|5000\.00/)).not.toBeInTheDocument();
     expect(screen.getAllByText("60%").length).toBeGreaterThan(0);
   });
@@ -487,11 +489,11 @@ describe("<OverviewSection/> (Executive Command Center)", () => {
     expect(screen.getByText(/300\.00/)).toBeInTheDocument();
     expect(screen.getByText(/200\.00/)).toBeInTheDocument();
     expect(screen.getByText(/543\.21/)).toBeInTheDocument();
-    // Dashboard 2.0: the expected variance legitimately appears twice by
-    // design — once as one of the Executive Verdict hero's three headline
-    // numbers, once in the Performance panel's own variance callout — both
-    // read the same real forecast.methods.commitment_aware.variance figure.
-    expect(screen.getAllByText(/222\.22/).length).toBeGreaterThanOrEqual(2);
+    // Dashboard 3.0: the Verdict block's headline number for variance
+    // shows the percent only (matching its "14.8%"-style reference), so
+    // the raw money figure now renders once, in the Financial Control
+    // flow's own variance callout.
+    expect(screen.getAllByText(/222\.22/).length).toBeGreaterThanOrEqual(1);
   });
 
   it("Financial Command Center: flags a negative variance as an over-budget forecast, never silently", async () => {
@@ -593,12 +595,11 @@ describe("<OverviewSection/> (Executive Command Center)", () => {
     mockApi("owner");
     renderSection();
     await waitFor(() => expect(screen.getByText("يحتاج إلى انتباه")).toBeInTheDocument());
-    // Dashboard 2.0: the same honest "nothing needs attention" fact
-    // legitimately appears twice by design — once as the Executive
-    // Verdict hero's "why" line (when there is no top attention item to
-    // show), once as the Risk panel's own empty state below — both are
-    // the same real fact, not two different claims.
-    expect(screen.getAllByText("لا توجد حالياً بنود تحتاج إلى انتباه.").length).toBeGreaterThanOrEqual(2);
+    // Dashboard 3.0: the Verdict block's one-line insight is now always the
+    // cost-vs-progress relationship (a different, always-present fact), so
+    // this honest empty state renders exactly once, in the Exceptions
+    // section itself — no longer duplicated in a separate hero strip.
+    expect(screen.getByText("لا توجد حالياً بنود تحتاج إلى انتباه.")).toBeInTheDocument();
   });
 
   it("Needs Attention: aggregates real risk signals from every domain — budget alert, overdue task, critical punch item, IPC awaiting certification, pending commitment, measurement awaiting approval", async () => {
@@ -611,11 +612,10 @@ describe("<OverviewSection/> (Executive Command Center)", () => {
       measurements: [fixtureMeasurementSubmitted],
     });
     renderSection();
-    // The top-priority item legitimately appears twice by design: once as
-    // the Identity strip's inline "Executive Verdict" highlight, and once
-    // in the full Needs Attention list below — both read the same real
-    // AttentionItem, not two different figures.
-    await waitFor(() => expect(screen.getAllByText("استهلاك الميزانية وصل إلى 105%").length).toBeGreaterThanOrEqual(2));
+    // Dashboard 3.0: the Verdict block no longer echoes the top attention
+    // item (its insight line is the cost-vs-progress relationship instead),
+    // so this real AttentionItem now renders once, in the Exceptions list.
+    await waitFor(() => expect(screen.getAllByText("استهلاك الميزانية وصل إلى 105%").length).toBeGreaterThanOrEqual(1));
     expect(screen.getByText(/مهمة متأخرة عن الجدول الزمني/)).toBeInTheDocument();
     expect(screen.getByText(/ملاحظة حرجة مفتوحة/)).toBeInTheDocument();
     expect(screen.getByText(/شهادة دفع \(IPC\) بانتظار التصديق/)).toBeInTheDocument();
@@ -689,6 +689,6 @@ describe("<OverviewSection/> (Executive Command Center)", () => {
     mockApi("member");
     renderSection();
     await waitFor(() => expect(screen.getByText("المركز المالي")).toBeInTheDocument());
-    expect(screen.getAllByText(/251,975\.42|251975\.42/).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText(/251,975\.42|251975\.42/).length).toBeGreaterThanOrEqual(1);
   });
 });

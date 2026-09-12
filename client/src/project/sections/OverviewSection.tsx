@@ -1,8 +1,6 @@
-import { useEffect, useState, type ReactNode, type SVGProps } from "react";
+import { useEffect, useState, type SVGProps } from "react";
 import { Link } from "react-router-dom";
-import { Card } from "../../ui/Card";
 import { Badge } from "../../ui/Badge";
-import { MetricCard } from "../../ui/MetricCard";
 import { ErrorState } from "../../ui/ErrorState";
 import { Skeleton } from "../../ui/Skeleton";
 import { Button } from "../../ui/Button";
@@ -41,57 +39,36 @@ import type {
 } from "../../api/types";
 
 // ─────────────────────────────────────────────────────────────────────────
-// MIDAD — Dashboard 2.0: a familiar widget grid, MIDAD-deep underneath.
+// MIDAD — Dashboard 3.0: Construction Commercial Intelligence.
 //
-// Explicit direction (superseding this file's earlier "look, don't copy"
-// framing): a user coming from Procore/Buildertrend/Autodesk Construction
-// Cloud/Sage should recognize this screen's STRUCTURE on sight — a row of
-// instrument tiles, then a grid of independently titled widget cards, each
-// carrying its own bold header bar and a uniform card weight (same border/
-// shadow on every widget, never a "primary vs. secondary tier" of shadow
-// intensity) — while every number and every drill-down this page has ever
-// shown stays fully present, just reorganized into that familiar shape.
-// The car-dashboard reading order still holds: (1) the instrument cluster
-// (KpiRow) — the few gauges/lights a driver reads at a glance — plus one
-// slim verdict strip. (2) Risk — health chips + the prioritized action
-// list, at the reading-start position, because risk outranks detail in
-// urgency. (3) Financial Flow — the Contract → Budget → Actual →
-// Committed → Forecast chain as one connected track, in its own widget.
-// (4) Cost vs Progress — the two radial gauges + planned/spent/remaining,
-// its own peer widget beside Financial Flow (previously nested inside one
-// combined panel; split out here purely as a container change — same
-// props, same links, same text). (5) Delivery/Cash/Commercial — three
-// widgets, same card weight as everything above them now, position (not a
-// lighter shadow) is what marks them as next-level detail. (6) Pulse — a
-// minimal activity feed and a bare row of quick-create links, the
-// lowest-priority information on the page.
+// A full presentational rebuild, not a rearrangement of Dashboard 2.0's
+// card grid. Dashboard 2.0 (and its "widget grid" follow-up) still
+// presented every fact as an equal-weight bordered/shadowed tile — this
+// version deliberately has almost none of that: typography, whitespace,
+// and dividers carry the hierarchy instead of card chrome. Reading order
+// still answers, in order: WHAT is happening (the verdict + its three
+// headline numbers) → WHY (the one-line insight + the per-domain health
+// strip) → the connected financial and delivery picture → WHAT'S THE
+// IMPACT (Cost vs Progress, Cash, Commercial) → WHAT TO DO (Exceptions,
+// Quick Actions). Source order equals reading order on every breakpoint,
+// unchanged invariant from every earlier version of this page — no
+// per-breakpoint reordering.
 //
-// Source order equals reading/priority order on every breakpoint (the same
-// invariant this page has always held): the same JSX collapses to that
-// exact sequence on mobile with no per-breakpoint `order-N` overrides.
-// Every figure still comes from this codebase's own already-authoritative
+// Every number still comes from this codebase's own already-authoritative
 // endpoints (Contract/Budget/Forecast/Cash Flow/Commitments/IPCs/
 // Measurements/Schedule/Punch List/Budget Alerts/Labor Cost/BOQ, plus the
 // canonical audit_events feed filtered client-side to this project's own
-// entity ids) — nothing here computes a second version of a financial
-// number the backend already owns, and this redesign changes none of that
-// math. The two client-side *compositions* of existing facts (never new
-// calculations) are unchanged from the previous design: the prioritized
-// Needs Attention list, and the project-scoped Activity feed. The one
-// genuine chart on this page (the radial gauge) renders a single
-// already-real percentage — no time series exists in this codebase to
-// plot, and none is invented here; it is now reused at a second, smaller
-// size inside the instrument cluster (same component, a `size` prop) the
-// same way Sage's own project cards lead with one large progress ring.
+// entity ids). computeHealth, buildNeedsAttention, and deriveVerdict are
+// reused verbatim, unchanged, from every earlier version of this page —
+// this rebuild replaces how their output is presented, never what they
+// compute. The cost-vs-progress gap headline is now computed once and
+// reused at two depths (the Verdict's one-line insight, and the full
+// Cost vs Progress section) — the same real relationship shown twice on
+// purpose, not two different claims. No new KPI, alert, or score is
+// invented anywhere on this page.
 //
 // Fetching is one Promise.all, unchanged.
 // ─────────────────────────────────────────────────────────────────────────
-
-const statusTone: Record<Project["status"], "success" | "warning" | "neutral"> = {
-  active: "success",
-  on_hold: "warning",
-  completed: "neutral",
-};
 
 const alertSeverityKey: Record<BudgetAlert["severity"], string> = {
   info: "severityInfo",
@@ -276,82 +253,100 @@ export function OverviewSection() {
     measurementsAwaitingApproval,
     measurementsHaveData: data.measurements.length > 0,
   });
+  const verdict = deriveVerdict(health);
+
+  // The cost-vs-progress relationship, computed once and reused at two
+  // depths: the Verdict block's one-line insight, and the full Cost vs
+  // Progress section below — the same real relationship, not two
+  // different claims.
+  const costConsumption = data.budget.totals.planned > 0 ? (data.budget.totals.spent / data.budget.totals.planned) * 100 : null;
+  const progressCostGap = avgProgress !== null && costConsumption !== null ? costConsumption - avgProgress : null;
+  const gapIsWarning = progressCostGap !== null && progressCostGap > 5;
+  const progressCostHeadline =
+    progressCostGap === null
+      ? t("dashboard.costProgress.noProgressData")
+      : progressCostGap > 5
+        ? t("dashboard.costProgress.costAheadOfProgress", { gap: formatPercent(progressCostGap, 0, locale) })
+        : progressCostGap < -5
+          ? t("dashboard.costProgress.progressAheadOfCost", { gap: formatPercent(Math.abs(progressCostGap), 0, locale) })
+          : t("dashboard.costProgress.aligned");
 
   return (
-    <div className="flex flex-col gap-6 lg:gap-7">
-      {/* The instrument cluster: a familiar top row of stat cards (the same
-          "icon + big number + label" convention Procore/Buildertrend/
-          Autodesk Construction Cloud all use for their own dashboards) so a
-          user coming from any of those platforms recognizes this screen
-          immediately, plus one slim warning-light strip underneath for the
-          verdict — never a full-width colored takeover. Everything MIDAD-
-          specific (the connected financial chain, the prioritized risk
-          rail, the cost-vs-progress relationship) still lives one scroll
-          down, unchanged — this row is the dashboard, not the whole car. */}
-      <KpiRow
+    <div className="flex flex-col gap-10 lg:gap-14">
+      <VerdictBlock
         project={project}
-        contract={mainContract}
-        avgProgress={avgProgress}
-        budget={data.budget}
-        forecastMethod={forecastMethod}
-        currency={data.forecast.currency}
-        overdueTasks={overdueTasks}
-        scheduleHasData={scheduleTasks.length > 0}
+        verdict={verdict}
+        insight={progressCostHeadline}
+        progress={avgProgress}
+        costConsumption={costConsumption}
+        variancePercent={forecastMethod.variancePercent}
+        overBudget={forecastMethod.variance < 0}
+        lastActivityAt={data.activity[0]?.createdAt ?? project.createdAt}
       />
-      <AlertStrip verdict={deriveVerdict(health)} topAttention={needsAttention[0]} lastActivityAt={data.activity[0]?.createdAt ?? project.createdAt} />
 
-      {/* Risk sits at the reading-start position (right in Arabic, left in
-          English/French) ahead of Financial Flow / Cost vs Progress —
-          priority order, not detail volume, decides source order. The
-          right column stacks two peer widgets (previously one combined
-          panel) so this reads as a grid of independently titled cards, the
-          same shape Buildertrend/Autodesk's own dashboards use, rather
-          than two unequal "hero panels". */}
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-12 xl:gap-6">
+      <HealthLine health={health} projectId={projectId} />
+
+      {/* xl, not lg: the desktop sidebar (ProjectSidebar.tsx) also claims
+          its fixed width starting at `lg`, cutting the content area's real
+          width well below 1024px at that exact breakpoint — every
+          multi-column switch on this page waits for `xl` for the same
+          reason (confirmed via a live 1024px screenshot in an earlier
+          round of this dashboard). */}
+      <div className="grid grid-cols-1 gap-10 xl:grid-cols-12 xl:gap-12">
+        <div className="xl:col-span-8">
+          <FinancialControl contract={mainContract} forecast={data.forecast} revision={latestRevision} projectId={projectId} />
+        </div>
         <div className="xl:col-span-4">
-          <RiskPanel health={health} items={needsAttention} projectId={projectId} />
-        </div>
-        <div className="flex flex-col gap-5 xl:col-span-8">
-          <FinancialFlowPanel contract={mainContract} forecast={data.forecast} revision={latestRevision} projectId={projectId} />
-          <CostProgressPanel budget={data.budget} avgProgress={avgProgress} />
+          <ExceptionsPanel items={needsAttention} />
         </div>
       </div>
 
-      {/* Same uniform widget-card weight as every panel above (no separate
-          "lighter tier" shadow anymore) — position in the reading order is
-          what marks these as next-level detail, matching how competitor
-          dashboards give every widget the same card treatment regardless
-          of its place on the page. xl, not lg: the desktop sidebar
-          (ProjectSidebar.tsx) also claims its fixed width starting at
-          `lg`, so three columns at that same breakpoint left each widget
-          too little real width (confirmed via a live 1024px screenshot). */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        <DeliveryStrip
-          projectId={projectId}
-          tasks={data.tasks}
-          overdueTasks={overdueTasks}
-          nextMilestone={nextMilestone}
-          avgProgress={avgProgress}
-          measurementsAwaitingApproval={measurementsAwaitingApproval}
-        />
-        <CashStrip cashFlow={data.cashFlow} projectId={projectId} />
-        <CommercialStrip
-          projectId={projectId}
-          totalCommitted={totalCommitted}
-          approvedCommitted={approvedCommitted}
-          pendingCommitted={pendingCommitted}
-          pendingCount={pendingCommitments.length}
-          awaitingCertification={ipcsAwaitingCertification.length}
-          awaitingApproval={ipcsAwaitingApproval.length}
-          certifiedTotal={certifiedTotal}
-          certifiedCount={certifiedIpcs.length}
-          currency={data.forecast.currency}
-          laborCost={data.laborCost}
-        />
+      <CostVsProgress
+        budget={data.budget}
+        avgProgress={avgProgress}
+        costConsumption={costConsumption}
+        gap={progressCostGap}
+        warnGap={gapIsWarning}
+        headline={progressCostHeadline}
+      />
+
+      <div className="grid grid-cols-1 gap-10 border-t border-stone-200 pt-10 xl:grid-cols-3 xl:gap-0 xl:divide-x xl:divide-x-reverse xl:divide-stone-200">
+        <div className="xl:px-8 xl:first:ps-0 xl:last:pe-0">
+          <DeliveryColumn
+            projectId={projectId}
+            tasks={data.tasks}
+            overdueTasks={overdueTasks}
+            nextMilestone={nextMilestone}
+            avgProgress={avgProgress}
+            measurementsAwaitingApproval={measurementsAwaitingApproval}
+          />
+        </div>
+        <div className="xl:px-8">
+          <CashColumn cashFlow={data.cashFlow} projectId={projectId} />
+        </div>
+        <div className="xl:px-8">
+          <CommercialColumn
+            projectId={projectId}
+            totalCommitted={totalCommitted}
+            approvedCommitted={approvedCommitted}
+            pendingCommitted={pendingCommitted}
+            pendingCount={pendingCommitments.length}
+            awaitingCertification={ipcsAwaitingCertification.length}
+            awaitingApproval={ipcsAwaitingApproval.length}
+            certifiedTotal={certifiedTotal}
+            certifiedCount={certifiedIpcs.length}
+            currency={data.forecast.currency}
+            laborCost={data.laborCost}
+          />
+        </div>
       </div>
 
-      <ActivityFeedCard events={projectActivity} />
-      <QuickActionsCard projectId={projectId} />
+      <div className="grid grid-cols-1 gap-8 border-t border-stone-200 pt-8 xl:grid-cols-3 xl:gap-12">
+        <div className="xl:col-span-2">
+          <ActivityPulse events={projectActivity} />
+        </div>
+        <QuickActionsRow projectId={projectId} />
+      </div>
     </div>
   );
 }
@@ -369,31 +364,15 @@ function HeaderSkeleton({ project }: { project: Project | null }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// Icon set — a small, consistent, stroke-based line-icon language (the same
-// visual family professional construction-SaaS dashboards use), inlined as
-// plain SVG so no new dependency is introduced anywhere in this codebase.
+// A deliberately small icon set — four line icons total, used only where
+// an icon carries real meaning (exception severity, the "+" on a quick
+// action). Every other section header on this page is plain typography,
+// no icon badge — this is the biggest single visual break from every
+// earlier version of this dashboard.
 // ─────────────────────────────────────────────────────────────────────────
 type IconProps = SVGProps<SVGSVGElement>;
-const iconBase = { width: 18, height: 18, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.75, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
+const iconBase = { width: 15, height: 15, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.75, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
 
-const IconMoney = (p: IconProps) => (
-  <svg {...iconBase} {...p}><circle cx="12" cy="12" r="9" /><path d="M9 15c0 1.1 1.3 2 3 2s3-.9 3-2-1.3-1.6-3-2-3-.9-3-2 1.3-2 3-2 3 .9 3 2" /></svg>
-);
-const IconCalendar = (p: IconProps) => (
-  <svg {...iconBase} {...p}><rect x="3.5" y="5" width="17" height="15.5" rx="2" /><path d="M3.5 9.5h17M8 3v4M16 3v4" /></svg>
-);
-const IconTrend = (p: IconProps) => (
-  <svg {...iconBase} {...p}><path d="M4 16l5-5 4 4 7-8" /><path d="M14 6h6v6" /></svg>
-);
-const IconPackage = (p: IconProps) => (
-  <svg {...iconBase} {...p}><path d="M21 8.5v7L12 20l-9-4.5v-7L12 4z" /><path d="M3.5 8.5L12 12l8.5-3.5M12 12v8" /></svg>
-);
-const IconBars = (p: IconProps) => (
-  <svg {...iconBase} {...p}><path d="M5 20V10M12 20V4M19 20v-7" /></svg>
-);
-const IconShield = (p: IconProps) => (
-  <svg {...iconBase} {...p}><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z" /></svg>
-);
 const IconAlertTriangle = (p: IconProps) => (
   <svg {...iconBase} {...p}><path d="M10.5 4 2 19h20L13.5 4a1.7 1.7 0 0 0-3 0z" /><path d="M12 10v4M12 17h.01" /></svg>
 );
@@ -403,406 +382,108 @@ const IconAlertCircle = (p: IconProps) => (
 const IconInfo = (p: IconProps) => (
   <svg {...iconBase} {...p}><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></svg>
 );
-const IconActivity = (p: IconProps) => (
-  <svg {...iconBase} {...p}><path d="M3 12h4l2-7 4 14 2-7h6" /></svg>
-);
-const IconClipboard = (p: IconProps) => (
-  <svg {...iconBase} {...p}><rect x="5" y="4.5" width="14" height="17" rx="2" /><path d="M9 4V3.5A1.5 1.5 0 0 1 10.5 2h3A1.5 1.5 0 0 1 15 3.5V4M8.5 11h7M8.5 15h5" /></svg>
-);
-const IconWallet = (p: IconProps) => (
-  <svg {...iconBase} {...p}><path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h11A2.5 2.5 0 0 1 20 7.5v9a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5z" /><path d="M15.5 12.5h2.5a1 1 0 0 0 0-2h-2.5a1 1 0 0 0 0 2z" /></svg>
-);
 const IconPlus = (p: IconProps) => (
   <svg {...iconBase} {...p}><path d="M12 5v14M5 12h14" /></svg>
 );
-const IconClock = (p: IconProps) => (
-  <svg {...iconBase} {...p}><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3.5 2" /></svg>
-);
 
-const healthIcon: Record<string, (p: IconProps) => JSX.Element> = {
-  cost: IconMoney,
-  schedule: IconCalendar,
-  cashflow: IconWallet,
-  procurement: IconPackage,
-  progress: IconBars,
-  compliance: IconShield,
-};
-
-// A small, colored icon badge used consistently as every section's visual
-// anchor — the same "icon in a tinted rounded square, next to a heading"
-// pattern professional dashboards (Procore/Autodesk-class) use throughout.
-const badgeTone: Record<"primary" | "success" | "warning" | "danger" | "info" | "neutral", string> = {
-  primary: "bg-primary/10 text-primary",
-  success: "bg-success-100 text-success-700",
-  warning: "bg-warning-100 text-warning-700",
-  danger: "bg-danger-100 text-danger-700",
-  info: "bg-info-100 text-info-700",
-  neutral: "bg-stone-100 text-stone-500",
-};
-// The same colored-edge convention the Needs Attention list already used
-// (`attentionAccent` below), reused on the instrument-cluster tiles too —
-// a `border-s-4` (RTL-safe: the visual right in Arabic) colored bar is the
-// one accent every reference dashboard leans on somewhere (Sage's colored
-// open-items counts, Autodesk's colored-left-border RFI rows).
-const accentBorderTone: Record<keyof typeof badgeTone, string> = {
-  primary: "border-s-primary",
-  success: "border-s-success-500",
-  warning: "border-s-warning-500",
-  danger: "border-s-danger-500",
-  info: "border-s-info-500",
-  neutral: "border-s-stone-300",
-};
-// Widget weight is now uniform: every top-level card on this page (Risk,
-// Financial Flow, Cost vs Progress, Delivery, Cash, Commercial, Activity)
-// renders through the same `Panel` shell, same border/shadow — matching
-// how competitor dashboards give every widget equal card treatment and let
-// position, not a lighter shadow, communicate priority. `SectionTier`
-// still exists purely to size a header's icon badge and title text: a
-// top-level widget's own title is `primary`-sized; a sub-heading *inside*
-// one widget (the two headings stacked inside Risk; each sub-block's own
-// heading inside Delivery/Cash/Commercial) is `secondary`; the Activity
-// feed's quieter title is `tertiary`.
-type SectionTier = "primary" | "secondary" | "tertiary";
-const badgeSizeByTier: Record<SectionTier, string> = {
-  primary: "h-8 w-8",
-  secondary: "h-7 w-7",
-  tertiary: "h-6 w-6",
-};
-const iconPxByTier: Record<SectionTier, number> = { primary: 16, secondary: 14, tertiary: 13 };
-const titleSizeByTier: Record<SectionTier, string> = {
-  primary: "text-[15px] font-bold",
-  secondary: "text-sm font-bold",
-  tertiary: "text-sm font-semibold",
-};
-const panelPaddingByTier: Record<SectionTier, string> = {
-  primary: "p-4 lg:p-5",
-  secondary: "p-4",
-  tertiary: "p-3.5 lg:p-4",
-};
-
-function IconBadge({
-  icon: Icon,
-  tone = "primary",
-  tier = "primary",
-}: {
-  icon: (p: IconProps) => JSX.Element;
-  tone?: keyof typeof badgeTone;
-  tier?: SectionTier;
-}) {
-  return (
-    <span className={`flex ${badgeSizeByTier[tier]} shrink-0 items-center justify-center rounded-lg ${badgeTone[tone]}`}>
-      <Icon width={iconPxByTier[tier]} height={iconPxByTier[tier]} />
-    </span>
-  );
-}
-
-function SectionHeader({
-  icon,
-  tone = "primary",
-  tier = "primary",
-  title,
-  meta,
-  action,
-}: {
-  icon: (p: IconProps) => JSX.Element;
-  tone?: keyof typeof badgeTone;
-  tier?: SectionTier;
-  title: string;
-  meta?: string;
-  action?: ReactNode;
-}) {
-  return (
-    <div className={`${tier === "tertiary" ? "mb-3" : "mb-4"} flex items-center justify-between gap-3`}>
-      <div className="flex items-center gap-2.5">
-        <IconBadge icon={icon} tone={tone} tier={tier} />
-        <div>
-          <h2 className={`${titleSizeByTier[tier]} text-stone-900`}>{title}</h2>
-          {meta && <p className="text-xs text-stone-400">{meta}</p>}
-        </div>
-      </div>
-      {action}
-    </div>
-  );
-}
-
-// A small label row above a sub-block inside a strip (e.g. "Procurement"
-// under the Commercial strip) — never its own card, just a quiet divider
-// between sub-blocks that share one strip's boundary.
-function MicroHeading({ title, action, className = "" }: { title: string; action?: ReactNode; className?: string }) {
-  return (
-    <div className={`mb-2 flex items-center justify-between gap-3 ${className}`}>
-      <h3 className="text-[11px] font-semibold uppercase tracking-wide text-stone-400">{title}</h3>
-      {action}
-    </div>
-  );
-}
-
-// The one card shell every widget on this page shares — Risk, Financial
-// Flow, Cost vs Progress, the three Delivery/Cash/Commercial strips, and
-// Activity all render through this same `Panel`, same border/shadow, same
-// rounded corners — the uniform "every widget is a peer card" convention
-// Buildertrend/Autodesk/Sage all use, letting position in the page (not a
-// lighter shadow on some cards) communicate which detail is more central.
-function Panel({ className = "", tier = "primary", children }: { className?: string; tier?: SectionTier; children: ReactNode }) {
-  return (
-    <Card
-      className={`h-full border-stone-200/80 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_1px_8px_rgba(15,23,42,0.03)] ${panelPaddingByTier[tier]} ${className}`}
-    >
-      {children}
-    </Card>
-  );
-}
-
-// A compact label:value list row — the secondary-tier equivalent of
-// MetricCard, used inside strips where a full card-per-metric grid would
-// be too heavy for a tier that's supposed to read as quieter than Risk/
-// Performance.
-function StatRow({ label, value, hint, tone = "default" }: { label: string; value: string; hint?: string; tone?: "default" | "success" | "warning" | "danger" }) {
-  const valueColor = tone === "success" ? "text-success-700" : tone === "warning" ? "text-warning-700" : tone === "danger" ? "text-danger-700" : "text-stone-800";
-  return (
-    <div className="flex items-baseline justify-between gap-3 py-2 first:pt-0 last:pb-0">
-      <span className="shrink-0 text-xs text-stone-500">{label}</span>
-      <span className="min-w-0 text-end">
-        <span className={`block break-words text-sm font-bold ${valueColor}`}>{value}</span>
-        {hint && <span className="mt-0.5 block break-words text-[11px] text-stone-400">{hint}</span>}
-      </span>
-    </div>
-  );
-}
-
-// The 2-up grid variant of StatRow, for the few places a strip still needs
-// two numbers side by side (e.g. awaiting-certification / awaiting-approval
-// counts) rather than a stacked list.
-function StatBlock({ label, value, tone = "default" }: { label: string; value: string; tone?: "default" | "success" | "warning" | "danger" }) {
-  const valueColor = tone === "success" ? "text-success-700" : tone === "warning" ? "text-warning-700" : tone === "danger" ? "text-danger-700" : "text-stone-800";
-  return (
-    <div className="min-w-0">
-      <p className="text-xs text-stone-500">{label}</p>
-      <p className={`mt-0.5 break-words text-sm font-bold ${valueColor}`}>{value}</p>
-    </div>
-  );
-}
-
-// ── Instrument cluster: KPI row + verdict strip ─────────────────────────
-// `deriveVerdict` is unchanged: worst tone wins across the already-computed
-// health array (one critical indicator makes the whole verdict critical,
-// regardless of how many others are healthy) — a summary of facts already
-// shown individually below, never a new score.
-function deriveVerdict(health: HealthIndicator[]): "healthy" | "watch" | "critical" {
-  if (health.some((h) => h.tone === "critical")) return "critical";
-  if (health.some((h) => h.tone === "watch")) return "watch";
-  return "healthy";
-}
-
-// One card = one instrument (speedometer, fuel gauge, warning light) — the
-// same "icon + big number + label" tile every competitor dashboard
-// (Procore, Buildertrend, Autodesk Construction Cloud) leads with, so a
-// user coming from any of them recognizes this row immediately. Deeper,
-// MIDAD-specific analysis (the connected financial chain, the prioritized
-// risk rail, the cost-vs-progress relationship) is one scroll down,
-// unabridged — this row is only the familiar entry point, not a
-// replacement for the depth.
-function StatCard({
-  icon,
-  tone = "primary",
-  label,
-  value,
-  valueTone = "default",
-  hint,
-}: {
-  icon: (p: IconProps) => JSX.Element;
-  tone?: keyof typeof badgeTone;
-  label: string;
-  value: string;
-  valueTone?: "default" | "success" | "warning" | "danger";
-  hint?: string;
-}) {
-  const valueColor =
-    valueTone === "danger" ? "text-danger-700" : valueTone === "success" ? "text-success-700" : valueTone === "warning" ? "text-warning-700" : "text-stone-900";
-  // min-w-0 + break-words: same MetricCard-documented fix as every other
-  // stat component on this page — a long formatted money string must wrap
-  // inside its own card, never overlap the next one. border-s-4: the same
-  // colored-edge convention as the Needs Attention rows below.
-  return (
-    <div className={`min-w-0 rounded-lg border-y border-e border-s-4 border-stone-200 bg-white p-3.5 shadow-[0_1px_2px_rgba(15,23,42,0.04)] ${accentBorderTone[tone]}`}>
-      <div className="flex items-center gap-2">
-        <IconBadge icon={icon} tone={tone} tier="secondary" />
-        <span className="truncate text-xs font-medium text-stone-500">{label}</span>
-      </div>
-      <p className={`mt-2 break-words text-xl font-extrabold tracking-tight ${valueColor}`}>{value}</p>
-      {hint && <p className="mt-0.5 truncate text-[11px] text-stone-400">{hint}</p>}
-    </div>
-  );
-}
-
-// The Progress tile specifically leads with a small radial ring instead of
-// plain text — the same "big progress ring is the dashboard's centerpiece"
-// convention Sage's own project cards use (a large "70%" ring next to
-// Total Invoiced), reusing this page's one existing gauge component at a
-// smaller size rather than inventing a second chart primitive.
-function RingStatCard({
-  icon,
-  tone = "primary",
-  label,
-  value,
-  color,
-  hint,
-}: {
-  icon: (p: IconProps) => JSX.Element;
-  tone?: keyof typeof badgeTone;
-  label: string;
-  value: number | null;
-  color: string;
-  hint?: string;
-}) {
-  const { locale } = useTranslation();
-  return (
-    <div className={`flex min-w-0 items-center gap-3 rounded-lg border-y border-e border-s-4 border-stone-200 bg-white p-3.5 shadow-[0_1px_2px_rgba(15,23,42,0.04)] ${accentBorderTone[tone]}`}>
-      <RadialGauge value={value} label="" color={color} locale={locale} size={52} stroke={6} showLabel={false} />
-      <div className="min-w-0">
-        <div className="flex items-center gap-2">
-          <IconBadge icon={icon} tone={tone} tier="secondary" />
-          <span className="truncate text-xs font-medium text-stone-500">{label}</span>
-        </div>
-        {hint && <p className="mt-1 truncate text-[11px] text-stone-400">{hint}</p>}
-      </div>
-    </div>
-  );
-}
-
-function KpiRow({
+// ── Verdict block — condition, one-line insight, three headline numbers ─
+function VerdictBlock({
   project,
-  contract,
-  avgProgress,
-  budget,
-  forecastMethod,
-  currency,
-  overdueTasks,
-  scheduleHasData,
-}: {
-  project: Project;
-  contract: Contract | null;
-  avgProgress: number | null;
-  budget: BudgetSummary;
-  forecastMethod: ForecastResult["methods"]["commitment_aware"];
-  currency: string;
-  overdueTasks: ProjectTask[];
-  scheduleHasData: boolean;
-}) {
-  const { t, locale } = useTranslation();
-  const overBudget = forecastMethod.variance < 0;
-  const costConsumption = budget.totals.planned > 0 ? (budget.totals.spent / budget.totals.planned) * 100 : null;
-
-  return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
-      <StatCard
-        icon={IconShield}
-        tone={statusTone[project.status] === "success" ? "success" : statusTone[project.status] === "warning" ? "warning" : "neutral"}
-        label={t("common.status")}
-        value={t(`dashboard.status.${project.status}`)}
-      />
-      <StatCard icon={IconMoney} label={t("dashboard.identity.contractValue")} value={contract ? formatMoney(contract.revisedValue, contract.currency, locale) : "—"} />
-      <RingStatCard
-        icon={IconBars}
-        label={t("dashboard.identity.progress")}
-        value={avgProgress}
-        color="#2563eb"
-        hint={avgProgress !== null ? t("dashboard.identity.fromSchedule") : t("dashboard.identity.noData")}
-      />
-      <StatCard
-        icon={IconTrend}
-        label={t("dashboard.costProgress.costConsumption")}
-        value={costConsumption !== null ? formatPercent(costConsumption, 1, locale) : "—"}
-      />
-      <StatCard
-        icon={overBudget ? IconAlertTriangle : IconTrend}
-        tone={overBudget ? "danger" : "success"}
-        label={t("dashboard.financial.expectedVariance")}
-        value={`${formatMoney(forecastMethod.variance, currency, locale)} (${formatPercent(forecastMethod.variancePercent, 1, locale)})`}
-        valueTone={overBudget ? "danger" : "success"}
-      />
-      <StatCard
-        icon={IconCalendar}
-        tone={!scheduleHasData ? "neutral" : overdueTasks.length > 0 ? "warning" : "success"}
-        label={t("dashboard.progressSchedule.scheduleStatus")}
-        value={
-          !scheduleHasData
-            ? t("dashboard.health.scheduleNoData")
-            : overdueTasks.length > 0
-              ? t("dashboard.progressSchedule.tasksOverdueCount", { count: overdueTasks.length })
-              : t("dashboard.progressSchedule.onTrack")
-        }
-        valueTone={scheduleHasData && overdueTasks.length > 0 ? "warning" : "default"}
-      />
-    </div>
-  );
-}
-
-// The one warning light on the instrument cluster — a single-line strip,
-// never a full-width colored takeover, still carrying the verdict headline
-// plus its one biggest reason (or an honest all-clear) so the executive
-// read stays a single glance even though the KPI row above no longer
-// states it directly.
-function AlertStrip({
   verdict,
-  topAttention,
+  insight,
+  progress,
+  costConsumption,
+  variancePercent,
+  overBudget,
   lastActivityAt,
 }: {
+  project: Project;
   verdict: "healthy" | "watch" | "critical";
-  topAttention?: AttentionItem;
+  insight: string;
+  progress: number | null;
+  costConsumption: number | null;
+  variancePercent: number | null;
+  overBudget: boolean;
   lastActivityAt: string;
 }) {
   const { t, locale } = useTranslation();
-  const toneClass: Record<"healthy" | "watch" | "critical", string> = {
-    healthy: "border-success-200 bg-success-50 text-success-700",
-    watch: "border-warning-200 bg-warning-50 text-warning-700",
-    critical: "border-danger-200 bg-danger-50 text-danger-700",
+  const verdictColor: Record<typeof verdict, string> = {
+    healthy: "text-success-700",
+    watch: "text-warning-700",
+    critical: "text-danger-700",
   };
-  const Icon = verdict === "critical" ? IconAlertTriangle : verdict === "watch" ? IconAlertCircle : IconTrend;
+  const dotColor: Record<typeof verdict, string> = {
+    healthy: "bg-success-500",
+    watch: "bg-warning-500",
+    critical: "bg-danger-500",
+  };
 
   return (
-    <div className={`flex flex-wrap items-center justify-between gap-3 rounded-lg border px-4 py-2.5 text-sm ${toneClass[verdict]}`}>
-      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-        <Icon width={16} height={16} className="shrink-0" />
-        <span className="font-semibold">{t(`dashboard.verdict.${verdict}`)}</span>
-        {topAttention ? (
-          <Link to={topAttention.href} className="flex flex-wrap items-center gap-x-2 hover:underline">
-            <span className="text-stone-400" aria-hidden="true">
-              —
-            </span>
-            <span>{topAttention.text}</span>
-            {topAttention.metric && <span className="font-bold">{topAttention.metric}</span>}
-          </Link>
-        ) : (
-          <>
-            <span className="text-stone-400" aria-hidden="true">
-              —
-            </span>
-            <span>{t("dashboard.needsAttention.empty")}</span>
-          </>
-        )}
+    <div>
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-stone-400">
+        <span className="text-stone-500">{project.name}</span>
+        <span aria-hidden="true">·</span>
+        <span>{t(`dashboard.status.${project.status}`)}</span>
+        <span aria-hidden="true">·</span>
+        <span>
+          {t("dashboard.identity.lastUpdated")} {formatDateTime(lastActivityAt, locale)}
+        </span>
       </div>
-      <span className="flex shrink-0 items-center gap-1.5 text-xs text-stone-400">
-        <IconClock width={13} height={13} />
-        {t("dashboard.identity.lastUpdated")} {formatDateTime(lastActivityAt, locale)}
-      </span>
+
+      <div className="mt-3 flex items-center gap-3">
+        <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${dotColor[verdict]}`} aria-hidden="true" />
+        <h1 className={`text-2xl font-bold tracking-tight sm:text-3xl ${verdictColor[verdict]}`}>{t(`dashboard.verdict.${verdict}`)}</h1>
+      </div>
+      <p className="mt-2 max-w-2xl text-base text-stone-600">{insight}</p>
+
+      <div className="mt-8 flex flex-wrap divide-x divide-x-reverse divide-stone-200">
+        <HeadlineStat
+          label={t("dashboard.identity.progress")}
+          value={progress !== null ? formatPercent(progress, 1, locale) : "—"}
+          hint={progress === null ? t("dashboard.identity.noData") : undefined}
+        />
+        <HeadlineStat
+          label={t("dashboard.costProgress.costConsumption")}
+          value={costConsumption !== null ? formatPercent(costConsumption, 1, locale) : "—"}
+        />
+        <HeadlineStat
+          label={t("dashboard.financial.expectedVariance")}
+          value={variancePercent !== null ? formatPercent(variancePercent, 1, locale) : "—"}
+          tone={overBudget ? "danger" : "success"}
+        />
+      </div>
     </div>
   );
 }
 
-// ── Project Health (compact chips, used inside the Risk panel) ─────────
+function HeadlineStat({
+  label,
+  value,
+  tone = "default",
+  hint,
+}: {
+  label: string;
+  value: string;
+  tone?: "default" | "success" | "danger";
+  hint?: string;
+}) {
+  const color = tone === "danger" ? "text-danger-700" : tone === "success" ? "text-success-700" : "text-stone-900";
+  return (
+    <div className="min-w-0 flex-1 px-6 first:ps-0 last:pe-0">
+      <p className={`text-4xl font-extrabold tracking-tight tabular-nums sm:text-5xl ${color}`}>{value}</p>
+      <p className="mt-1.5 text-xs font-medium text-stone-500">{label}</p>
+      {hint && <p className="mt-0.5 text-[11px] text-stone-400">{hint}</p>}
+    </div>
+  );
+}
+
+// ── Health line — a single quiet inline strip, not a grid of colored tiles
 type HealthTone = "healthy" | "watch" | "critical" | "neutral";
 const healthDotColor: Record<HealthTone, string> = {
   healthy: "bg-success-500",
   watch: "bg-warning-500",
   critical: "bg-danger-500",
   neutral: "bg-stone-300",
-};
-const healthBadgeTone: Record<HealthTone, keyof typeof badgeTone> = {
-  healthy: "success",
-  watch: "warning",
-  critical: "danger",
-  neutral: "neutral",
 };
 
 interface HealthIndicator {
@@ -912,48 +593,48 @@ function computeHealth(input: {
   ];
 }
 
-// One line per indicator (icon, label, status) rather than the previous
-// four-line tile — this rail is now a narrower column, and the detailed
-// metric a click away on each domain's own screen.
-function HealthChips({ health, projectId }: { health: HealthIndicator[]; projectId: string }) {
+function deriveVerdict(health: HealthIndicator[]): "healthy" | "watch" | "critical" {
+  if (health.some((h) => h.tone === "critical")) return "critical";
+  if (health.some((h) => h.tone === "watch")) return "watch";
+  return "healthy";
+}
+
+function HealthLine({ health, projectId }: { health: HealthIndicator[]; projectId: string }) {
+  const { t } = useTranslation();
   return (
-    <div className="grid grid-cols-2 gap-2">
-      {health.map((h) => {
-        const Icon = healthIcon[h.key] ?? IconInfo;
-        return (
+    <div className="border-t border-stone-200 pt-5">
+      <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-stone-400">{t("dashboard.health.title")}</p>
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+        {health.map((h) => (
           <Link
             key={h.key}
             to={h.href === "__company_compliance__" ? "/labor-compliance" : `/projects/${projectId}/${h.href}`}
-            className="flex items-center gap-2 rounded-md border border-stone-200 px-2.5 py-2 transition hover:border-stone-300 hover:bg-stone-50"
+            className="flex items-center gap-1.5 transition hover:text-stone-900"
           >
-            <IconBadge icon={Icon} tone={healthBadgeTone[h.tone]} tier="secondary" />
-            <span className="min-w-0">
-              <span className="block truncate text-xs font-semibold text-stone-700">{h.label}</span>
-              <span className="block truncate text-[11px] text-stone-400">{h.statusText}</span>
-            </span>
+            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${healthDotColor[h.tone]}`} aria-hidden="true" />
+            <span className="font-semibold text-stone-700">{h.label}</span>
+            <span className="text-stone-400">{h.statusText}</span>
           </Link>
-        );
-      })}
+        ))}
+      </div>
     </div>
   );
 }
 
-// ── Financial Flow + Cost vs Progress — two peer widgets ────────────────
+// ── Financial Control — a connected flow, not six independent cards ─────
 // forecast.methods.commitment_aware already bundles the entire
 // Contract→Budget→Actual→Committed→EAC→Variance chain in one
-// already-authoritative object. This used to be one combined "Performance"
-// panel; it is now two independently titled widget cards, stacked in the
-// same column — a container-only split (same props, same values, same
-// links) so the page reads as a grid of widgets rather than one long
-// panel, matching how Sage/Buildertrend/Autodesk each give a connected
-// concern its own separately titled card instead of nesting it.
+// already-authoritative object — this section is a presentation of that
+// one object as a single connected track (thin dividers, not boxes),
+// ending in one distinguished variance stat set off by a top rule instead
+// of another equal cell.
 const boqRevisionStatusTone: Record<BoqRevision["status"], "neutral" | "success" | "warning"> = {
   draft: "warning",
   published: "success",
   superseded: "neutral",
 };
 
-function FinancialFlowPanel({
+function FinancialControl({
   contract,
   forecast,
   revision,
@@ -969,11 +650,11 @@ function FinancialFlowPanel({
   const overBudget = m.variance < 0;
 
   // Every value read verbatim off forecast.methods.commitment_aware / the
-  // contract, never recomputed — the step track below is presentation
-  // only. No divider arrows (this app has no RTL-aware icon-mirroring
-  // convention anywhere yet) — a plain divide-x/divide-x-reverse rule
-  // between stages reads correctly in both directions with zero risk of a
-  // backwards arrow.
+  // contract, never recomputed. No divider arrows (this app has no
+  // RTL-aware icon-mirroring convention) — a plain divide-x/
+  // divide-x-reverse rule between stages reads correctly in both
+  // directions with zero risk of a backwards arrow (the same pattern
+  // verified live in earlier rounds of this dashboard).
   const stages: { label: string; value: number; href: string }[] = [
     { label: t("dashboard.financial.contractValue"), value: contract ? Number(contract.revisedValue) : m.costPlan, href: "contract" },
     { label: t("dashboard.financial.approvedBudget"), value: m.costPlan, href: "cost-plan" },
@@ -983,46 +664,52 @@ function FinancialFlowPanel({
   ];
 
   return (
-    <Panel tier="primary">
-      <SectionHeader
-        icon={IconMoney}
-        tier="primary"
-        title={t("dashboard.financial.title")}
-        meta={t("dashboard.financial.asOf", { date: formatDate(forecast.asOfDate, locale) })}
-      />
+    <div>
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 className="text-sm font-bold uppercase tracking-wide text-stone-900">{t("dashboard.financial.title")}</h2>
+        <span className="text-xs text-stone-400">{t("dashboard.financial.asOf", { date: formatDate(forecast.asOfDate, locale) })}</span>
+      </div>
 
-      {/* xl, not lg: the desktop sidebar (ProjectSidebar.tsx) also appears
-          starting at `lg`, cutting the content area's real width well
-          below 1024px at that exact breakpoint — switching this row to
-          horizontal at the same breakpoint the sidebar claims space left
-          each of 5 stages too little room and overlapped neighboring
-          values (confirmed via a live 1024px screenshot). `min-w-0` +
-          `break-words` on each stage is the same MetricCard-documented
-          fix as HeroKpi/StatBlock above, kept even after moving the
-          breakpoint since a long value can still overflow a narrow
-          in-between width. */}
-      <div className="flex flex-col divide-y divide-stone-100 overflow-hidden rounded-lg border border-stone-200 xl:flex-row xl:divide-x xl:divide-y-0 xl:divide-x-reverse">
-        {stages.map((s) => (
-          <Link key={s.label} to={`/projects/${projectId}/${s.href}`} className="min-w-0 flex-1 px-3.5 py-3 transition hover:bg-stone-50">
-            <p className="text-[11px] font-medium text-stone-500">{s.label}</p>
-            <p className="mt-1 break-words text-sm font-bold text-stone-900 lg:text-base">{formatMoney(s.value, forecast.currency, locale)}</p>
+      {/* A vertical ledger, not a horizontal strip: with the desktop
+          sidebar (ProjectSidebar.tsx) plus the app's own outer nav both
+          claiming fixed width, this panel's real content width never
+          leaves enough room for five money figures across one row without
+          truncating them — confirmed live (an earlier horizontal attempt
+          rendered "SAR …" with the actual figure hidden entirely, strictly
+          worse than a wrap). Each row instead gets the full panel width,
+          so a value never competes for horizontal space; order down the
+          page still reads as the same Contract→Budget→Actual→Committed→
+          Forecast sequence. */}
+      <div className="mt-5 divide-y divide-stone-200 border-t border-stone-200">
+        {stages.map((s, i) => (
+          <Link
+            key={s.label}
+            to={`/projects/${projectId}/${s.href}`}
+            className="flex items-baseline justify-between gap-3 py-3 transition hover:bg-stone-50"
+          >
+            <span className="flex min-w-0 items-baseline gap-2.5 text-stone-500">
+              <span className="text-xs tabular-nums text-stone-300">{String(i + 1).padStart(2, "0")}</span>
+              <span className="truncate text-xs font-medium uppercase tracking-wide">{s.label}</span>
+            </span>
+            <span className="shrink-0 whitespace-nowrap text-base font-bold tabular-nums text-stone-900 xl:text-lg">
+              {formatMoney(s.value, forecast.currency, locale)}
+            </span>
           </Link>
         ))}
       </div>
 
-      <div className={`mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4 ${overBudget ? "border-danger-200 bg-danger-50" : "border-success-200 bg-success-50"}`}>
-        <span className={`flex items-center gap-2 text-sm font-semibold ${overBudget ? "text-danger-700" : "text-success-700"}`}>
-          {overBudget ? <IconAlertTriangle width={18} height={18} /> : <IconTrend width={18} height={18} />}
+      <div className={`mt-5 flex flex-wrap items-baseline justify-between gap-2 border-t-2 pt-4 ${overBudget ? "border-danger-600" : "border-success-600"}`}>
+        <span className="text-sm font-semibold text-stone-600">
           {t("dashboard.financial.expectedVariance")}
           {overBudget ? t("dashboard.financial.overBudgetSuffix") : ""}
         </span>
-        <span className={`text-xl font-extrabold ${overBudget ? "text-danger-700" : "text-success-700"}`}>
+        <span className={`text-2xl font-extrabold tabular-nums ${overBudget ? "text-danger-700" : "text-success-700"}`}>
           {formatMoney(m.variance, forecast.currency, locale)} ({formatPercent(m.variancePercent, 1, locale)})
         </span>
       </div>
 
       {revision && (
-        <p className="mt-3 text-xs text-stone-400">
+        <p className="mt-4 text-xs text-stone-400">
           {t("dashboard.financial.boqRevision", { number: revision.revisionNumber })}{" "}
           <Badge tone={boqRevisionStatusTone[revision.status]}>{t(`dashboard.financial.boqRevisionStatus.${revision.status}`)}</Badge>{" "}
           <Link to={`/projects/${projectId}/boq`} className="text-primary hover:underline">
@@ -1030,114 +717,11 @@ function FinancialFlowPanel({
           </Link>
         </p>
       )}
-    </Panel>
-  );
-}
-
-function CostProgressPanel({ budget, avgProgress }: { budget: BudgetSummary; avgProgress: number | null }) {
-  const { t, locale } = useTranslation();
-  const costConsumption = budget.totals.planned > 0 ? (budget.totals.spent / budget.totals.planned) * 100 : null;
-  // Same subtraction the previous design already made — surfaced as a
-  // plain-language headline with the actual point gap, still just a
-  // difference of two already-displayed percentages, not a new financial
-  // figure.
-  const gap = avgProgress !== null && costConsumption !== null ? costConsumption - avgProgress : null;
-  const warnGap = gap !== null && gap > 5;
-  const costOverBudget = budget.totals.remaining < 0;
-
-  const headline =
-    gap === null
-      ? t("dashboard.costProgress.noProgressData")
-      : gap > 5
-        ? t("dashboard.costProgress.costAheadOfProgress", { gap: formatPercent(gap, 0, locale) })
-        : gap < -5
-          ? t("dashboard.costProgress.progressAheadOfCost", { gap: formatPercent(Math.abs(gap), 0, locale) })
-          : t("dashboard.costProgress.aligned");
-
-  return (
-    <Panel tier="primary">
-      <SectionHeader icon={IconBars} tier="primary" title={t("dashboard.costProgress.title")} />
-      <p className={`mb-5 flex items-center gap-2 text-sm font-bold ${warnGap ? "text-warning-700" : gap !== null ? "text-success-700" : "text-stone-400"}`}>
-        {warnGap ? <IconAlertTriangle width={18} height={18} /> : gap !== null ? <IconTrend width={18} height={18} /> : null}
-        {headline}
-      </p>
-      <div className="flex flex-col items-center gap-6 sm:flex-row sm:items-stretch sm:justify-center">
-        <RadialGauge value={avgProgress} label={t("dashboard.costProgress.actualProgress")} color="#2563eb" locale={locale} />
-        <RadialGauge value={costConsumption} label={t("dashboard.costProgress.costConsumption")} color={warnGap ? "#dc2626" : "#16a34a"} locale={locale} />
-      </div>
-      <div className="mt-5 grid grid-cols-3 gap-3 border-t border-stone-100 pt-4">
-        <MetricCard label={t("dashboard.costProgress.totalPlanned")} value={formatMoney(budget.totals.planned, "SAR", locale)} />
-        <MetricCard label={t("dashboard.costProgress.totalSpent")} value={formatMoney(budget.totals.spent, "SAR", locale)} />
-        <MetricCard
-          label={costOverBudget ? t("dashboard.costProgress.overBudget") : t("dashboard.costProgress.remaining")}
-          value={formatMoney(budget.totals.remaining, "SAR", locale)}
-          tone={costOverBudget ? "danger" : "default"}
-        />
-      </div>
-    </Panel>
-  );
-}
-
-// A single real percentage (never a fabricated time series) rendered as an
-// SVG radial gauge — the one genuine chart on this page. `size`/`stroke`
-// default to this component's original dimensions so its two Cost-vs-
-// Progress call sites render pixel-identical to before; the instrument
-// cluster's RingStatCard reuses the same component at a smaller size
-// (`showLabel=false`, since the tile's own header already carries the
-// label) rather than a second chart primitive.
-function RadialGauge({
-  value,
-  label,
-  color,
-  locale,
-  size = 132,
-  stroke = 11,
-  showLabel = true,
-}: {
-  value: number | null;
-  label: string;
-  color: string;
-  locale: string;
-  size?: number;
-  stroke?: number;
-  showLabel?: boolean;
-}) {
-  const r = (size - stroke) / 2;
-  const circumference = 2 * Math.PI * r;
-  const pct = Math.min(100, Math.max(0, value ?? 0));
-  const offset = circumference * (1 - pct / 100);
-  const fontSize = size >= 100 ? 24 : Math.max(11, Math.round(size * 0.28));
-  return (
-    <div className="flex flex-col items-center gap-2">
-      <div className="relative shrink-0" style={{ width: size, height: size }}>
-        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90">
-          <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#f1f5f9" strokeWidth={stroke} />
-          {value !== null && (
-            <circle
-              cx={size / 2}
-              cy={size / 2}
-              r={r}
-              fill="none"
-              stroke={color}
-              strokeWidth={stroke}
-              strokeLinecap="round"
-              strokeDasharray={circumference}
-              strokeDashoffset={offset}
-            />
-          )}
-        </svg>
-        <div className="absolute inset-0 flex items-center justify-center">
-          <span className="font-extrabold text-stone-900" style={{ fontSize }}>
-            {value !== null ? formatPercent(value, 0, locale) : "—"}
-          </span>
-        </div>
-      </div>
-      {showLabel && <span className="text-sm font-semibold text-stone-600">{label}</span>}
     </div>
   );
 }
 
-// ── Risk panel: Health chips + Needs Attention ──────────────────────────
+// ── Exceptions — an action system, not an activity feed ─────────────────
 type AttentionSeverity = "critical" | "attention" | "info";
 interface AttentionItem {
   severity: AttentionSeverity;
@@ -1228,74 +812,141 @@ const attentionAccent: Record<AttentionSeverity, string> = {
   attention: "border-s-warning-500 text-warning-600",
   info: "border-s-info-500 text-info-600",
 };
-const attentionCountKey: Record<AttentionSeverity, string> = {
-  critical: "critical",
-  attention: "attention",
-  info: "info",
-};
 
-function RiskPanel({ health, items, projectId }: { health: HealthIndicator[]; items: AttentionItem[]; projectId: string }) {
+function ExceptionsPanel({ items }: { items: AttentionItem[] }) {
   const { t } = useTranslation();
-  const counts = {
-    critical: items.filter((i) => i.severity === "critical").length,
-    attention: items.filter((i) => i.severity === "attention").length,
-    info: items.filter((i) => i.severity === "info").length,
-  };
-
   return (
-    <Panel tier="primary">
-      <SectionHeader icon={IconShield} tier="secondary" title={t("dashboard.health.title")} />
-      <HealthChips health={health} projectId={projectId} />
-
-      <div className="mt-6 border-t border-stone-100 pt-5">
-        <SectionHeader
-          icon={IconAlertTriangle}
-          tone={counts.critical > 0 ? "danger" : counts.attention > 0 ? "warning" : "success"}
-          tier="secondary"
-          title={t("dashboard.needsAttention.title")}
-          action={
-            <div className="flex flex-wrap items-center gap-1.5">
-              {(["critical", "attention", "info"] as const).map((sev) => (
-                <span key={sev} className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${badgeTone[healthBadgeTone[sev === "critical" ? "critical" : sev === "attention" ? "watch" : "neutral"]]}`}>
-                  {counts[sev]} {t(`dashboard.needsAttention.${attentionCountKey[sev]}`)}
-                </span>
-              ))}
-            </div>
-          }
-        />
-        {items.length === 0 ? (
-          <p className="flex items-center gap-2 text-sm text-stone-400">
-            <IconTrend width={16} height={16} />
-            {t("dashboard.needsAttention.empty")}
-          </p>
-        ) : (
-          <ul className="space-y-2">
-            {items.map((item, i) => {
-              const Icon = attentionIcon[item.severity];
-              return (
-                <li key={i}>
-                  <Link
-                    to={item.href}
-                    className={`flex items-center justify-between gap-3 rounded-md border-s-4 bg-stone-50/60 px-3 py-2.5 text-sm transition hover:bg-stone-100 ${attentionAccent[item.severity]}`}
-                  >
-                    <span className="flex items-center gap-2.5 text-stone-700">
-                      <Icon width={16} height={16} className={attentionAccent[item.severity].split(" ")[1]} />
-                      {item.text}
-                    </span>
-                    {item.metric && <span className="shrink-0 text-xs font-bold text-stone-600">{item.metric}</span>}
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </div>
-    </Panel>
+    <div>
+      <h2 className="text-sm font-bold uppercase tracking-wide text-stone-900">{t("dashboard.needsAttention.title")}</h2>
+      {items.length === 0 ? (
+        <p className="mt-4 text-sm text-stone-400">{t("dashboard.needsAttention.empty")}</p>
+      ) : (
+        <ul className="mt-4 divide-y divide-stone-200 border-t border-stone-200">
+          {items.map((item, i) => {
+            const Icon = attentionIcon[item.severity];
+            const [borderClass, colorClass] = attentionAccent[item.severity].split(" ");
+            return (
+              <li key={i}>
+                <Link to={item.href} className={`flex items-start gap-3 border-s-2 py-3 ps-3 transition hover:bg-stone-50 ${borderClass}`}>
+                  <Icon className={`mt-0.5 shrink-0 ${colorClass}`} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm text-stone-700">{item.text}</span>
+                    {item.metric && <span className="mt-0.5 block text-xs font-semibold text-stone-500">{item.metric}</span>}
+                  </span>
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
   );
 }
 
-// ── Secondary strips: Delivery, Cash, Commercial ────────────────────────
-function DeliveryStrip({
+// ── Cost vs Progress — a shared-axis comparison, not two decorative rings
+function CostVsProgress({
+  budget,
+  avgProgress,
+  costConsumption,
+  gap,
+  warnGap,
+  headline,
+}: {
+  budget: BudgetSummary;
+  avgProgress: number | null;
+  costConsumption: number | null;
+  gap: number | null;
+  warnGap: boolean;
+  headline: string;
+}) {
+  const { t, locale } = useTranslation();
+  const costOverBudget = budget.totals.remaining < 0;
+
+  return (
+    <div className="border-t border-stone-200 pt-10">
+      <h2 className="text-sm font-bold uppercase tracking-wide text-stone-900">{t("dashboard.costProgress.title")}</h2>
+      <p className={`mt-2 text-sm font-semibold ${warnGap ? "text-warning-700" : gap !== null ? "text-success-700" : "text-stone-400"}`}>{headline}</p>
+
+      <div className="mt-6 max-w-2xl space-y-4">
+        <ComparisonBar label={t("dashboard.costProgress.actualProgress")} value={avgProgress} color="bg-stone-700" />
+        <ComparisonBar label={t("dashboard.costProgress.costConsumption")} value={costConsumption} color={warnGap ? "bg-danger-500" : "bg-success-500"} />
+      </div>
+
+      {/* grid-cols-1 below sm: at narrow widths, three-across left too
+          little room per figure — text-ellipsis on a right-aligned/RTL
+          number truncates from the *start*, hiding the significant
+          leading digits (confirmed live: "152,000.00" rendered as
+          "…2,000.00"). One column per row at narrow widths always gives a
+          money value its full container width instead. */}
+      <div className="mt-6 grid max-w-2xl grid-cols-1 gap-4 border-t border-stone-200 pt-5 sm:grid-cols-3 sm:gap-6">
+        <PlainStat label={t("dashboard.costProgress.totalPlanned")} value={formatMoney(budget.totals.planned, "SAR", locale)} />
+        <PlainStat label={t("dashboard.costProgress.totalSpent")} value={formatMoney(budget.totals.spent, "SAR", locale)} />
+        <PlainStat
+          label={costOverBudget ? t("dashboard.costProgress.overBudget") : t("dashboard.costProgress.remaining")}
+          value={formatMoney(budget.totals.remaining, "SAR", locale)}
+          tone={costOverBudget ? "danger" : "default"}
+        />
+      </div>
+    </div>
+  );
+}
+
+function ComparisonBar({ label, value, color }: { label: string; value: number | null; color: string }) {
+  const { locale } = useTranslation();
+  const pct = Math.min(100, Math.max(0, value ?? 0));
+  return (
+    <div>
+      <div className="mb-1.5 flex items-baseline justify-between text-sm">
+        <span className="font-medium text-stone-600">{label}</span>
+        <span className="font-bold tabular-nums text-stone-900">{value !== null ? formatPercent(value, 0, locale) : "—"}</span>
+      </div>
+      <div className="h-2 w-full overflow-hidden rounded-full bg-stone-100">
+        <div className={`h-full rounded-full ${color}`} style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function PlainStat({ label, value, tone = "default" }: { label: string; value: string; tone?: "default" | "danger" }) {
+  const color = tone === "danger" ? "text-danger-700" : "text-stone-900";
+  return (
+    <div className="min-w-0">
+      <p className="truncate text-xs text-stone-500">{label}</p>
+      <p className={`mt-1 whitespace-nowrap text-base font-bold tabular-nums ${color}`}>{value}</p>
+    </div>
+  );
+}
+
+// A compact label:value row shared by the Delivery/Cash/Commercial columns.
+function PlainRow({
+  label,
+  value,
+  hint,
+  tone = "default",
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  tone?: "default" | "success" | "warning" | "danger";
+}) {
+  const color = tone === "success" ? "text-success-700" : tone === "warning" ? "text-warning-700" : tone === "danger" ? "text-danger-700" : "text-stone-800";
+  // The label truncates first (min-w-0 + truncate) — the value never
+  // breaks mid-digit: it's shrink-0 + whitespace-nowrap so a money figure
+  // always reads as one intact number, never split across lines.
+  return (
+    <div className="flex items-baseline justify-between gap-3">
+      <span className="min-w-0 truncate text-stone-500" title={label}>{label}</span>
+      <span className="shrink-0 text-end">
+        <span className={`block whitespace-nowrap font-semibold tabular-nums ${color}`}>{value}</span>
+        {hint && <span className="mt-0.5 block max-w-[12rem] truncate text-xs text-stone-400">{hint}</span>}
+      </span>
+    </div>
+  );
+}
+
+// ── Delivery / Cash / Commercial — three quiet columns, divided by a thin
+// rule instead of three separate boxes ───────────────────────────────────
+function DeliveryColumn({
   projectId,
   tasks,
   overdueTasks,
@@ -1312,28 +963,24 @@ function DeliveryStrip({
 }) {
   const { t, locale } = useTranslation();
   return (
-    <Panel tier="secondary">
-      <SectionHeader
-        icon={IconCalendar}
-        tier="secondary"
-        title={t("dashboard.progressSchedule.title")}
-        action={
-          <Link to={`/projects/${projectId}/schedule`} className="text-xs font-medium text-primary hover:underline">
-            {t("dashboard.progressSchedule.openSchedule")}
-          </Link>
-        }
-      />
+    <div>
+      <div className="flex items-baseline justify-between gap-2">
+        <h3 className="text-sm font-bold text-stone-900">{t("dashboard.progressSchedule.title")}</h3>
+        <Link to={`/projects/${projectId}/schedule`} className="text-xs font-medium text-primary hover:underline">
+          {t("dashboard.progressSchedule.openSchedule")}
+        </Link>
+      </div>
       {tasks.length === 0 ? (
-        <p className="text-sm text-stone-400">{t("dashboard.progressSchedule.noData")}</p>
+        <p className="mt-3 text-sm text-stone-400">{t("dashboard.progressSchedule.noData")}</p>
       ) : (
-        <div className="divide-y divide-stone-100">
-          <StatRow label={t("dashboard.progressSchedule.overallProgress")} value={avgProgress !== null ? formatPercent(avgProgress, 1, locale) : "—"} />
-          <StatRow
+        <div className="mt-3 space-y-2.5 text-sm">
+          <PlainRow label={t("dashboard.progressSchedule.overallProgress")} value={avgProgress !== null ? formatPercent(avgProgress, 1, locale) : "—"} />
+          <PlainRow
             label={t("dashboard.progressSchedule.scheduleStatus")}
             value={overdueTasks.length > 0 ? t("dashboard.progressSchedule.tasksOverdueCount", { count: overdueTasks.length }) : t("dashboard.progressSchedule.onTrack")}
             tone={overdueTasks.length > 0 ? "warning" : "success"}
           />
-          <StatRow label={t("dashboard.progressSchedule.nextMilestone")} value={nextMilestone ? formatDate(nextMilestone.endDate, locale) : "—"} hint={nextMilestone?.name} />
+          <PlainRow label={t("dashboard.progressSchedule.nextMilestone")} value={nextMilestone ? formatDate(nextMilestone.endDate, locale) : "—"} hint={nextMilestone?.name} />
         </div>
       )}
       {measurementsAwaitingApproval.length > 0 && (
@@ -1343,43 +990,41 @@ function DeliveryStrip({
           </Link>
         </p>
       )}
-    </Panel>
+    </div>
   );
 }
 
-function CashStrip({ cashFlow, projectId }: { cashFlow: CashFlowResult; projectId: string }) {
+function CashColumn({ cashFlow, projectId }: { cashFlow: CashFlowResult; projectId: string }) {
   const { t, locale } = useTranslation();
   return (
-    <Panel tier="secondary">
-      <SectionHeader
-        icon={IconWallet}
-        tier="secondary"
-        title={t("dashboard.cashFlow.title")}
-        action={
-          <Link to={`/projects/${projectId}/cash-flow`} className="text-xs font-medium text-primary hover:underline">
-            {t("dashboard.cashFlow.fullDetails")}
-          </Link>
-        }
-      />
-      <div className="divide-y divide-stone-100">
-        <StatRow label={t("dashboard.cashFlow.collected")} value={formatMoney(cashFlow.historical.cashReceived, cashFlow.currency, locale)} />
-        <StatRow label={t("dashboard.cashFlow.incurredCost")} value={formatMoney(cashFlow.historical.incurredCost, cashFlow.currency, locale)} />
-        <StatRow label={t("dashboard.cashFlow.expectedReceivables")} value={formatMoney(cashFlow.projected.receivables, cashFlow.currency, locale)} />
-        <StatRow
+    <div>
+      <div className="flex items-baseline justify-between gap-2">
+        <h3 className="text-sm font-bold text-stone-900">{t("dashboard.cashFlow.title")}</h3>
+        <Link to={`/projects/${projectId}/cash-flow`} className="text-xs font-medium text-primary hover:underline">
+          {t("dashboard.cashFlow.fullDetails")}
+        </Link>
+      </div>
+      <div className="mt-3 space-y-2.5 text-sm">
+        <PlainRow label={t("dashboard.cashFlow.collected")} value={formatMoney(cashFlow.historical.cashReceived, cashFlow.currency, locale)} />
+        <PlainRow label={t("dashboard.cashFlow.incurredCost")} value={formatMoney(cashFlow.historical.incurredCost, cashFlow.currency, locale)} />
+        <PlainRow label={t("dashboard.cashFlow.expectedReceivables")} value={formatMoney(cashFlow.projected.receivables, cashFlow.currency, locale)} />
+        <PlainRow
           label={t("dashboard.cashFlow.projectedNet")}
           value={formatMoney(cashFlow.projected.net, cashFlow.currency, locale)}
           tone={cashFlow.projected.net < 0 ? "danger" : "success"}
         />
       </div>
-    </Panel>
+    </div>
   );
 }
 
 // IPC and distributed labor cost are two distinct real data sources (Ipc[]
 // and ProjectLaborCost) — grouped with Procurement purely as presentation
-// (three sub-blocks sharing one strip instead of three competing cards),
-// each keeping its own figures and drill-down link untouched.
-function CommercialStrip({
+// (three sub-blocks sharing one column instead of three competing cards),
+// each keeping its own figures and drill-down link untouched. IPC never
+// blends with Forecast/Cash Flow/Actual Cost — each sub-block reads only
+// its own already-authoritative source.
+function CommercialColumn({
   projectId,
   totalCommitted,
   approvedCommitted,
@@ -1406,67 +1051,56 @@ function CommercialStrip({
 }) {
   const { t, locale } = useTranslation();
   return (
-    <Panel tier="secondary">
-      <SectionHeader icon={IconClipboard} tier="secondary" title={t("dashboard.commercial.title")} meta={t("dashboard.commercial.subtitle")} />
+    <div>
+      <h3 className="text-sm font-bold text-stone-900">{t("dashboard.commercial.title")}</h3>
+      <p className="text-xs text-stone-400">{t("dashboard.commercial.subtitle")}</p>
 
-      <MicroHeading
-        title={t("dashboard.procurement.title")}
-        action={
-          <Link to={`/projects/${projectId}/procurement`} className="text-xs font-medium text-primary hover:underline">
-            {t("dashboard.procurement.open")}
-          </Link>
-        }
-      />
-      <div className="divide-y divide-stone-100">
-        <StatRow label={t("dashboard.procurement.totalCommitted")} value={formatMoney(totalCommitted, currency, locale)} />
-        <StatRow label={t("dashboard.procurement.activeExecuted")} value={formatMoney(approvedCommitted, currency, locale)} tone="success" />
-        <StatRow label={t("dashboard.procurement.pendingApprovalCount", { count: pendingCount })} value={formatMoney(pendingCommitted, currency, locale)} tone="warning" />
-      </div>
-
-      <MicroHeading
-        className="mt-4 border-t border-stone-100 pt-4"
-        title={t("dashboard.commercial.ipcTitle")}
-        action={
-          <Link to={`/projects/${projectId}/ipc`} className="text-xs font-medium text-primary hover:underline">
-            {t("dashboard.commercial.openCertificates")}
-          </Link>
-        }
-      />
-      <StatRow label={t("dashboard.commercial.certifiedValueCount", { count: certifiedCount })} value={formatMoney(certifiedTotal, currency, locale)} tone="success" />
-      <div className="mt-2 grid grid-cols-2 gap-3">
-        <StatBlock label={t("dashboard.commercial.awaitingCertification")} value={String(awaitingCertification)} tone={awaitingCertification > 0 ? "warning" : "default"} />
-        <StatBlock label={t("dashboard.commercial.awaitingApproval")} value={String(awaitingApproval)} tone={awaitingApproval > 0 ? "warning" : "default"} />
-      </div>
-
-      <MicroHeading
-        className="mt-4 border-t border-stone-100 pt-4"
-        title={t("dashboard.commercial.laborTitle")}
-        action={laborCost.allocationCount > 0 && laborCost.posted ? <Badge tone="success">{t("dashboard.commercial.fullyPosted")}</Badge> : undefined}
-      />
-      {laborCost.allocationCount === 0 ? (
-        <p className="text-sm text-stone-400">{t("dashboard.commercial.noLaborCost")}</p>
-      ) : (
-        <div className="grid grid-cols-2 gap-3">
-          <StatBlock label={t("dashboard.commercial.totalAllocated")} value={formatMoney(laborCost.allocatedTotal, "SAR", locale)} />
-          <StatBlock label={t("dashboard.commercial.allocationCount")} value={String(laborCost.allocationCount)} />
-        </div>
-      )}
-      <div className="mt-2 text-end">
-        <Link to="/payroll" className="text-xs font-medium text-primary hover:underline">
-          {t("dashboard.commercial.viewPayrollDetails")}
+      <div className="mt-4 flex items-baseline justify-between gap-2">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-stone-400">{t("dashboard.procurement.title")}</p>
+        <Link to={`/projects/${projectId}/procurement`} className="text-xs font-medium text-primary hover:underline">
+          {t("dashboard.procurement.open")}
         </Link>
       </div>
-    </Panel>
+      <div className="mt-2 space-y-2.5 text-sm">
+        <PlainRow label={t("dashboard.procurement.totalCommitted")} value={formatMoney(totalCommitted, currency, locale)} />
+        <PlainRow label={t("dashboard.procurement.activeExecuted")} value={formatMoney(approvedCommitted, currency, locale)} tone="success" />
+        <PlainRow label={t("dashboard.procurement.pendingApprovalCount", { count: pendingCount })} value={formatMoney(pendingCommitted, currency, locale)} tone="warning" />
+      </div>
+
+      <div className="mt-4 flex items-baseline justify-between gap-2 border-t border-stone-200 pt-4">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-stone-400">{t("dashboard.commercial.ipcTitle")}</p>
+        <Link to={`/projects/${projectId}/ipc`} className="text-xs font-medium text-primary hover:underline">
+          {t("dashboard.commercial.openCertificates")}
+        </Link>
+      </div>
+      <div className="mt-2 space-y-2.5 text-sm">
+        <PlainRow label={t("dashboard.commercial.certifiedValueCount", { count: certifiedCount })} value={formatMoney(certifiedTotal, currency, locale)} tone="success" />
+        <PlainRow label={t("dashboard.commercial.awaitingCertification")} value={String(awaitingCertification)} tone={awaitingCertification > 0 ? "warning" : "default"} />
+        <PlainRow label={t("dashboard.commercial.awaitingApproval")} value={String(awaitingApproval)} tone={awaitingApproval > 0 ? "warning" : "default"} />
+      </div>
+
+      <div className="mt-4 flex items-baseline justify-between gap-2 border-t border-stone-200 pt-4">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-stone-400">{t("dashboard.commercial.laborTitle")}</p>
+        {laborCost.allocationCount > 0 && laborCost.posted && <Badge tone="success">{t("dashboard.commercial.fullyPosted")}</Badge>}
+      </div>
+      {laborCost.allocationCount === 0 ? (
+        <p className="mt-2 text-sm text-stone-400">{t("dashboard.commercial.noLaborCost")}</p>
+      ) : (
+        <div className="mt-2 space-y-2.5 text-sm">
+          <PlainRow label={t("dashboard.commercial.totalAllocated")} value={formatMoney(laborCost.allocatedTotal, "SAR", locale)} />
+          <PlainRow label={t("dashboard.commercial.allocationCount")} value={String(laborCost.allocationCount)} />
+        </div>
+      )}
+      <p className="mt-3 text-end text-xs">
+        <Link to="/payroll" className="font-medium text-primary hover:underline">
+          {t("dashboard.commercial.viewPayrollDetails")}
+        </Link>
+      </p>
+    </div>
   );
 }
 
-// ── Pulse: Recent Activity + Quick Actions ──────────────────────────────
-// The action codes below (e.g. "ipc.certified") are the canonical
-// audit_events identifiers, not display text — they double as the dot-path
-// suffix under dashboard.activity.verbs.* in every locale dictionary. An
-// action code outside this known set (never emitted today, but not
-// impossible for a future event type) falls back to the raw code rather
-// than a translation lookup, matching the previous `?? e.action` fallback.
+// ── Pulse + Quick Actions — the lowest-priority information on the page ─
 const KNOWN_ACTIVITY_VERBS = new Set([
   "ipc.certified",
   "ipc.approved",
@@ -1484,37 +1118,31 @@ function activityVerbLabel(t: (key: string) => string, action: string): string {
   return KNOWN_ACTIVITY_VERBS.has(action) ? t(`dashboard.activity.verbs.${action}`) : action;
 }
 
-function ActivityFeedCard({ events }: { events: ActivityEvent[] }) {
+function ActivityPulse({ events }: { events: ActivityEvent[] }) {
   const { t, locale } = useTranslation();
   return (
-    <Panel tier="tertiary">
-      <SectionHeader icon={IconActivity} tier="tertiary" title={t("dashboard.activity.title")} />
+    <div>
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-stone-400">{t("dashboard.activity.title")}</h3>
       {events.length === 0 ? (
-        <p className="text-sm text-stone-400">{t("dashboard.activity.empty")}</p>
+        <p className="mt-2 text-sm text-stone-400">{t("dashboard.activity.empty")}</p>
       ) : (
-        <ul className="space-y-1">
-          {events.map((e, i) => (
-            <li key={e.id} className="relative flex items-center justify-between gap-3 py-2 text-sm">
-              <span className="flex items-center gap-2.5 text-stone-700">
-                <span className="relative flex h-2 w-2 shrink-0 items-center justify-center">
-                  <span className="h-1.5 w-1.5 rounded-full bg-primary" />
-                  {i < events.length - 1 && <span className="absolute top-2.5 h-6 w-px bg-stone-200" aria-hidden="true" />}
-                </span>
-                {activityVerbLabel(t, e.action)}
-              </span>
-              <span className="shrink-0 text-xs text-stone-400">{formatDateTime(e.createdAt, locale)}</span>
+        <ul className="mt-2 space-y-1.5">
+          {events.map((e) => (
+            <li key={e.id} className="flex items-center justify-between gap-3 text-xs">
+              <span className="text-stone-600">{activityVerbLabel(t, e.action)}</span>
+              <span className="shrink-0 text-stone-400">{formatDateTime(e.createdAt, locale)}</span>
             </li>
           ))}
         </ul>
       )}
-    </Panel>
+    </div>
   );
 }
 
 // Plain navigation to each domain's own existing, already permission-gated
 // create flow — this never duplicates a Can-wrapped create button itself,
 // it only links to the screen that owns it.
-function QuickActionsCard({ projectId }: { projectId: string }) {
+function QuickActionsRow({ projectId }: { projectId: string }) {
   const { t } = useTranslation();
   // Document upload has no owner-only gate anywhere in this codebase
   // (create/read are member-open, same posture as Tasks/Daily Logs), so
@@ -1526,28 +1154,27 @@ function QuickActionsCard({ projectId }: { projectId: string }) {
     { labelKey: "expense", href: "actual-cost", permission: "budget.manage" },
     { labelKey: "ipc", href: "ipc", permission: "ipc.manage" },
   ];
-  // A bare compact action bar, not a card — Quick Actions is the
-  // lowest-priority section on the page and shouldn't carry any card
-  // treatment at all. Just a top divider + a row of buttons.
   return (
-    <div className="flex flex-wrap items-center gap-2 border-t border-stone-200 pt-4">
-      <span className="text-xs font-semibold text-stone-400">{t("dashboard.quickActions.title")}</span>
-      {gatedActions.map((a) => (
-        <Can key={a.href} permission={a.permission}>
-          <Link to={`/projects/${projectId}/${a.href}`}>
-            <Button variant="secondary" size="sm" className="flex items-center gap-1.5">
-              <IconPlus width={14} height={14} />
-              {t(`dashboard.quickActions.${a.labelKey}`)}
-            </Button>
-          </Link>
-        </Can>
-      ))}
-      <Link to={`/projects/${projectId}/documents`}>
-        <Button variant="secondary" size="sm" className="flex items-center gap-1.5">
-          <IconPlus width={14} height={14} />
-          {t("dashboard.quickActions.uploadDocument")}
-        </Button>
-      </Link>
+    <div>
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-stone-400">{t("dashboard.quickActions.title")}</h3>
+      <div className="mt-2 flex flex-wrap gap-2">
+        {gatedActions.map((a) => (
+          <Can key={a.href} permission={a.permission}>
+            <Link to={`/projects/${projectId}/${a.href}`}>
+              <Button variant="secondary" size="sm" className="flex items-center gap-1.5">
+                <IconPlus width={14} height={14} />
+                {t(`dashboard.quickActions.${a.labelKey}`)}
+              </Button>
+            </Link>
+          </Can>
+        ))}
+        <Link to={`/projects/${projectId}/documents`}>
+          <Button variant="secondary" size="sm" className="flex items-center gap-1.5">
+            <IconPlus width={14} height={14} />
+            {t("dashboard.quickActions.uploadDocument")}
+          </Button>
+        </Link>
+      </div>
     </div>
   );
 }
