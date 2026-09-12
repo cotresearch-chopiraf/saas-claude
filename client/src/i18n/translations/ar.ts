@@ -1979,6 +1979,24 @@ const ar = {
   platformLogin: {
     title: "دخول مشغّلي المنصة",
   },
+  publicInvoicePage: {
+    notFound: "الفاتورة غير موجودة أو لم تعد متاحة.",
+    invoiceFrom: "فاتورة من {{company}}",
+    toAndIssueDate: "إلى: {{client}} · تاريخ الإصدار: {{date}}",
+    taxWithPercent: "الضريبة ({{percent}}%)",
+  },
+  publicQuotePage: {
+    nameRequiredError: "الرجاء إدخال اسمك للتأكيد",
+    genericError: "تعذّر إتمام الإجراء",
+    notFound: "عرض السعر غير موجود أو لم يعد متاحاً.",
+    quoteFrom: "عرض سعر من {{company}}",
+    toClient: "إلى: {{client}}",
+    namePlaceholder: "اكتب اسمك الكامل للتأكيد",
+    accept: "قبول العرض",
+    reject: "رفض",
+    acceptedNotice: "تم قبول هذا العرض. سيتواصل معك المقاول قريباً.",
+    rejectedNotice: "تم رفض هذا العرض.",
+  },
   laborAllocationPage: {
     loadError: "تعذّر تحميل بيانات توزيع الراتب",
     backToPayrollPeriod: "العودة إلى فترة الرواتب",

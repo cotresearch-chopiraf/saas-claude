@@ -1980,6 +1980,24 @@ const fr = {
   platformLogin: {
     title: "Connexion des opérateurs de la plateforme",
   },
+  publicInvoicePage: {
+    notFound: "Cette facture n'existe pas ou n'est plus disponible.",
+    invoiceFrom: "Facture de {{company}}",
+    toAndIssueDate: "À : {{client}} · Date d'émission : {{date}}",
+    taxWithPercent: "Taxe ({{percent}}%)",
+  },
+  publicQuotePage: {
+    nameRequiredError: "Veuillez saisir votre nom pour confirmer",
+    genericError: "Impossible de finaliser l'action",
+    notFound: "Ce devis n'existe pas ou n'est plus disponible.",
+    quoteFrom: "Devis de {{company}}",
+    toClient: "À : {{client}}",
+    namePlaceholder: "Écrivez votre nom complet pour confirmer",
+    accept: "Accepter le devis",
+    reject: "Refuser",
+    acceptedNotice: "Ce devis a été accepté. L'entrepreneur vous contactera bientôt.",
+    rejectedNotice: "Ce devis a été refusé.",
+  },
   laborAllocationPage: {
     loadError: "Impossible de charger les données de répartition du salaire",
     backToPayrollPeriod: "Retour à la période de paie",

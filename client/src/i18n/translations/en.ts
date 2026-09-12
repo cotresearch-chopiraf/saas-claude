@@ -1980,6 +1980,24 @@ const en = {
   platformLogin: {
     title: "Platform Operator Login",
   },
+  publicInvoicePage: {
+    notFound: "This invoice doesn't exist or is no longer available.",
+    invoiceFrom: "Invoice from {{company}}",
+    toAndIssueDate: "To: {{client}} · Issue date: {{date}}",
+    taxWithPercent: "Tax ({{percent}}%)",
+  },
+  publicQuotePage: {
+    nameRequiredError: "Please enter your name to confirm",
+    genericError: "Unable to complete the action",
+    notFound: "This quote doesn't exist or is no longer available.",
+    quoteFrom: "Quote from {{company}}",
+    toClient: "To: {{client}}",
+    namePlaceholder: "Type your full name to confirm",
+    accept: "Accept quote",
+    reject: "Reject",
+    acceptedNotice: "This quote has been accepted. The contractor will contact you soon.",
+    rejectedNotice: "This quote has been rejected.",
+  },
   laborAllocationPage: {
     loadError: "Couldn't load the labor allocation data",
     backToPayrollPeriod: "Back to payroll period",
