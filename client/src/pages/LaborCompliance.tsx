@@ -50,6 +50,7 @@ import type {
   ComplianceExceptionSeverity,
   ComplianceExceptionStatus,
 } from "../api/types";
+import { useTranslation } from "../i18n/I18nProvider";
 
 // MIDAD Phase D1 — Nitaqat + GOSI Compliance Tracking Foundation.
 //
@@ -62,6 +63,7 @@ import type {
 // score, no percentage, no green/red "compliant" verdict anywhere on this
 // page — see this phase's own explicit "no fake compliance metric" rule.
 export function LaborCompliance() {
+  const { t } = useTranslation();
   const [dashboard, setDashboard] = useState<ComplianceDashboard | null>(null);
   const [dashboardError, setDashboardError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"periods" | "nitaqat" | "gosi" | "exceptions">("nitaqat");
@@ -71,13 +73,13 @@ export function LaborCompliance() {
     setDashboard(null);
     getComplianceDashboard()
       .then(setDashboard)
-      .catch((err) => setDashboardError(err instanceof ApiError ? err.message : "تعذّر تحميل لوحة الامتثال"));
+      .catch((err) => setDashboardError(err instanceof ApiError ? err.message : t("laborCompliancePage.loadError")));
   }
   useEffect(loadDashboard, []);
 
   return (
     <Layout>
-      <PageHeader title="امتثال العمالة — نطاقات و GOSI" subtitle="تتبع داخلي لبيانات نطاقات والتأمينات الاجتماعية، غير متصل رسمياً بأي جهة حكومية." />
+      <PageHeader title={t("laborCompliancePage.title")} subtitle={t("laborCompliancePage.subtitle")} />
 
       <div className="mb-6">
         {dashboardError && <ErrorState message={dashboardError} onRetry={loadDashboard} />}
@@ -87,10 +89,10 @@ export function LaborCompliance() {
 
       <Tabs
         items={[
-          { key: "nitaqat", label: "نطاقات" },
-          { key: "gosi", label: "GOSI" },
-          { key: "exceptions", label: "استثناءات" },
-          { key: "periods", label: "الفترات" },
+          { key: "nitaqat", label: t("laborCompliancePage.tabs.nitaqat") },
+          { key: "gosi", label: t("laborCompliancePage.tabs.gosi") },
+          { key: "exceptions", label: t("laborCompliancePage.tabs.exceptions") },
+          { key: "periods", label: t("laborCompliancePage.tabs.periods") },
         ]}
         active={activeTab}
         onChange={(key) => setActiveTab(key as typeof activeTab)}
@@ -106,63 +108,55 @@ export function LaborCompliance() {
   );
 }
 
-const sourceTypeLabel: Record<ComplianceSourceType, string> = {
-  manual: "إدخال داخلي",
-  csv_import: "استيراد CSV",
-  excel_import: "استيراد Excel",
-  external_reference: "مرجع خارجي",
-};
-const verificationStatusLabel: Record<ComplianceVerificationStatus, string> = {
-  unverified: "غير موثق",
-  pending_verification: "بانتظار التحقق",
-  verified: "موثق",
-};
 const verificationStatusTone: Record<ComplianceVerificationStatus, "neutral" | "warning" | "success"> = {
   unverified: "neutral",
   pending_verification: "warning",
   verified: "success",
 };
-const gosiStatusLabel: Record<GosiStatus, string> = {
-  not_recorded: "غير مسجَّل",
-  recorded: "مسجَّل",
-  pending_verification: "بانتظار التحقق",
-  verified: "موثق",
-  exception: "استثناء",
-};
+
+// pending_verification/verified are shared with ComplianceVerificationStatus and
+// reuse those translation keys; only not_recorded/recorded/exception are GOSI-specific.
+function gosiStatusLabel(t: (key: string) => string, status: GosiStatus): string {
+  if (status === "pending_verification" || status === "verified") {
+    return t(`laborCompliancePage.verificationStatus.${status}`);
+  }
+  return t(`laborCompliancePage.gosiStatus.${status}`);
+}
 
 function DashboardCard({ dashboard }: { dashboard: ComplianceDashboard }) {
+  const { t, locale } = useTranslation();
   return (
     <Card className="p-5">
-      <h2 className="mb-4 font-semibold text-stone-800">الامتثال</h2>
+      <h2 className="mb-4 font-semibold text-stone-800">{t("laborCompliancePage.dashboard.heading")}</h2>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <div>
-          <p className="mb-1 text-xs font-semibold text-stone-500">نطاقات</p>
+          <p className="mb-1 text-xs font-semibold text-stone-500">{t("laborCompliancePage.tabs.nitaqat")}</p>
           {dashboard.nitaqat ? (
             <>
-              <Badge tone={verificationStatusTone[dashboard.nitaqat.verificationStatus]}>{verificationStatusLabel[dashboard.nitaqat.verificationStatus]}</Badge>
-              <p className="mt-1 text-xs text-stone-500">المصدر: {sourceTypeLabel[dashboard.nitaqat.sourceType]}</p>
-              <p className="text-xs text-stone-400">آخر تحديث: {formatDate(dashboard.nitaqat.updatedAt)}</p>
+              <Badge tone={verificationStatusTone[dashboard.nitaqat.verificationStatus]}>{t(`laborCompliancePage.verificationStatus.${dashboard.nitaqat.verificationStatus}`)}</Badge>
+              <p className="mt-1 text-xs text-stone-500">{t("laborCompliancePage.sourceLabel", { source: t(`laborCompliancePage.sourceType.${dashboard.nitaqat.sourceType}`) })}</p>
+              <p className="text-xs text-stone-400">{t("laborCompliancePage.dashboard.lastUpdated", { date: formatDate(dashboard.nitaqat.updatedAt, locale) })}</p>
             </>
           ) : (
-            <p className="text-sm text-stone-400">لا يوجد سجل بعد</p>
+            <p className="text-sm text-stone-400">{t("laborCompliancePage.dashboard.noRecordYet")}</p>
           )}
         </div>
         <div>
-          <p className="mb-1 text-xs font-semibold text-stone-500">GOSI</p>
+          <p className="mb-1 text-xs font-semibold text-stone-500">{t("laborCompliancePage.tabs.gosi")}</p>
           {dashboard.gosi ? (
             <>
-              <Badge tone={verificationStatusTone[dashboard.gosi.verificationStatus]}>{verificationStatusLabel[dashboard.gosi.verificationStatus]}</Badge>
-              <p className="mt-1 text-xs text-stone-500">المصدر: {sourceTypeLabel[dashboard.gosi.sourceType]}</p>
-              <p className="text-xs text-stone-400">آخر تحديث: {formatDate(dashboard.gosi.updatedAt)}</p>
+              <Badge tone={verificationStatusTone[dashboard.gosi.verificationStatus]}>{t(`laborCompliancePage.verificationStatus.${dashboard.gosi.verificationStatus}`)}</Badge>
+              <p className="mt-1 text-xs text-stone-500">{t("laborCompliancePage.sourceLabel", { source: t(`laborCompliancePage.sourceType.${dashboard.gosi.sourceType}`) })}</p>
+              <p className="text-xs text-stone-400">{t("laborCompliancePage.dashboard.lastUpdated", { date: formatDate(dashboard.gosi.updatedAt, locale) })}</p>
             </>
           ) : (
-            <p className="text-sm text-stone-400">لا يوجد سجل بعد</p>
+            <p className="text-sm text-stone-400">{t("laborCompliancePage.dashboard.noRecordYet")}</p>
           )}
         </div>
         <div>
-          <p className="mb-1 text-xs font-semibold text-stone-500">استثناءات</p>
-          <p className="text-sm text-stone-700">{dashboard.exceptions.open} مفتوحة</p>
-          {dashboard.exceptions.highOrCritical > 0 && <p className="text-sm text-danger-600">{dashboard.exceptions.highOrCritical} عالية الأولوية</p>}
+          <p className="mb-1 text-xs font-semibold text-stone-500">{t("laborCompliancePage.tabs.exceptions")}</p>
+          <p className="text-sm text-stone-700">{t("laborCompliancePage.dashboard.openCount", { count: dashboard.exceptions.open })}</p>
+          {dashboard.exceptions.highOrCritical > 0 && <p className="text-sm text-danger-600">{t("laborCompliancePage.dashboard.highPriorityCount", { count: dashboard.exceptions.highOrCritical })}</p>}
         </div>
       </div>
     </Card>
@@ -171,6 +165,7 @@ function DashboardCard({ dashboard }: { dashboard: ComplianceDashboard }) {
 
 // --- Periods ---
 function PeriodsTab({ onChanged }: { onChanged: () => void }) {
+  const { t, locale } = useTranslation();
   const [periods, setPeriods] = useState<CompliancePeriod[] | null>(null);
   const [snapshots, setSnapshots] = useState<ComplianceWorkforceSnapshot[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -184,7 +179,7 @@ function PeriodsTab({ onChanged }: { onChanged: () => void }) {
         setPeriods(p);
         setSnapshots(s);
       })
-      .catch((err) => setError(err instanceof ApiError ? err.message : "تعذّر تحميل الفترات"));
+      .catch((err) => setError(err instanceof ApiError ? err.message : t("laborCompliancePage.periods.loadError")));
   }
   useEffect(load, []);
 
@@ -195,10 +190,10 @@ function PeriodsTab({ onChanged }: { onChanged: () => void }) {
     <div className="space-y-6">
       <div>
         <div className="mb-3 flex items-center justify-between">
-          <h3 className="font-semibold text-stone-800">فترات الامتثال</h3>
+          <h3 className="font-semibold text-stone-800">{t("laborCompliancePage.periods.heading")}</h3>
           <Can permission="laborCompliance.manage">
             <Button size="sm" onClick={() => setShowCreatePeriod((v) => !v)}>
-              {showCreatePeriod ? "إلغاء" : "+ فترة جديدة"}
+              {showCreatePeriod ? t("common.cancel") : t("laborCompliancePage.periods.newPeriod")}
             </Button>
           </Can>
         </div>
@@ -212,13 +207,13 @@ function PeriodsTab({ onChanged }: { onChanged: () => void }) {
           />
         )}
         {periods.length === 0 ? (
-          <EmptyState message="لا توجد فترات امتثال بعد" />
+          <EmptyState message={t("laborCompliancePage.periods.emptyMessage")} />
         ) : (
           <ul className="space-y-1">
             {periods.map((p) => (
               <li key={p.id} className="flex items-center justify-between rounded-md border border-stone-100 px-3 py-2 text-sm">
-                <span>{p.label ?? `${formatDate(p.periodStart)} — ${formatDate(p.periodEnd)}`}</span>
-                <Badge tone={p.status === "open" ? "success" : "neutral"}>{p.status === "open" ? "مفتوحة" : "مغلقة"}</Badge>
+                <span>{p.label ?? `${formatDate(p.periodStart, locale)} — ${formatDate(p.periodEnd, locale)}`}</span>
+                <Badge tone={p.status === "open" ? "success" : "neutral"}>{t(`laborCompliancePage.periods.status.${p.status}`)}</Badge>
               </li>
             ))}
           </ul>
@@ -227,10 +222,10 @@ function PeriodsTab({ onChanged }: { onChanged: () => void }) {
 
       <div>
         <div className="mb-3 flex items-center justify-between">
-          <h3 className="font-semibold text-stone-800">لقطات العمالة</h3>
+          <h3 className="font-semibold text-stone-800">{t("laborCompliancePage.periods.snapshotsHeading")}</h3>
           <Can permission="laborCompliance.manage">
             <Button size="sm" onClick={() => setShowCreateSnapshot((v) => !v)} disabled={periods.length === 0}>
-              {showCreateSnapshot ? "إلغاء" : "+ لقطة جديدة"}
+              {showCreateSnapshot ? t("common.cancel") : t("laborCompliancePage.periods.newSnapshot")}
             </Button>
           </Can>
         </div>
@@ -245,16 +240,16 @@ function PeriodsTab({ onChanged }: { onChanged: () => void }) {
           />
         )}
         {snapshots.length === 0 ? (
-          <EmptyState message="لا توجد لقطات عمالة بعد" />
+          <EmptyState message={t("laborCompliancePage.periods.snapshotsEmptyMessage")} />
         ) : (
           <ul className="space-y-1">
             {snapshots.map((s) => (
               <li key={s.id} className="rounded-md border border-stone-100 px-3 py-2 text-sm">
                 <div className="flex items-center justify-between">
-                  <span>{formatDate(s.snapshotDate)} — إجمالي {s.totalEmployees} (سعوديون {s.saudiEmployees} / غير سعوديين {s.nonSaudiEmployees})</span>
-                  <Badge tone={verificationStatusTone[s.verificationStatus]}>{verificationStatusLabel[s.verificationStatus]}</Badge>
+                  <span>{t("laborCompliancePage.periods.snapshotSummary", { date: formatDate(s.snapshotDate, locale), total: s.totalEmployees, saudi: s.saudiEmployees, nonSaudi: s.nonSaudiEmployees })}</span>
+                  <Badge tone={verificationStatusTone[s.verificationStatus]}>{t(`laborCompliancePage.verificationStatus.${s.verificationStatus}`)}</Badge>
                 </div>
-                <p className="mt-1 text-xs text-stone-500">المصدر: {sourceTypeLabel[s.sourceType]}</p>
+                <p className="mt-1 text-xs text-stone-500">{t("laborCompliancePage.sourceLabel", { source: t(`laborCompliancePage.sourceType.${s.sourceType}`) })}</p>
               </li>
             ))}
           </ul>
@@ -265,6 +260,7 @@ function PeriodsTab({ onChanged }: { onChanged: () => void }) {
 }
 
 function PeriodForm({ onSaved, onCancel }: { onSaved: () => void; onCancel: () => void }) {
+  const { t } = useTranslation();
   const [periodStart, setPeriodStart] = useState("");
   const [periodEnd, setPeriodEnd] = useState("");
   const [label, setLabel] = useState("");
@@ -279,7 +275,7 @@ function PeriodForm({ onSaved, onCancel }: { onSaved: () => void; onCancel: () =
       await createCompliancePeriod({ periodStart, periodEnd, label: label || undefined });
       onSaved();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر إنشاء الفترة");
+      setError(err instanceof ApiError ? err.message : t("laborCompliancePage.periods.form.genericError"));
     } finally {
       setSubmitting(false);
     }
@@ -293,12 +289,12 @@ function PeriodForm({ onSaved, onCancel }: { onSaved: () => void; onCancel: () =
             <ErrorState message={error} />
           </div>
         )}
-        <input placeholder="تسمية (اختياري)" value={label} onChange={(e) => setLabel(e.target.value)} className="rounded-md border border-stone-300 px-3 py-2 text-sm sm:col-span-2" />
+        <input placeholder={t("laborCompliancePage.periods.form.labelPlaceholder")} value={label} onChange={(e) => setLabel(e.target.value)} className="rounded-md border border-stone-300 px-3 py-2 text-sm sm:col-span-2" />
         <input required type="date" value={periodStart} onChange={(e) => setPeriodStart(e.target.value)} className="rounded-md border border-stone-300 px-3 py-2 text-sm" />
         <input required type="date" value={periodEnd} onChange={(e) => setPeriodEnd(e.target.value)} className="rounded-md border border-stone-300 px-3 py-2 text-sm" />
         <div className="flex gap-2 sm:col-span-4">
-          <Button type="submit" size="sm" disabled={submitting}>حفظ</Button>
-          <Button type="button" variant="secondary" size="sm" onClick={onCancel}>إلغاء</Button>
+          <Button type="submit" size="sm" disabled={submitting}>{t("common.save")}</Button>
+          <Button type="button" variant="secondary" size="sm" onClick={onCancel}>{t("common.cancel")}</Button>
         </div>
       </form>
     </Card>
@@ -306,6 +302,7 @@ function PeriodForm({ onSaved, onCancel }: { onSaved: () => void; onCancel: () =
 }
 
 function SnapshotForm({ periods, onSaved, onCancel }: { periods: CompliancePeriod[]; onSaved: () => void; onCancel: () => void }) {
+  const { t, locale } = useTranslation();
   const [compliancePeriodId, setCompliancePeriodId] = useState(periods[0]?.id ?? "");
   const [snapshotDate, setSnapshotDate] = useState("");
   const [totalEmployees, setTotalEmployees] = useState("");
@@ -328,7 +325,7 @@ function SnapshotForm({ periods, onSaved, onCancel }: { periods: CompliancePerio
       });
       onSaved();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر إنشاء اللقطة");
+      setError(err instanceof ApiError ? err.message : t("laborCompliancePage.periods.snapshotForm.genericError"));
     } finally {
       setSubmitting(false);
     }
@@ -344,16 +341,16 @@ function SnapshotForm({ periods, onSaved, onCancel }: { periods: CompliancePerio
         )}
         <select required value={compliancePeriodId} onChange={(e) => setCompliancePeriodId(e.target.value)} className="rounded-md border border-stone-300 px-3 py-2 text-sm">
           {periods.map((p) => (
-            <option key={p.id} value={p.id}>{p.label ?? formatDate(p.periodStart)}</option>
+            <option key={p.id} value={p.id}>{p.label ?? formatDate(p.periodStart, locale)}</option>
           ))}
         </select>
         <input required type="date" value={snapshotDate} onChange={(e) => setSnapshotDate(e.target.value)} className="rounded-md border border-stone-300 px-3 py-2 text-sm" />
-        <input required type="number" min="0" placeholder="إجمالي الموظفين" value={totalEmployees} onChange={(e) => setTotalEmployees(e.target.value)} className="rounded-md border border-stone-300 px-3 py-2 text-sm" />
-        <input required type="number" min="0" placeholder="سعوديون" value={saudiEmployees} onChange={(e) => setSaudiEmployees(e.target.value)} className="rounded-md border border-stone-300 px-3 py-2 text-sm" />
-        <input required type="number" min="0" placeholder="غير سعوديين" value={nonSaudiEmployees} onChange={(e) => setNonSaudiEmployees(e.target.value)} className="rounded-md border border-stone-300 px-3 py-2 text-sm" />
+        <input required type="number" min="0" placeholder={t("laborCompliancePage.periods.snapshotForm.totalPlaceholder")} value={totalEmployees} onChange={(e) => setTotalEmployees(e.target.value)} className="rounded-md border border-stone-300 px-3 py-2 text-sm" />
+        <input required type="number" min="0" placeholder={t("laborCompliancePage.periods.snapshotForm.saudiPlaceholder")} value={saudiEmployees} onChange={(e) => setSaudiEmployees(e.target.value)} className="rounded-md border border-stone-300 px-3 py-2 text-sm" />
+        <input required type="number" min="0" placeholder={t("laborCompliancePage.periods.snapshotForm.nonSaudiPlaceholder")} value={nonSaudiEmployees} onChange={(e) => setNonSaudiEmployees(e.target.value)} className="rounded-md border border-stone-300 px-3 py-2 text-sm" />
         <div className="flex gap-2 sm:col-span-4">
-          <Button type="submit" size="sm" disabled={submitting}>حفظ</Button>
-          <Button type="button" variant="secondary" size="sm" onClick={onCancel}>إلغاء</Button>
+          <Button type="submit" size="sm" disabled={submitting}>{t("common.save")}</Button>
+          <Button type="button" variant="secondary" size="sm" onClick={onCancel}>{t("common.cancel")}</Button>
         </div>
       </form>
     </Card>
@@ -362,6 +359,7 @@ function SnapshotForm({ periods, onSaved, onCancel }: { periods: CompliancePerio
 
 // --- Nitaqat ---
 function NitaqatTab({ onChanged }: { onChanged: () => void }) {
+  const { t } = useTranslation();
   const [records, setRecords] = useState<NitaqatComplianceRecord[] | null>(null);
   const [periods, setPeriods] = useState<CompliancePeriod[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -375,7 +373,7 @@ function NitaqatTab({ onChanged }: { onChanged: () => void }) {
         setRecords(r);
         setPeriods(p);
       })
-      .catch((err) => setError(err instanceof ApiError ? err.message : "تعذّر تحميل سجلات نطاقات"));
+      .catch((err) => setError(err instanceof ApiError ? err.message : t("laborCompliancePage.nitaqat.loadError")));
   }
   useEffect(load, []);
 
@@ -387,14 +385,14 @@ function NitaqatTab({ onChanged }: { onChanged: () => void }) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="font-semibold text-stone-800">سجلات نطاقات</h3>
+        <h3 className="font-semibold text-stone-800">{t("laborCompliancePage.nitaqat.heading")}</h3>
         <Can permission="laborCompliance.manage">
           <Button size="sm" onClick={() => setShowCreate((v) => !v)} disabled={periods.length === 0}>
-            {showCreate ? "إلغاء" : "+ سجل جديد"}
+            {showCreate ? t("common.cancel") : t("laborCompliancePage.nitaqat.newRecord")}
           </Button>
         </Can>
       </div>
-      {periods.length === 0 && <p className="text-xs text-stone-500">أنشئ فترة امتثال أولاً من تبويب "الفترات".</p>}
+      {periods.length === 0 && <p className="text-xs text-stone-500">{t("laborCompliancePage.needsPeriodHint")}</p>}
       {showCreate && (
         <NitaqatForm
           periods={periods}
@@ -408,16 +406,16 @@ function NitaqatTab({ onChanged }: { onChanged: () => void }) {
       )}
 
       {records.length === 0 ? (
-        <EmptyState message="لا توجد سجلات نطاقات بعد" />
+        <EmptyState message={t("laborCompliancePage.nitaqat.emptyMessage")} />
       ) : (
         <ul className="space-y-1">
           {records.map((r) => (
             <li key={r.id} className="cursor-pointer rounded-md border border-stone-100 px-3 py-2 text-sm hover:bg-stone-50" onClick={() => setSelectedId(r.id)}>
               <div className="flex items-center justify-between">
-                <span>{r.classification ?? "بدون تصنيف مسجَّل"} — إجمالي {r.totalCount} (سعوديون {r.saudiCount})</span>
-                <Badge tone={verificationStatusTone[r.verificationStatus]}>{verificationStatusLabel[r.verificationStatus]}</Badge>
+                <span>{t("laborCompliancePage.nitaqat.rowSummary", { classification: r.classification ?? t("laborCompliancePage.nitaqat.noClassification"), total: r.totalCount, saudi: r.saudiCount })}</span>
+                <Badge tone={verificationStatusTone[r.verificationStatus]}>{t(`laborCompliancePage.verificationStatus.${r.verificationStatus}`)}</Badge>
               </div>
-              <p className="mt-1 text-xs text-stone-500">المصدر: {sourceTypeLabel[r.sourceType]}</p>
+              <p className="mt-1 text-xs text-stone-500">{t("laborCompliancePage.sourceLabel", { source: t(`laborCompliancePage.sourceType.${r.sourceType}`) })}</p>
             </li>
           ))}
         </ul>
@@ -438,6 +436,7 @@ function NitaqatTab({ onChanged }: { onChanged: () => void }) {
 }
 
 function NitaqatForm({ periods, onSaved, onCancel }: { periods: CompliancePeriod[]; onSaved: () => void; onCancel: () => void }) {
+  const { t, locale } = useTranslation();
   const [compliancePeriodId, setCompliancePeriodId] = useState(periods[0]?.id ?? "");
   const [classification, setClassification] = useState("");
   const [saudiCount, setSaudiCount] = useState("");
@@ -462,7 +461,7 @@ function NitaqatForm({ periods, onSaved, onCancel }: { periods: CompliancePeriod
       });
       onSaved();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر إنشاء السجل");
+      setError(err instanceof ApiError ? err.message : t("laborCompliancePage.recordForm.genericError"));
     } finally {
       setSubmitting(false);
     }
@@ -476,20 +475,20 @@ function NitaqatForm({ periods, onSaved, onCancel }: { periods: CompliancePeriod
             <ErrorState message={error} />
           </div>
         )}
-        <p className="text-xs text-stone-500 sm:col-span-3">أدخل التصنيف كما ورد لك تحديداً (مثلاً من شاشة قوى) — هذا الحقل نص حر، ولا يُحسب داخل مداد.</p>
+        <p className="text-xs text-stone-500 sm:col-span-3">{t("laborCompliancePage.nitaqat.form.classificationHint")}</p>
         <select required value={compliancePeriodId} onChange={(e) => setCompliancePeriodId(e.target.value)} className="rounded-md border border-stone-300 px-3 py-2 text-sm">
           {periods.map((p) => (
-            <option key={p.id} value={p.id}>{p.label ?? formatDate(p.periodStart)}</option>
+            <option key={p.id} value={p.id}>{p.label ?? formatDate(p.periodStart, locale)}</option>
           ))}
         </select>
-        <input placeholder="التصنيف المُبلَّغ (اختياري)" value={classification} onChange={(e) => setClassification(e.target.value)} className="rounded-md border border-stone-300 px-3 py-2 text-sm sm:col-span-2" />
-        <input required type="number" min="0" placeholder="عدد السعوديين" value={saudiCount} onChange={(e) => setSaudiCount(e.target.value)} className="rounded-md border border-stone-300 px-3 py-2 text-sm" />
-        <input required type="number" min="0" placeholder="عدد غير السعوديين" value={nonSaudiCount} onChange={(e) => setNonSaudiCount(e.target.value)} className="rounded-md border border-stone-300 px-3 py-2 text-sm" />
-        <input required type="number" min="0" placeholder="الإجمالي" value={totalCount} onChange={(e) => setTotalCount(e.target.value)} className="rounded-md border border-stone-300 px-3 py-2 text-sm" />
-        <input placeholder="مرجع خارجي (اختياري)" value={externalReference} onChange={(e) => setExternalReference(e.target.value)} className="rounded-md border border-stone-300 px-3 py-2 text-sm sm:col-span-3" />
+        <input placeholder={t("laborCompliancePage.nitaqat.form.classificationPlaceholder")} value={classification} onChange={(e) => setClassification(e.target.value)} className="rounded-md border border-stone-300 px-3 py-2 text-sm sm:col-span-2" />
+        <input required type="number" min="0" placeholder={t("laborCompliancePage.nitaqat.form.saudiPlaceholder")} value={saudiCount} onChange={(e) => setSaudiCount(e.target.value)} className="rounded-md border border-stone-300 px-3 py-2 text-sm" />
+        <input required type="number" min="0" placeholder={t("laborCompliancePage.nitaqat.form.nonSaudiPlaceholder")} value={nonSaudiCount} onChange={(e) => setNonSaudiCount(e.target.value)} className="rounded-md border border-stone-300 px-3 py-2 text-sm" />
+        <input required type="number" min="0" placeholder={t("laborCompliancePage.nitaqat.form.totalPlaceholder")} value={totalCount} onChange={(e) => setTotalCount(e.target.value)} className="rounded-md border border-stone-300 px-3 py-2 text-sm" />
+        <input placeholder={t("laborCompliancePage.recordForm.externalReferencePlaceholder")} value={externalReference} onChange={(e) => setExternalReference(e.target.value)} className="rounded-md border border-stone-300 px-3 py-2 text-sm sm:col-span-3" />
         <div className="flex gap-2 sm:col-span-3">
-          <Button type="submit" size="sm" disabled={submitting}>حفظ</Button>
-          <Button type="button" variant="secondary" size="sm" onClick={onCancel}>إلغاء</Button>
+          <Button type="submit" size="sm" disabled={submitting}>{t("common.save")}</Button>
+          <Button type="button" variant="secondary" size="sm" onClick={onCancel}>{t("common.cancel")}</Button>
         </div>
       </form>
     </Card>
@@ -497,6 +496,7 @@ function NitaqatForm({ periods, onSaved, onCancel }: { periods: CompliancePeriod
 }
 
 function NitaqatDetail({ record, onChanged, onClose }: { record: NitaqatComplianceRecord; onChanged: () => void; onClose: () => void }) {
+  const { t } = useTranslation();
   const [evidence, setEvidence] = useState<ComplianceEvidence[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -513,7 +513,7 @@ function NitaqatDetail({ record, onChanged, onClose }: { record: NitaqatComplian
       await verifyNitaqatRecord(record.id);
       onChanged();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر التحقق من السجل");
+      setError(err instanceof ApiError ? err.message : t("laborCompliancePage.detail.verifyError"));
     } finally {
       setSubmitting(false);
     }
@@ -527,7 +527,7 @@ function NitaqatDetail({ record, onChanged, onClose }: { record: NitaqatComplian
       await uploadNitaqatEvidence(record.id, file);
       loadEvidence();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر رفع الدليل");
+      setError(err instanceof ApiError ? err.message : t("laborCompliancePage.detail.uploadError"));
     }
   }
 
@@ -535,10 +535,10 @@ function NitaqatDetail({ record, onChanged, onClose }: { record: NitaqatComplian
     <Card className="p-5">
       <div className="mb-3 flex items-start justify-between">
         <div>
-          <h3 className="font-semibold text-stone-800">{record.classification ?? "سجل نطاقات"}</h3>
-          <Badge tone={verificationStatusTone[record.verificationStatus]}>{verificationStatusLabel[record.verificationStatus]}</Badge>
+          <h3 className="font-semibold text-stone-800">{record.classification ?? t("laborCompliancePage.nitaqat.defaultTitle")}</h3>
+          <Badge tone={verificationStatusTone[record.verificationStatus]}>{t(`laborCompliancePage.verificationStatus.${record.verificationStatus}`)}</Badge>
         </div>
-        <button type="button" onClick={onClose} className="text-stone-400 hover:text-stone-600" aria-label="إغلاق التفاصيل">✕</button>
+        <button type="button" onClick={onClose} className="text-stone-400 hover:text-stone-600" aria-label={t("laborCompliancePage.detail.closeAriaLabel")}>✕</button>
       </div>
 
       {error && (
@@ -548,21 +548,21 @@ function NitaqatDetail({ record, onChanged, onClose }: { record: NitaqatComplian
       )}
 
       <dl className="mb-4 text-sm">
-        <div className="flex justify-between border-b border-stone-100 py-1.5"><dt className="text-stone-500">المصدر</dt><dd>{sourceTypeLabel[record.sourceType]}</dd></div>
-        <div className="flex justify-between border-b border-stone-100 py-1.5"><dt className="text-stone-500">مرجع خارجي</dt><dd>{record.externalReference ?? "—"}</dd></div>
-        <div className="flex justify-between py-1.5"><dt className="text-stone-500">ملاحظات</dt><dd>{record.notes ?? "—"}</dd></div>
+        <div className="flex justify-between border-b border-stone-100 py-1.5"><dt className="text-stone-500">{t("laborCompliancePage.detail.fields.source")}</dt><dd>{t(`laborCompliancePage.sourceType.${record.sourceType}`)}</dd></div>
+        <div className="flex justify-between border-b border-stone-100 py-1.5"><dt className="text-stone-500">{t("laborCompliancePage.detail.fields.externalReference")}</dt><dd>{record.externalReference ?? "—"}</dd></div>
+        <div className="flex justify-between py-1.5"><dt className="text-stone-500">{t("laborCompliancePage.detail.fields.notes")}</dt><dd>{record.notes ?? "—"}</dd></div>
       </dl>
 
       <div className="mb-4">
-        <p className="mb-2 text-xs font-semibold text-stone-500">الأدلة الداعمة</p>
-        {evidence === null && <p className="text-xs text-stone-400">جارٍ التحميل...</p>}
-        {evidence && evidence.length === 0 && <p className="text-xs text-stone-400">لا توجد أدلة مرفقة</p>}
+        <p className="mb-2 text-xs font-semibold text-stone-500">{t("laborCompliancePage.detail.evidenceHeading")}</p>
+        {evidence === null && <p className="text-xs text-stone-400">{t("common.loading")}</p>}
+        {evidence && evidence.length === 0 && <p className="text-xs text-stone-400">{t("laborCompliancePage.detail.noEvidence")}</p>}
         {evidence && evidence.length > 0 && (
           <ul className="space-y-1">
             {evidence.map((f) => (
               <li key={f.id} className="flex items-center justify-between text-xs">
                 <span>{f.fileName}</span>
-                <button type="button" onClick={() => downloadNitaqatEvidence(record.id, f.id, f.fileName)} className="text-primary hover:underline">تنزيل</button>
+                <button type="button" onClick={() => downloadNitaqatEvidence(record.id, f.id, f.fileName)} className="text-primary hover:underline">{t("laborCompliancePage.detail.download")}</button>
               </li>
             ))}
           </ul>
@@ -574,7 +574,7 @@ function NitaqatDetail({ record, onChanged, onClose }: { record: NitaqatComplian
 
       {record.verificationStatus !== "verified" && (
         <Can permission="laborCompliance.verify">
-          <Button size="sm" disabled={submitting} onClick={onVerify}>تحقق من السجل</Button>
+          <Button size="sm" disabled={submitting} onClick={onVerify}>{t("laborCompliancePage.detail.verify")}</Button>
         </Can>
       )}
     </Card>
@@ -583,6 +583,7 @@ function NitaqatDetail({ record, onChanged, onClose }: { record: NitaqatComplian
 
 // --- GOSI ---
 function GosiTab({ onChanged }: { onChanged: () => void }) {
+  const { t } = useTranslation();
   const [records, setRecords] = useState<GosiComplianceRecord[] | null>(null);
   const [periods, setPeriods] = useState<CompliancePeriod[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -596,7 +597,7 @@ function GosiTab({ onChanged }: { onChanged: () => void }) {
         setRecords(r);
         setPeriods(p);
       })
-      .catch((err) => setError(err instanceof ApiError ? err.message : "تعذّر تحميل سجلات GOSI"));
+      .catch((err) => setError(err instanceof ApiError ? err.message : t("laborCompliancePage.gosi.loadError")));
   }
   useEffect(load, []);
 
@@ -608,14 +609,14 @@ function GosiTab({ onChanged }: { onChanged: () => void }) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="font-semibold text-stone-800">سجلات GOSI</h3>
+        <h3 className="font-semibold text-stone-800">{t("laborCompliancePage.gosi.heading")}</h3>
         <Can permission="laborCompliance.manage">
           <Button size="sm" onClick={() => setShowCreate((v) => !v)} disabled={periods.length === 0}>
-            {showCreate ? "إلغاء" : "+ سجل جديد"}
+            {showCreate ? t("common.cancel") : t("laborCompliancePage.nitaqat.newRecord")}
           </Button>
         </Can>
       </div>
-      {periods.length === 0 && <p className="text-xs text-stone-500">أنشئ فترة امتثال أولاً من تبويب "الفترات".</p>}
+      {periods.length === 0 && <p className="text-xs text-stone-500">{t("laborCompliancePage.needsPeriodHint")}</p>}
       {showCreate && (
         <GosiForm
           periods={periods}
@@ -629,16 +630,16 @@ function GosiTab({ onChanged }: { onChanged: () => void }) {
       )}
 
       {records.length === 0 ? (
-        <EmptyState message="لا توجد سجلات GOSI بعد" />
+        <EmptyState message={t("laborCompliancePage.gosi.emptyMessage")} />
       ) : (
         <ul className="space-y-1">
           {records.map((r) => (
             <li key={r.id} className="cursor-pointer rounded-md border border-stone-100 px-3 py-2 text-sm hover:bg-stone-50" onClick={() => setSelectedId(r.id)}>
               <div className="flex items-center justify-between">
-                <span>الاشتراك: {gosiStatusLabel[r.contributionStatus]} — التقديم: {gosiStatusLabel[r.submissionStatus]}</span>
-                <Badge tone={verificationStatusTone[r.verificationStatus]}>{verificationStatusLabel[r.verificationStatus]}</Badge>
+                <span>{t("laborCompliancePage.gosi.rowSummary", { contribution: gosiStatusLabel(t, r.contributionStatus), submission: gosiStatusLabel(t, r.submissionStatus) })}</span>
+                <Badge tone={verificationStatusTone[r.verificationStatus]}>{t(`laborCompliancePage.verificationStatus.${r.verificationStatus}`)}</Badge>
               </div>
-              <p className="mt-1 text-xs text-stone-500">المصدر: {sourceTypeLabel[r.sourceType]}</p>
+              <p className="mt-1 text-xs text-stone-500">{t("laborCompliancePage.sourceLabel", { source: t(`laborCompliancePage.sourceType.${r.sourceType}`) })}</p>
             </li>
           ))}
         </ul>
@@ -659,6 +660,7 @@ function GosiTab({ onChanged }: { onChanged: () => void }) {
 }
 
 function GosiForm({ periods, onSaved, onCancel }: { periods: CompliancePeriod[]; onSaved: () => void; onCancel: () => void }) {
+  const { t, locale } = useTranslation();
   const [compliancePeriodId, setCompliancePeriodId] = useState(periods[0]?.id ?? "");
   const [registeredEmployeeCount, setRegisteredEmployeeCount] = useState("");
   const [externalReference, setExternalReference] = useState("");
@@ -677,7 +679,7 @@ function GosiForm({ periods, onSaved, onCancel }: { periods: CompliancePeriod[];
       });
       onSaved();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر إنشاء السجل");
+      setError(err instanceof ApiError ? err.message : t("laborCompliancePage.recordForm.genericError"));
     } finally {
       setSubmitting(false);
     }
@@ -693,14 +695,14 @@ function GosiForm({ periods, onSaved, onCancel }: { periods: CompliancePeriod[];
         )}
         <select required value={compliancePeriodId} onChange={(e) => setCompliancePeriodId(e.target.value)} className="rounded-md border border-stone-300 px-3 py-2 text-sm">
           {periods.map((p) => (
-            <option key={p.id} value={p.id}>{p.label ?? formatDate(p.periodStart)}</option>
+            <option key={p.id} value={p.id}>{p.label ?? formatDate(p.periodStart, locale)}</option>
           ))}
         </select>
-        <input type="number" min="0" placeholder="عدد الموظفين المسجَّلين (اختياري)" value={registeredEmployeeCount} onChange={(e) => setRegisteredEmployeeCount(e.target.value)} className="rounded-md border border-stone-300 px-3 py-2 text-sm" />
-        <input placeholder="مرجع خارجي (اختياري)" value={externalReference} onChange={(e) => setExternalReference(e.target.value)} className="rounded-md border border-stone-300 px-3 py-2 text-sm" />
+        <input type="number" min="0" placeholder={t("laborCompliancePage.gosi.form.registeredCountPlaceholder")} value={registeredEmployeeCount} onChange={(e) => setRegisteredEmployeeCount(e.target.value)} className="rounded-md border border-stone-300 px-3 py-2 text-sm" />
+        <input placeholder={t("laborCompliancePage.recordForm.externalReferencePlaceholder")} value={externalReference} onChange={(e) => setExternalReference(e.target.value)} className="rounded-md border border-stone-300 px-3 py-2 text-sm" />
         <div className="flex gap-2 sm:col-span-3">
-          <Button type="submit" size="sm" disabled={submitting}>حفظ</Button>
-          <Button type="button" variant="secondary" size="sm" onClick={onCancel}>إلغاء</Button>
+          <Button type="submit" size="sm" disabled={submitting}>{t("common.save")}</Button>
+          <Button type="button" variant="secondary" size="sm" onClick={onCancel}>{t("common.cancel")}</Button>
         </div>
       </form>
     </Card>
@@ -708,6 +710,7 @@ function GosiForm({ periods, onSaved, onCancel }: { periods: CompliancePeriod[];
 }
 
 function GosiDetail({ record, onChanged, onClose }: { record: GosiComplianceRecord; onChanged: () => void; onClose: () => void }) {
+  const { t } = useTranslation();
   const [evidence, setEvidence] = useState<ComplianceEvidence[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -724,7 +727,7 @@ function GosiDetail({ record, onChanged, onClose }: { record: GosiComplianceReco
       await verifyGosiRecord(record.id);
       onChanged();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر التحقق من السجل");
+      setError(err instanceof ApiError ? err.message : t("laborCompliancePage.detail.verifyError"));
     } finally {
       setSubmitting(false);
     }
@@ -743,7 +746,7 @@ function GosiDetail({ record, onChanged, onClose }: { record: GosiComplianceReco
       await uploadGosiEvidence(record.id, file);
       loadEvidence();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر رفع الدليل");
+      setError(err instanceof ApiError ? err.message : t("laborCompliancePage.detail.uploadError"));
     }
   }
 
@@ -753,10 +756,10 @@ function GosiDetail({ record, onChanged, onClose }: { record: GosiComplianceReco
     <Card className="p-5">
       <div className="mb-3 flex items-start justify-between">
         <div>
-          <h3 className="font-semibold text-stone-800">سجل GOSI</h3>
-          <Badge tone={verificationStatusTone[record.verificationStatus]}>{verificationStatusLabel[record.verificationStatus]}</Badge>
+          <h3 className="font-semibold text-stone-800">{t("laborCompliancePage.gosi.detailTitle")}</h3>
+          <Badge tone={verificationStatusTone[record.verificationStatus]}>{t(`laborCompliancePage.verificationStatus.${record.verificationStatus}`)}</Badge>
         </div>
-        <button type="button" onClick={onClose} className="text-stone-400 hover:text-stone-600" aria-label="إغلاق التفاصيل">✕</button>
+        <button type="button" onClick={onClose} className="text-stone-400 hover:text-stone-600" aria-label={t("laborCompliancePage.detail.closeAriaLabel")}>✕</button>
       </div>
 
       {error && (
@@ -769,7 +772,7 @@ function GosiDetail({ record, onChanged, onClose }: { record: GosiComplianceReco
         {(["contributionStatus", "submissionStatus", "paymentStatus"] as const).map((field) => (
           <div key={field}>
             <label className="mb-1 block text-xs text-stone-500">
-              {field === "contributionStatus" ? "الاشتراك" : field === "submissionStatus" ? "التقديم" : "السداد"}
+              {field === "contributionStatus" ? t("laborCompliancePage.gosi.detail.fields.contribution") : field === "submissionStatus" ? t("laborCompliancePage.gosi.detail.fields.submission") : t("laborCompliancePage.gosi.detail.fields.payment")}
             </label>
             <select
               value={record[field]}
@@ -778,7 +781,7 @@ function GosiDetail({ record, onChanged, onClose }: { record: GosiComplianceReco
               disabled={record.verificationStatus === "verified"}
             >
               {statusOptions.map((s) => (
-                <option key={s} value={s}>{gosiStatusLabel[s]}</option>
+                <option key={s} value={s}>{gosiStatusLabel(t, s)}</option>
               ))}
             </select>
           </div>
@@ -786,15 +789,15 @@ function GosiDetail({ record, onChanged, onClose }: { record: GosiComplianceReco
       </div>
 
       <div className="mb-4">
-        <p className="mb-2 text-xs font-semibold text-stone-500">الأدلة الداعمة</p>
-        {evidence === null && <p className="text-xs text-stone-400">جارٍ التحميل...</p>}
-        {evidence && evidence.length === 0 && <p className="text-xs text-stone-400">لا توجد أدلة مرفقة</p>}
+        <p className="mb-2 text-xs font-semibold text-stone-500">{t("laborCompliancePage.detail.evidenceHeading")}</p>
+        {evidence === null && <p className="text-xs text-stone-400">{t("common.loading")}</p>}
+        {evidence && evidence.length === 0 && <p className="text-xs text-stone-400">{t("laborCompliancePage.detail.noEvidence")}</p>}
         {evidence && evidence.length > 0 && (
           <ul className="space-y-1">
             {evidence.map((f) => (
               <li key={f.id} className="flex items-center justify-between text-xs">
                 <span>{f.fileName}</span>
-                <button type="button" onClick={() => downloadGosiEvidence(record.id, f.id, f.fileName)} className="text-primary hover:underline">تنزيل</button>
+                <button type="button" onClick={() => downloadGosiEvidence(record.id, f.id, f.fileName)} className="text-primary hover:underline">{t("laborCompliancePage.detail.download")}</button>
               </li>
             ))}
           </ul>
@@ -806,7 +809,7 @@ function GosiDetail({ record, onChanged, onClose }: { record: GosiComplianceReco
 
       {record.verificationStatus !== "verified" && (
         <Can permission="laborCompliance.verify">
-          <Button size="sm" disabled={submitting} onClick={onVerify}>تحقق من السجل</Button>
+          <Button size="sm" disabled={submitting} onClick={onVerify}>{t("laborCompliancePage.detail.verify")}</Button>
         </Can>
       )}
     </Card>
@@ -814,11 +817,10 @@ function GosiDetail({ record, onChanged, onClose }: { record: GosiComplianceReco
 }
 
 // --- Exceptions ---
-const severityLabel: Record<ComplianceExceptionSeverity, string> = { low: "منخفضة", medium: "متوسطة", high: "عالية", critical: "حرجة" };
 const severityTone: Record<ComplianceExceptionSeverity, "neutral" | "info" | "warning" | "danger"> = { low: "neutral", medium: "info", high: "warning", critical: "danger" };
-const exceptionStatusLabel: Record<ComplianceExceptionStatus, string> = { open: "مفتوح", in_progress: "قيد المعالجة", resolved: "تم الحل", closed: "مغلق" };
 
 function ExceptionsTab({ onChanged }: { onChanged: () => void }) {
+  const { t } = useTranslation();
   const [exceptions, setExceptions] = useState<ComplianceException[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
@@ -827,7 +829,7 @@ function ExceptionsTab({ onChanged }: { onChanged: () => void }) {
     setError(null);
     listComplianceExceptions()
       .then(setExceptions)
-      .catch((err) => setError(err instanceof ApiError ? err.message : "تعذّر تحميل الاستثناءات"));
+      .catch((err) => setError(err instanceof ApiError ? err.message : t("laborCompliancePage.exceptions.loadError")));
   }
   useEffect(load, []);
 
@@ -848,9 +850,9 @@ function ExceptionsTab({ onChanged }: { onChanged: () => void }) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="font-semibold text-stone-800">الاستثناءات</h3>
+        <h3 className="font-semibold text-stone-800">{t("laborCompliancePage.exceptions.heading")}</h3>
         <Can permission="laborCompliance.manage">
-          <Button size="sm" onClick={() => setShowCreate((v) => !v)}>{showCreate ? "إلغاء" : "+ استثناء جديد"}</Button>
+          <Button size="sm" onClick={() => setShowCreate((v) => !v)}>{showCreate ? t("common.cancel") : t("laborCompliancePage.exceptions.newException")}</Button>
         </Can>
       </div>
       {showCreate && (
@@ -865,7 +867,7 @@ function ExceptionsTab({ onChanged }: { onChanged: () => void }) {
       )}
 
       {exceptions.length === 0 ? (
-        <EmptyState message="لا توجد استثناءات" />
+        <EmptyState message={t("laborCompliancePage.exceptions.emptyMessage")} />
       ) : (
         <ul className="space-y-2">
           {exceptions.map((exc) => (
@@ -873,17 +875,17 @@ function ExceptionsTab({ onChanged }: { onChanged: () => void }) {
               <div className="flex items-center justify-between">
                 <span>{exc.description}</span>
                 <div className="flex items-center gap-2">
-                  <Badge tone={severityTone[exc.severity]}>{severityLabel[exc.severity]}</Badge>
-                  <Badge tone="neutral">{exceptionStatusLabel[exc.status]}</Badge>
+                  <Badge tone={severityTone[exc.severity]}>{t(`laborCompliancePage.exceptions.severity.${exc.severity}`)}</Badge>
+                  <Badge tone="neutral">{t(`laborCompliancePage.exceptions.status.${exc.status}`)}</Badge>
                 </div>
               </div>
               <Can permission="laborCompliance.manage">
                 <div className="mt-2 flex gap-2">
                   {(exc.status === "open" || exc.status === "in_progress") && (
-                    <Button size="sm" variant="secondary" onClick={() => onResolve(exc.id)}>تحديد كمحلول</Button>
+                    <Button size="sm" variant="secondary" onClick={() => onResolve(exc.id)}>{t("budgetAlertsPage.detail.markResolved")}</Button>
                   )}
                   {exc.status === "resolved" && (
-                    <Button size="sm" variant="secondary" onClick={() => onClose(exc.id)}>إغلاق</Button>
+                    <Button size="sm" variant="secondary" onClick={() => onClose(exc.id)}>{t("laborCompliancePage.exceptions.closeAction")}</Button>
                   )}
                 </div>
               </Can>
@@ -895,7 +897,10 @@ function ExceptionsTab({ onChanged }: { onChanged: () => void }) {
   );
 }
 
+const EXCEPTION_SEVERITIES: ComplianceExceptionSeverity[] = ["low", "medium", "high", "critical"];
+
 function ExceptionForm({ onSaved, onCancel }: { onSaved: () => void; onCancel: () => void }) {
+  const { t } = useTranslation();
   const [description, setDescription] = useState("");
   const [severity, setSeverity] = useState<ComplianceExceptionSeverity>("medium");
   const [error, setError] = useState<string | null>(null);
@@ -909,7 +914,7 @@ function ExceptionForm({ onSaved, onCancel }: { onSaved: () => void; onCancel: (
       await createComplianceException({ description, severity });
       onSaved();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر إنشاء الاستثناء");
+      setError(err instanceof ApiError ? err.message : t("laborCompliancePage.exceptions.form.genericError"));
     } finally {
       setSubmitting(false);
     }
@@ -923,15 +928,15 @@ function ExceptionForm({ onSaved, onCancel }: { onSaved: () => void; onCancel: (
             <ErrorState message={error} />
           </div>
         )}
-        <input required placeholder="الوصف (مثال: يحتاج إلى تحقق)" value={description} onChange={(e) => setDescription(e.target.value)} className="rounded-md border border-stone-300 px-3 py-2 text-sm sm:col-span-2" />
+        <input required placeholder={t("laborCompliancePage.exceptions.form.descriptionPlaceholder")} value={description} onChange={(e) => setDescription(e.target.value)} className="rounded-md border border-stone-300 px-3 py-2 text-sm sm:col-span-2" />
         <select value={severity} onChange={(e) => setSeverity(e.target.value as ComplianceExceptionSeverity)} className="rounded-md border border-stone-300 px-3 py-2 text-sm">
-          {(Object.keys(severityLabel) as ComplianceExceptionSeverity[]).map((s) => (
-            <option key={s} value={s}>{severityLabel[s]}</option>
+          {EXCEPTION_SEVERITIES.map((s) => (
+            <option key={s} value={s}>{t(`laborCompliancePage.exceptions.severity.${s}`)}</option>
           ))}
         </select>
         <div className="flex gap-2 sm:col-span-3">
-          <Button type="submit" size="sm" disabled={submitting}>حفظ</Button>
-          <Button type="button" variant="secondary" size="sm" onClick={onCancel}>إلغاء</Button>
+          <Button type="submit" size="sm" disabled={submitting}>{t("common.save")}</Button>
+          <Button type="button" variant="secondary" size="sm" onClick={onCancel}>{t("common.cancel")}</Button>
         </div>
       </form>
     </Card>
