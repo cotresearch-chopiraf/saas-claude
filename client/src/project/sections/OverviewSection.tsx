@@ -930,16 +930,18 @@ function PlainRow({
   tone?: "default" | "success" | "warning" | "danger";
 }) {
   const color = tone === "success" ? "text-success-700" : tone === "warning" ? "text-warning-700" : tone === "danger" ? "text-danger-700" : "text-stone-800";
-  // The label truncates first (min-w-0 + truncate) — the value never
-  // breaks mid-digit: it's shrink-0 + whitespace-nowrap so a money figure
-  // always reads as one intact number, never split across lines.
+  // Label above, value below — the same convention as PlainStat and the
+  // Financial Control ledger, used everywhere on this page now. Stacking
+  // (rather than a same-line label:value pair) means the value never
+  // competes with the label for width, so neither one needs to truncate
+  // even in the narrowest of the three Delivery/Cash/Commercial columns —
+  // a same-line layout tried earlier here still truncated long English
+  // labels ("Total com…", "Awaiting ap…") at that width.
   return (
-    <div className="flex items-baseline justify-between gap-3">
-      <span className="min-w-0 truncate text-stone-500" title={label}>{label}</span>
-      <span className="shrink-0 text-end">
-        <span className={`block whitespace-nowrap font-semibold tabular-nums ${color}`}>{value}</span>
-        {hint && <span className="mt-0.5 block max-w-[12rem] truncate text-xs text-stone-400">{hint}</span>}
-      </span>
+    <div>
+      <p className="text-xs text-stone-500">{label}</p>
+      <p className={`mt-0.5 whitespace-nowrap text-sm font-semibold tabular-nums ${color}`}>{value}</p>
+      {hint && <p className="mt-0.5 truncate text-xs text-stone-400">{hint}</p>}
     </div>
   );
 }
@@ -973,7 +975,7 @@ function DeliveryColumn({
       {tasks.length === 0 ? (
         <p className="mt-3 text-sm text-stone-400">{t("dashboard.progressSchedule.noData")}</p>
       ) : (
-        <div className="mt-3 space-y-2.5 text-sm">
+        <div className="mt-3 space-y-3">
           <PlainRow label={t("dashboard.progressSchedule.overallProgress")} value={avgProgress !== null ? formatPercent(avgProgress, 1, locale) : "—"} />
           <PlainRow
             label={t("dashboard.progressSchedule.scheduleStatus")}
@@ -1004,7 +1006,7 @@ function CashColumn({ cashFlow, projectId }: { cashFlow: CashFlowResult; project
           {t("dashboard.cashFlow.fullDetails")}
         </Link>
       </div>
-      <div className="mt-3 space-y-2.5 text-sm">
+      <div className="mt-3 space-y-3">
         <PlainRow label={t("dashboard.cashFlow.collected")} value={formatMoney(cashFlow.historical.cashReceived, cashFlow.currency, locale)} />
         <PlainRow label={t("dashboard.cashFlow.incurredCost")} value={formatMoney(cashFlow.historical.incurredCost, cashFlow.currency, locale)} />
         <PlainRow label={t("dashboard.cashFlow.expectedReceivables")} value={formatMoney(cashFlow.projected.receivables, cashFlow.currency, locale)} />
@@ -1061,7 +1063,7 @@ function CommercialColumn({
           {t("dashboard.procurement.open")}
         </Link>
       </div>
-      <div className="mt-2 space-y-2.5 text-sm">
+      <div className="mt-2 space-y-3">
         <PlainRow label={t("dashboard.procurement.totalCommitted")} value={formatMoney(totalCommitted, currency, locale)} />
         <PlainRow label={t("dashboard.procurement.activeExecuted")} value={formatMoney(approvedCommitted, currency, locale)} tone="success" />
         <PlainRow label={t("dashboard.procurement.pendingApprovalCount", { count: pendingCount })} value={formatMoney(pendingCommitted, currency, locale)} tone="warning" />
@@ -1073,7 +1075,7 @@ function CommercialColumn({
           {t("dashboard.commercial.openCertificates")}
         </Link>
       </div>
-      <div className="mt-2 space-y-2.5 text-sm">
+      <div className="mt-2 space-y-3">
         <PlainRow label={t("dashboard.commercial.certifiedValueCount", { count: certifiedCount })} value={formatMoney(certifiedTotal, currency, locale)} tone="success" />
         <PlainRow label={t("dashboard.commercial.awaitingCertification")} value={String(awaitingCertification)} tone={awaitingCertification > 0 ? "warning" : "default"} />
         <PlainRow label={t("dashboard.commercial.awaitingApproval")} value={String(awaitingApproval)} tone={awaitingApproval > 0 ? "warning" : "default"} />
@@ -1086,7 +1088,7 @@ function CommercialColumn({
       {laborCost.allocationCount === 0 ? (
         <p className="mt-2 text-sm text-stone-400">{t("dashboard.commercial.noLaborCost")}</p>
       ) : (
-        <div className="mt-2 space-y-2.5 text-sm">
+        <div className="mt-2 space-y-3">
           <PlainRow label={t("dashboard.commercial.totalAllocated")} value={formatMoney(laborCost.allocatedTotal, "SAR", locale)} />
           <PlainRow label={t("dashboard.commercial.allocationCount")} value={String(laborCost.allocationCount)} />
         </div>
