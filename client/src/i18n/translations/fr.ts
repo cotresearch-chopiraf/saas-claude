@@ -2116,6 +2116,57 @@ const fr = {
     actionRevoked: "Accès de support révoqué",
     diagnosticsNote: "Pour diagnostiquer un problème client précis : ouvrez l'organisation concernée, puis utilisez « Demander un accès de support » pour démarrer une session d'investigation en lecture seule, et consultez son journal d'activité depuis la page de la session. Il n'existe actuellement aucun système centralisé de suivi détaillé des erreurs techniques — les journaux structurés (Structured Logs) avec Request ID sont le moyen actuel de diagnostic côté serveur.",
   },
+  portalProjectStatus: {
+    active: "En cours",
+    on_hold: "Suspendu",
+    completed: "Terminé",
+  },
+  zatcaErrorPresentations: {
+    configuration: {
+      title: "Configuration incomplète",
+      retryGuidanceText: "Complétez l'étape manquante (indiquée ci-dessous) puis réessayez.",
+    },
+    authentication: {
+      title: "Problème d'authentification avec ZATCA",
+      retryGuidanceText: "ZATCA a rejeté les identifiants ou le code de vérification (OTP) utilisé — vérifiez-les avant de réessayer.",
+    },
+    authorization: {
+      title: "Le certificat n'est pas autorisé pour cette action",
+      retryGuidanceText: "Le certificat actuel n'est pas autorisé à effectuer cette action précise — vérifiez l'environnement de connexion (simulation/production) et l'étape du certificat.",
+    },
+    validation: {
+      title: "ZATCA a rejeté les données envoyées",
+      retryGuidanceText: "Corrigez les données mentionnées dans le message ci-dessous puis réessayez — renvoyer sans modification ne servira à rien.",
+    },
+    duplicate: {
+      title: "Cette demande a déjà été envoyée",
+      retryGuidanceText: "ZATCA a signalé que cette demande a déjà été envoyée avec succès — aucun besoin de la renvoyer.",
+    },
+    rate_limited: {
+      title: "Trop de tentatives",
+      retryGuidanceText: "Patientez quelques minutes puis réessayez.",
+    },
+    network: {
+      title: "Impossible d'atteindre ZATCA",
+      retryGuidanceText: "Il pourrait s'agir d'un problème de connexion temporaire — réessayez dans quelques instants. Si le problème persiste, contactez le support.",
+    },
+    external_service: {
+      title: "Le service ZATCA est actuellement indisponible",
+      retryGuidanceText: "La plateforme a bien contacté ZATCA mais la réponse était inattendue ou le service est indisponible — réessayez dans quelques instants.",
+    },
+    not_implemented: {
+      title: "Cette fonctionnalité n'est pas encore disponible",
+      retryGuidanceText: "Cette action n'est pas activée dans cette version de la plateforme — contactez le support pour connaître les alternatives.",
+    },
+    internal: {
+      title: "Une erreur interne de la plateforme s'est produite",
+      retryGuidanceText: "Il s'agit d'une erreur du côté de MIDAD et non des données ZATCA — contactez le support en indiquant l'heure approximative de l'incident.",
+    },
+    unknown: {
+      title: "Impossible de terminer l'action",
+      retryGuidanceText: "Réessayez. Si le problème persiste, contactez le support.",
+    },
+  },
   publicQuotePage: {
     nameRequiredError: "Veuillez saisir votre nom pour confirmer",
     genericError: "Impossible de finaliser l'action",

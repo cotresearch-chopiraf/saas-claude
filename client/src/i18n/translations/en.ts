@@ -2116,6 +2116,57 @@ const en = {
     actionRevoked: "Support access revoked",
     diagnosticsNote: "To diagnose a specific customer issue: open the relevant organization, then use \"Request support access\" to start a read-only investigation session, and review its activity log from the session page. There is currently no centralized system for tracking detailed technical errors — structured logs with a Request ID are the current means of server-side diagnosis.",
   },
+  portalProjectStatus: {
+    active: "In progress",
+    on_hold: "On hold",
+    completed: "Completed",
+  },
+  zatcaErrorPresentations: {
+    configuration: {
+      title: "Setup incomplete",
+      retryGuidanceText: "Complete the missing step (shown below), then try again.",
+    },
+    authentication: {
+      title: "Authentication problem with ZATCA",
+      retryGuidanceText: "ZATCA rejected the credentials or verification code (OTP) used — check them before retrying.",
+    },
+    authorization: {
+      title: "The certificate is not authorized for this action",
+      retryGuidanceText: "The current certificate is not authorized to perform this specific action — check the connection environment (simulation/production) and the certificate stage.",
+    },
+    validation: {
+      title: "ZATCA rejected the submitted data",
+      retryGuidanceText: "Correct the data mentioned in the message below, then try again — resubmitting without changes won't help.",
+    },
+    duplicate: {
+      title: "This request was already submitted",
+      retryGuidanceText: "ZATCA reported that this request was already submitted successfully — no need to resubmit.",
+    },
+    rate_limited: {
+      title: "Too many attempts",
+      retryGuidanceText: "Wait a few minutes, then try again.",
+    },
+    network: {
+      title: "Could not reach ZATCA",
+      retryGuidanceText: "This may be a temporary connection issue — try again shortly. If the problem persists, contact support.",
+    },
+    external_service: {
+      title: "The ZATCA service is currently unavailable",
+      retryGuidanceText: "The platform reached ZATCA but the response was unexpected or the service is unavailable — try again shortly.",
+    },
+    not_implemented: {
+      title: "This feature isn't available yet",
+      retryGuidanceText: "This action isn't enabled in this version of the platform — contact support to learn about alternatives.",
+    },
+    internal: {
+      title: "An internal platform error occurred",
+      retryGuidanceText: "This is an error on MIDAD's side, not the ZATCA data — contact support with the approximate time it happened.",
+    },
+    unknown: {
+      title: "Couldn't complete the action",
+      retryGuidanceText: "Try again. If the problem persists, contact support.",
+    },
+  },
   publicQuotePage: {
     nameRequiredError: "Please enter your name to confirm",
     genericError: "Unable to complete the action",

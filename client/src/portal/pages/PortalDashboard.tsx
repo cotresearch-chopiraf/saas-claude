@@ -65,7 +65,7 @@ export function PortalDashboard() {
               <Card className="h-full p-5 transition-shadow hover:shadow-md">
                 <h3 className="mb-2 font-semibold text-stone-800">{project.name}</h3>
                 <div className="mb-3">
-                  <Badge tone={portalStatusTone[project.status]}>{portalStatusLabel[project.status]}</Badge>
+                  <Badge tone={portalStatusTone[project.status]}>{portalStatusLabel(t, project.status)}</Badge>
                 </div>
                 {project.startDate && <p className="text-sm text-stone-500">{t("portalDashboardPage.startDate", { date: formatDate(project.startDate, locale) })}</p>}
                 <p className="mt-3 text-sm text-primary">{t("portalDashboardPage.viewProject")}</p>

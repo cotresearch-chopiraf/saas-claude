@@ -7,12 +7,12 @@ import type { PortalProjectStatus } from "../api/types";
 // fourth. The wording here is deliberately the fuller, more
 // externally-legible phrasing ("قيد التنفيذ" rather than the internal
 // short "نشط") specified for the Client Portal — never a change to the
-// underlying enum, only its external translation.
-export const portalStatusLabel: Record<PortalProjectStatus, string> = {
-  active: "قيد التنفيذ",
-  on_hold: "متوقف مؤقتاً",
-  completed: "مكتمل",
-};
+// underlying enum, only its external translation. Takes t as a parameter
+// (rather than a plain Record) since this module has no React context of
+// its own — every call site already has its own useTranslation().
+export function portalStatusLabel(t: (key: string) => string, status: PortalProjectStatus): string {
+  return t(`portalProjectStatus.${status}`);
+}
 
 export const portalStatusTone: Record<PortalProjectStatus, "success" | "warning" | "neutral"> = {
   active: "success",

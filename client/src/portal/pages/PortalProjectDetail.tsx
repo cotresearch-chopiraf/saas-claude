@@ -149,7 +149,7 @@ export function PortalProjectDetail() {
         <>
           <h1 className="mb-2 text-xl font-bold text-stone-800">{project.name}</h1>
           <div className="mb-6">
-            <Badge tone={portalStatusTone[project.status]}>{portalStatusLabel[project.status]}</Badge>
+            <Badge tone={portalStatusTone[project.status]}>{portalStatusLabel(t, project.status)}</Badge>
           </div>
 
           <Card className="p-5">

@@ -172,7 +172,7 @@ function CsrStep({ unit, identity, onChanged }: { unit: ZatcaEgsUnit; identity: 
       load();
       onChanged();
     } catch (err) {
-      setPresentedError(presentZatcaError(err, t("zatcaOnboardingPanel.csr.genericError")));
+      setPresentedError(presentZatcaError(t, err, t("zatcaOnboardingPanel.csr.genericError")));
     } finally {
       setSubmitting(false);
     }
@@ -315,7 +315,7 @@ function ComplianceCsidStep({ unit, onChanged }: { unit: ZatcaEgsUnit; onChanged
       setOtp("");
       load();
     } catch (err) {
-      setRequestError(presentZatcaError(err, t("zatcaOnboardingPanel.complianceCsid.requestError")));
+      setRequestError(presentZatcaError(t, err, t("zatcaOnboardingPanel.complianceCsid.requestError")));
     } finally {
       setRequesting(false);
     }
@@ -332,7 +332,7 @@ function ComplianceCsidStep({ unit, onChanged }: { unit: ZatcaEgsUnit; onChanged
       setConfirmSecret("");
       onChanged();
     } catch (err) {
-      setConfirmError(presentZatcaError(err, t("zatcaOnboardingPanel.complianceCsid.confirmError")));
+      setConfirmError(presentZatcaError(t, err, t("zatcaOnboardingPanel.complianceCsid.confirmError")));
     } finally {
       setConfirming(false);
     }
@@ -467,7 +467,7 @@ function ComplianceInvoiceStep({ unit }: { unit: ZatcaEgsUnit }) {
       setOutcome(res.status);
       load();
     } catch (err) {
-      setPresentedError(presentZatcaError(err, t("zatcaOnboardingPanel.complianceInvoice.submitError")));
+      setPresentedError(presentZatcaError(t, err, t("zatcaOnboardingPanel.complianceInvoice.submitError")));
     } finally {
       setSubmitting(false);
     }
@@ -573,7 +573,7 @@ function ProductionCsidStep({ unit, onChanged }: { unit: ZatcaEgsUnit; onChanged
       setResult(res);
       load();
     } catch (err) {
-      setPresentedError(presentZatcaError(err, t("zatcaOnboardingPanel.productionCsid.requestError")));
+      setPresentedError(presentZatcaError(t, err, t("zatcaOnboardingPanel.productionCsid.requestError")));
     } finally {
       setRequesting(false);
     }
@@ -589,7 +589,7 @@ function ProductionCsidStep({ unit, onChanged }: { unit: ZatcaEgsUnit; onChanged
       setConfirmSecret("");
       onChanged();
     } catch (err) {
-      setConfirmError(presentZatcaError(err, t("zatcaOnboardingPanel.productionCsid.confirmError")));
+      setConfirmError(presentZatcaError(t, err, t("zatcaOnboardingPanel.productionCsid.confirmError")));
     } finally {
       setConfirming(false);
     }
@@ -698,7 +698,7 @@ function RenewalStep({ unit }: { unit: ZatcaEgsUnit }) {
       setOutcome(res);
       setOtp("");
     } catch (err) {
-      setPresentedError(presentZatcaError(err, t("zatcaOnboardingPanel.renewal.genericError")));
+      setPresentedError(presentZatcaError(t, err, t("zatcaOnboardingPanel.renewal.genericError")));
     } finally {
       setSubmitting(false);
     }
