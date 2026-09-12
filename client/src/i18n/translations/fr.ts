@@ -1968,6 +1968,18 @@ const fr = {
       requestAction: "Demander le renouvellement à ZATCA",
     },
   },
+  portalLayout: {
+    tagline: "Portail client",
+  },
+  platformLayout: {
+    title: "Console d'exploitation de la plateforme",
+    dashboard: "Tableau de bord",
+    organizations: "Organisations",
+    supportSessions: "Sessions de support",
+  },
+  platformLogin: {
+    title: "Connexion des opérateurs de la plateforme",
+  },
   laborAllocationPage: {
     loadError: "Impossible de charger les données de répartition du salaire",
     backToPayrollPeriod: "Retour à la période de paie",

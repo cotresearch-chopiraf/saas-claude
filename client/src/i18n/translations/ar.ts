@@ -1967,6 +1967,18 @@ const ar = {
       requestAction: "طلب التجديد من ZATCA",
     },
   },
+  portalLayout: {
+    tagline: "بوابة العميل",
+  },
+  platformLayout: {
+    title: "لوحة تشغيل المنصة",
+    dashboard: "لوحة التحكم",
+    organizations: "المؤسسات",
+    supportSessions: "جلسات الدعم",
+  },
+  platformLogin: {
+    title: "دخول مشغّلي المنصة",
+  },
   laborAllocationPage: {
     loadError: "تعذّر تحميل بيانات توزيع الراتب",
     backToPayrollPeriod: "العودة إلى فترة الرواتب",

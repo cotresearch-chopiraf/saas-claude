@@ -1968,6 +1968,18 @@ const en = {
       requestAction: "Request renewal from ZATCA",
     },
   },
+  portalLayout: {
+    tagline: "Client Portal",
+  },
+  platformLayout: {
+    title: "Platform Operations Console",
+    dashboard: "Dashboard",
+    organizations: "Organizations",
+    supportSessions: "Support sessions",
+  },
+  platformLogin: {
+    title: "Platform Operator Login",
+  },
   laborAllocationPage: {
     loadError: "Couldn't load the labor allocation data",
     backToPayrollPeriod: "Back to payroll period",
