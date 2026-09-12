@@ -86,7 +86,7 @@ export function DocumentsSection() {
     setUploading(true);
     setUploadError(null);
     try {
-      await uploadProjectDocument(projectId, selectedFile);
+      await uploadProjectDocument(t, projectId, selectedFile);
       setNotice(t("documentsPage.uploadSuccess"));
       setSelectedFile(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -198,7 +198,7 @@ export function DocumentsSection() {
         rowActions={(d) => (
           <button
             type="button"
-            onClick={() => downloadProjectDocument(projectId, d.id, d.fileName)}
+            onClick={() => downloadProjectDocument(t, projectId, d.id, d.fileName)}
             className="text-sm text-primary hover:underline"
           >
             {t("documentsPage.download")}

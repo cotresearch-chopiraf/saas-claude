@@ -1,4 +1,5 @@
 import { ApiError } from "../../api/client";
+import { translateStatic } from "../../i18n/I18nProvider";
 
 // MIDAD Phase B1/B2 — Client Portal — deliberately its own token key, its
 // own storage functions, and its own fetch wrapper: ../../api/client.ts's
@@ -33,7 +34,7 @@ export async function portalApiFetch<T>(path: string, options: RequestInit = {})
 
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new ApiError(body.error ?? "حدث خطأ غير متوقع", res.status);
+    throw new ApiError(body.error ?? translateStatic("common.errorGeneric"), res.status);
   }
   return body as T;
 }

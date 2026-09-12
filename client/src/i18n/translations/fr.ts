@@ -2512,6 +2512,18 @@ const fr = {
       uploadDocument: "Téléverser un document",
     },
   },
+  errorBoundary: {
+    description: "Impossible d'afficher cette page. Essayez de la recharger ; si le problème persiste, contactez le support technique.",
+    reloadButton: "Recharger la page",
+  },
+  notificationBell: {
+    ariaLabel: "Notifications",
+    markAllRead: "Tout marquer comme lu",
+    emptyMessage: "Aucune notification",
+  },
+  languageSelect: {
+    label: "Langue du document",
+  },
 } as const;
 
 export default fr;

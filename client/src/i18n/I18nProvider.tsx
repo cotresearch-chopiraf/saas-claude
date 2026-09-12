@@ -98,6 +98,22 @@ export function useI18n(): I18nContextValue {
   return ctx;
 }
 
+// For the rare non-component module (e.g. api/client.ts's generic HTTP
+// error fallback) that needs a translated string but has no React context
+// of its own — reads the same persisted locale preference useTranslation()
+// does, with the same locale -> Arabic -> key fallback chain. Never use
+// this from a component; use useTranslation() there instead, since this
+// reads localStorage fresh on every call and won't reactively update on a
+// language switch mid-render.
+export function translateStatic(key: string, vars?: Record<string, string | number>): string {
+  const locale = readStoredLocale();
+  const current = resolveDotPath(translations[locale], key);
+  if (current !== undefined) return interpolate(current, vars);
+  const fallback = resolveDotPath(translations[DEFAULT_LOCALE], key);
+  if (fallback !== undefined) return interpolate(fallback, vars);
+  return key;
+}
+
 // Convenience alias matching the common `useTranslation()` naming other
 // localization libraries use, so call sites read naturally: `const { t } =
 // useTranslation();`

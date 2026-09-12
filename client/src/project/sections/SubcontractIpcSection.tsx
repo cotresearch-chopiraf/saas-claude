@@ -532,7 +532,7 @@ function SubcontractIpcEvidence({ projectId, ipcId }: { projectId: string; ipcId
     setUploading(true);
     setUploadError(null);
     try {
-      await uploadSubcontractIpcDocument(projectId, ipcId, selectedFile);
+      await uploadSubcontractIpcDocument(t, projectId, ipcId, selectedFile);
       setSelectedFile(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
       load();
@@ -595,7 +595,7 @@ function SubcontractIpcEvidence({ projectId, ipcId }: { projectId: string; ipcId
         rowActions={(d) => (
           <button
             type="button"
-            onClick={() => downloadSubcontractIpcDocument(projectId, ipcId, d.id, d.fileName)}
+            onClick={() => downloadSubcontractIpcDocument(t, projectId, ipcId, d.id, d.fileName)}
             className="text-sm text-primary hover:underline"
           >
             {t("subcontractIpcPage.evidence.download")}

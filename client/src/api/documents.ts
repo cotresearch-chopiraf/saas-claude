@@ -27,7 +27,7 @@ export function listProjectDocuments(projectId: string): Promise<ProjectDocument
 // Bypasses apiFetch (same reason pages/Settings.tsx's uploadLogo does):
 // a multipart body must not carry a "Content-Type: application/json"
 // header — the browser sets its own multipart boundary.
-export async function uploadProjectDocument(projectId: string, file: File): Promise<ProjectDocument> {
+export async function uploadProjectDocument(t: (key: string) => string, projectId: string, file: File): Promise<ProjectDocument> {
   const form = new FormData();
   form.append("document", file);
   const res = await fetch(`/api/projects/${projectId}/documents`, {
@@ -36,18 +36,18 @@ export async function uploadProjectDocument(projectId: string, file: File): Prom
     body: form,
   });
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(body.error ?? "تعذّر رفع الملف", res.status);
+  if (!res.ok) throw new ApiError(body.error ?? t("documentsPage.uploadError"), res.status);
   return body as ProjectDocument;
 }
 
 // Authenticated binary download — mirrors pages/Invoices.tsx's
 // downloadInvoicePdf exactly. The server deliberately never exposes a
 // public storage URL for a private project document.
-export async function downloadProjectDocument(projectId: string, documentId: string, fileName: string): Promise<void> {
+export async function downloadProjectDocument(t: (key: string) => string, projectId: string, documentId: string, fileName: string): Promise<void> {
   const res = await fetch(`/api/projects/${projectId}/documents/${documentId}`, {
     headers: { Authorization: `Bearer ${getToken()}` },
   });
-  if (!res.ok) throw new ApiError("تعذّر تنزيل الملف", res.status);
+  if (!res.ok) throw new ApiError(t("quotesPage.actions.downloadError"), res.status);
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");

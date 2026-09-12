@@ -54,7 +54,7 @@ function PortalDocumentsSection({ projectId }: { projectId: string }) {
   async function onDownload(doc: PortalDocument) {
     setDownloadError(null);
     try {
-      await downloadPortalDocument(projectId, doc.id, doc.fileName);
+      await downloadPortalDocument(t, projectId, doc.id, doc.fileName);
     } catch (err) {
       setDownloadError(err instanceof ApiError ? err.message : t("quotesPage.actions.downloadError"));
     }

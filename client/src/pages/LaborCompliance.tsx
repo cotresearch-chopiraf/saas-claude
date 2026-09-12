@@ -524,7 +524,7 @@ function NitaqatDetail({ record, onChanged, onClose }: { record: NitaqatComplian
     if (!file) return;
     setError(null);
     try {
-      await uploadNitaqatEvidence(record.id, file);
+      await uploadNitaqatEvidence(t, record.id, file);
       loadEvidence();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("laborCompliancePage.detail.uploadError"));
@@ -562,7 +562,7 @@ function NitaqatDetail({ record, onChanged, onClose }: { record: NitaqatComplian
             {evidence.map((f) => (
               <li key={f.id} className="flex items-center justify-between text-xs">
                 <span>{f.fileName}</span>
-                <button type="button" onClick={() => downloadNitaqatEvidence(record.id, f.id, f.fileName)} className="text-primary hover:underline">{t("laborCompliancePage.detail.download")}</button>
+                <button type="button" onClick={() => downloadNitaqatEvidence(t, record.id, f.id, f.fileName)} className="text-primary hover:underline">{t("laborCompliancePage.detail.download")}</button>
               </li>
             ))}
           </ul>
@@ -743,7 +743,7 @@ function GosiDetail({ record, onChanged, onClose }: { record: GosiComplianceReco
     if (!file) return;
     setError(null);
     try {
-      await uploadGosiEvidence(record.id, file);
+      await uploadGosiEvidence(t, record.id, file);
       loadEvidence();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("laborCompliancePage.detail.uploadError"));
@@ -797,7 +797,7 @@ function GosiDetail({ record, onChanged, onClose }: { record: GosiComplianceReco
             {evidence.map((f) => (
               <li key={f.id} className="flex items-center justify-between text-xs">
                 <span>{f.fileName}</span>
-                <button type="button" onClick={() => downloadGosiEvidence(record.id, f.id, f.fileName)} className="text-primary hover:underline">{t("laborCompliancePage.detail.download")}</button>
+                <button type="button" onClick={() => downloadGosiEvidence(t, record.id, f.id, f.fileName)} className="text-primary hover:underline">{t("laborCompliancePage.detail.download")}</button>
               </li>
             ))}
           </ul>

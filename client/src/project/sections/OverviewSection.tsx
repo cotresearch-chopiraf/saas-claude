@@ -30,11 +30,9 @@ import type {
   BudgetSummary,
   CashFlowResult,
   Commitment,
-  CommitmentStatus,
   Contract,
   ForecastResult,
   Ipc,
-  IpcStatus,
   Measurement,
   Project,
   ProjectLaborCost,
@@ -76,23 +74,6 @@ const statusTone: Record<Project["status"], "success" | "warning" | "neutral"> =
   active: "success",
   on_hold: "warning",
   completed: "neutral",
-};
-
-const ipcStatusLabel: Record<IpcStatus, string> = {
-  draft: "مسودة",
-  submitted: "بانتظار الاعتماد",
-  approved: "معتمدة (بانتظار التصديق)",
-  certified: "مصدَّقة",
-  rejected: "مرفوضة",
-};
-
-const commitmentStatusLabel: Record<CommitmentStatus, string> = {
-  draft: "مسودة",
-  pending_approval: "بانتظار الاعتماد",
-  active: "نشط",
-  partially_fulfilled: "منفَّذ جزئياً",
-  closed: "مغلق",
-  cancelled: "ملغى",
 };
 
 const alertSeverityKey: Record<BudgetAlert["severity"], string> = {

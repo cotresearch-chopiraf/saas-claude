@@ -13,7 +13,7 @@ export function listSubcontractIpcDocuments(projectId: string, ipcId: string): P
 
 // Bypasses apiFetch (same reason as uploadProjectDocument): a multipart
 // body must not carry a "Content-Type: application/json" header.
-export async function uploadSubcontractIpcDocument(projectId: string, ipcId: string, file: File): Promise<SubcontractIpcDocument> {
+export async function uploadSubcontractIpcDocument(t: (key: string) => string, projectId: string, ipcId: string, file: File): Promise<SubcontractIpcDocument> {
   const form = new FormData();
   form.append("document", file);
   const res = await fetch(`/api/projects/${projectId}/subcontract-ipcs/${ipcId}/documents`, {
@@ -22,17 +22,17 @@ export async function uploadSubcontractIpcDocument(projectId: string, ipcId: str
     body: form,
   });
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(body.error ?? "تعذّر رفع الملف", res.status);
+  if (!res.ok) throw new ApiError(body.error ?? t("documentsPage.uploadError"), res.status);
   return body as SubcontractIpcDocument;
 }
 
 // Authenticated binary download — mirrors downloadProjectDocument exactly.
 // The server never exposes a public storage URL for private IPC evidence.
-export async function downloadSubcontractIpcDocument(projectId: string, ipcId: string, documentId: string, fileName: string): Promise<void> {
+export async function downloadSubcontractIpcDocument(t: (key: string) => string, projectId: string, ipcId: string, documentId: string, fileName: string): Promise<void> {
   const res = await fetch(`/api/projects/${projectId}/subcontract-ipcs/${ipcId}/documents/${documentId}`, {
     headers: { Authorization: `Bearer ${getToken()}` },
   });
-  if (!res.ok) throw new ApiError("تعذّر تنزيل الملف", res.status);
+  if (!res.ok) throw new ApiError(t("quotesPage.actions.downloadError"), res.status);
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");

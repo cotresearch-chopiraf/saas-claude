@@ -1,3 +1,5 @@
+import { translateStatic } from "../i18n/I18nProvider";
+
 const TOKEN_KEY = "contractor_os_token";
 
 export function getToken(): string | null {
@@ -44,7 +46,7 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
 
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new ApiError(body.error ?? "حدث خطأ غير متوقع", res.status, typeof body.category === "string" ? body.category : undefined);
+    throw new ApiError(body.error ?? translateStatic("common.errorGeneric"), res.status, typeof body.category === "string" ? body.category : undefined);
   }
   return body as T;
 }

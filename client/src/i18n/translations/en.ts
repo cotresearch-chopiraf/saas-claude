@@ -2512,6 +2512,18 @@ const en = {
       uploadDocument: "Upload document",
     },
   },
+  errorBoundary: {
+    description: "Couldn't display this page. Try reloading it; if the problem persists, contact technical support.",
+    reloadButton: "Reload the page",
+  },
+  notificationBell: {
+    ariaLabel: "Notifications",
+    markAllRead: "Mark all as read",
+    emptyMessage: "No notifications",
+  },
+  languageSelect: {
+    label: "Document language",
+  },
 } as const;
 
 export default en;

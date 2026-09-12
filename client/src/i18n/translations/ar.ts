@@ -2514,6 +2514,18 @@ const ar = {
       uploadDocument: "رفع مستند",
     },
   },
+  errorBoundary: {
+    description: "تعذّر عرض هذه الصفحة. حاول إعادة تحميلها؛ إذا استمرت المشكلة، تواصل مع الدعم الفني.",
+    reloadButton: "إعادة تحميل الصفحة",
+  },
+  notificationBell: {
+    ariaLabel: "الإشعارات",
+    markAllRead: "تعليم الكل كمقروء",
+    emptyMessage: "لا توجد إشعارات",
+  },
+  languageSelect: {
+    label: "لغة المستند",
+  },
 } as const;
 
 export default ar;

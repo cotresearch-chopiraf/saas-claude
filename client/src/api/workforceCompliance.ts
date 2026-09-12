@@ -89,17 +89,17 @@ export function verifyNitaqatRecord(id: string): Promise<NitaqatComplianceRecord
 export function listNitaqatEvidence(id: string): Promise<ComplianceEvidence[]> {
   return apiFetch<ComplianceEvidence[]>(`/workforce-compliance/nitaqat/${id}/evidence`);
 }
-export async function uploadNitaqatEvidence(id: string, file: File): Promise<ComplianceEvidence> {
+export async function uploadNitaqatEvidence(t: (key: string) => string, id: string, file: File): Promise<ComplianceEvidence> {
   const form = new FormData();
   form.append("evidence", file);
   const res = await fetch(`/api/workforce-compliance/nitaqat/${id}/evidence`, { method: "POST", headers: { Authorization: `Bearer ${getToken()}` }, body: form });
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(body.error ?? "تعذّر رفع الملف", res.status);
+  if (!res.ok) throw new ApiError(body.error ?? t("documentsPage.uploadError"), res.status);
   return body as ComplianceEvidence;
 }
-export async function downloadNitaqatEvidence(id: string, fileId: string, fileName: string): Promise<void> {
+export async function downloadNitaqatEvidence(t: (key: string) => string, id: string, fileId: string, fileName: string): Promise<void> {
   const res = await fetch(`/api/workforce-compliance/nitaqat/${id}/evidence/${fileId}`, { headers: { Authorization: `Bearer ${getToken()}` } });
-  if (!res.ok) throw new ApiError("تعذّر تنزيل الملف", res.status);
+  if (!res.ok) throw new ApiError(t("quotesPage.actions.downloadError"), res.status);
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -135,17 +135,17 @@ export function verifyGosiRecord(id: string): Promise<GosiComplianceRecord> {
 export function listGosiEvidence(id: string): Promise<ComplianceEvidence[]> {
   return apiFetch<ComplianceEvidence[]>(`/workforce-compliance/gosi/${id}/evidence`);
 }
-export async function uploadGosiEvidence(id: string, file: File): Promise<ComplianceEvidence> {
+export async function uploadGosiEvidence(t: (key: string) => string, id: string, file: File): Promise<ComplianceEvidence> {
   const form = new FormData();
   form.append("evidence", file);
   const res = await fetch(`/api/workforce-compliance/gosi/${id}/evidence`, { method: "POST", headers: { Authorization: `Bearer ${getToken()}` }, body: form });
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(body.error ?? "تعذّر رفع الملف", res.status);
+  if (!res.ok) throw new ApiError(body.error ?? t("documentsPage.uploadError"), res.status);
   return body as ComplianceEvidence;
 }
-export async function downloadGosiEvidence(id: string, fileId: string, fileName: string): Promise<void> {
+export async function downloadGosiEvidence(t: (key: string) => string, id: string, fileId: string, fileName: string): Promise<void> {
   const res = await fetch(`/api/workforce-compliance/gosi/${id}/evidence/${fileId}`, { headers: { Authorization: `Bearer ${getToken()}` } });
-  if (!res.ok) throw new ApiError("تعذّر تنزيل الملف", res.status);
+  if (!res.ok) throw new ApiError(t("quotesPage.actions.downloadError"), res.status);
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
