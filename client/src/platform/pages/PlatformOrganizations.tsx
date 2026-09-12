@@ -7,10 +7,12 @@ import { formatDateTime } from "../../lib/format";
 import { listOrganizations } from "../api/organizations";
 import { createSupportSession } from "../api/supportSessions";
 import type { Organization } from "../api/types";
+import { useTranslation } from "../../i18n/I18nProvider";
 
 const PAGE_SIZE = 20;
 
 export function PlatformOrganizations() {
+  const { t, locale } = useTranslation();
   const [search, setSearch] = useState("");
   const [organizations, setOrganizations] = useState<Organization[] | null>(null);
   const [hasMore, setHasMore] = useState(false);
@@ -26,7 +28,7 @@ export function PlatformOrganizations() {
         setOrganizations(page.organizations);
         setHasMore(page.hasMore);
       })
-      .catch((err) => setError(err instanceof ApiError ? err.message : "تعذّر تحميل قائمة الشركات"));
+      .catch((err) => setError(err instanceof ApiError ? err.message : t("platformOrganizationsPage.loadError")));
   }
   // search is the effect's own dependency — every change (including
   // clearing it back to "") re-fetches through the same real API call,
@@ -41,26 +43,26 @@ export function PlatformOrganizations() {
       setOrganizations([...organizations, ...page.organizations]);
       setHasMore(page.hasMore);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر تحميل المزيد");
+      setError(err instanceof ApiError ? err.message : t("platformSupportSessionsPage.loadMoreError"));
     } finally {
       setLoadingMore(false);
     }
   }
 
   const columns: FinancialColumn<Organization>[] = [
-    { key: "name", header: "الشركة", render: (o) => o.name },
-    { key: "createdAt", header: "تاريخ الإنشاء", render: (o) => formatDateTime(o.createdAt) },
+    { key: "name", header: t("platformOrganizationsPage.columns.name"), render: (o) => o.name },
+    { key: "createdAt", header: t("platformOrganizationsPage.columns.createdAt"), render: (o) => formatDateTime(o.createdAt, locale) },
   ];
 
   return (
     <PlatformLayout>
       <PageHeader
-        title="الشركات"
-        subtitle="قائمة الشركات المسجّلة على المنصة (للقراءة فقط)."
+        title={t("platformOrganizationsPage.title")}
+        subtitle={t("platformOrganizationsPage.subtitle")}
         actions={
           <input
             type="search"
-            placeholder="البحث باسم الشركة"
+            placeholder={t("platformOrganizationsPage.searchPlaceholder")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="rounded-md border border-stone-300 px-3 py-2 text-sm"
@@ -74,10 +76,10 @@ export function PlatformOrganizations() {
         rowKey={(o) => o.id}
         error={error}
         onRetry={() => load(search)}
-        emptyMessage={search ? "لا توجد شركات مطابقة للبحث" : "لا توجد شركات بعد"}
+        emptyMessage={search ? t("platformOrganizationsPage.emptyMessageSearch") : t("platformOrganizationsPage.emptyMessage")}
         rowActions={(o) => (
           <Button size="sm" variant="secondary" onClick={() => setRequestingFor(o)}>
-            طلب وصول دعم
+            {t("platformOrganizationsPage.requestAccess")}
           </Button>
         )}
       />
@@ -85,7 +87,7 @@ export function PlatformOrganizations() {
       {organizations && organizations.length > 0 && hasMore && (
         <div className="mt-3 text-center">
           <Button variant="secondary" size="sm" disabled={loadingMore} onClick={loadMore}>
-            {loadingMore ? "جارٍ التحميل..." : "تحميل المزيد"}
+            {loadingMore ? t("quotesPage.loadingMore") : t("quotesPage.loadMore")}
           </Button>
         </div>
       )}
@@ -96,6 +98,7 @@ export function PlatformOrganizations() {
 }
 
 function RequestAccessModal({ organization, onClose }: { organization: Organization; onClose: () => void }) {
+  const { t, direction } = useTranslation();
   const navigate = useNavigate();
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -109,24 +112,24 @@ function RequestAccessModal({ organization, onClose }: { organization: Organizat
       const session = await createSupportSession(organization.id, reason);
       navigate(`/platform/support-sessions/${session.id}`, { state: { organizationName: organization.name } });
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر إنشاء جلسة الدعم");
+      setError(err instanceof ApiError ? err.message : t("platformOrganizationsPage.requestModal.genericError"));
       setSubmitting(false);
     }
   }
 
   return (
-    <div className="fixed inset-0 z-10 flex items-center justify-center bg-black/40 px-4" dir="rtl">
+    <div className="fixed inset-0 z-10 flex items-center justify-center bg-black/40 px-4" dir={direction}>
       <Card className="w-full max-w-md p-5">
-        <h2 className="mb-1 font-semibold text-stone-800">طلب وصول دعم — {organization.name}</h2>
+        <h2 className="mb-1 font-semibold text-stone-800">{t("platformOrganizationsPage.requestModal.title", { organizationName: organization.name })}</h2>
         <p className="mb-4 text-sm text-stone-500">
-          الوصول للقراءة فقط، مؤقت (30 دقيقة)، ويُسجَّل في سجل التدقيق باسمك.
+          {t("platformOrganizationsPage.requestModal.description")}
         </p>
         <form onSubmit={onSubmit} className="space-y-3">
           {error && <ErrorState message={error} />}
           <textarea
             required
             minLength={3}
-            placeholder="سبب طلب الوصول"
+            placeholder={t("platformOrganizationsPage.requestModal.reasonPlaceholder")}
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             rows={3}
@@ -134,10 +137,10 @@ function RequestAccessModal({ organization, onClose }: { organization: Organizat
           />
           <div className="flex justify-end gap-2">
             <Button type="button" variant="secondary" onClick={onClose} disabled={submitting}>
-              إلغاء
+              {t("common.cancel")}
             </Button>
             <Button type="submit" disabled={submitting}>
-              {submitting ? "جارٍ الإنشاء..." : "منح الوصول"}
+              {submitting ? t("platformOrganizationsPage.requestModal.creating") : t("platformOrganizationsPage.requestModal.grantAccess")}
             </Button>
           </div>
         </form>

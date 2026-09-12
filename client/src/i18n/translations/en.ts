@@ -2038,6 +2038,27 @@ const en = {
     emptyMessage: "No activity yet.",
     systemActor: "System",
   },
+  platformOrganizationsPage: {
+    loadError: "Unable to load the company list",
+    title: "Companies",
+    subtitle: "List of companies registered on the platform (read-only).",
+    searchPlaceholder: "Search by company name",
+    columns: {
+      name: "Company",
+      createdAt: "Created at",
+    },
+    emptyMessageSearch: "No companies match the search",
+    emptyMessage: "No companies yet",
+    requestAccess: "Request support access",
+    requestModal: {
+      genericError: "Unable to create the support session",
+      title: "Request support access — {{organizationName}}",
+      description: "Read-only access, temporary (30 minutes), and logged to the audit trail under your name.",
+      reasonPlaceholder: "Reason for the access request",
+      creating: "Creating...",
+      grantAccess: "Grant access",
+    },
+  },
   publicQuotePage: {
     nameRequiredError: "Please enter your name to confirm",
     genericError: "Unable to complete the action",

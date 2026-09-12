@@ -2037,6 +2037,27 @@ const ar = {
     emptyMessage: "لا يوجد نشاط بعد.",
     systemActor: "النظام",
   },
+  platformOrganizationsPage: {
+    loadError: "تعذّر تحميل قائمة الشركات",
+    title: "الشركات",
+    subtitle: "قائمة الشركات المسجّلة على المنصة (للقراءة فقط).",
+    searchPlaceholder: "البحث باسم الشركة",
+    columns: {
+      name: "الشركة",
+      createdAt: "تاريخ الإنشاء",
+    },
+    emptyMessageSearch: "لا توجد شركات مطابقة للبحث",
+    emptyMessage: "لا توجد شركات بعد",
+    requestAccess: "طلب وصول دعم",
+    requestModal: {
+      genericError: "تعذّر إنشاء جلسة الدعم",
+      title: "طلب وصول دعم — {{organizationName}}",
+      description: "الوصول للقراءة فقط، مؤقت (30 دقيقة)، ويُسجَّل في سجل التدقيق باسمك.",
+      reasonPlaceholder: "سبب طلب الوصول",
+      creating: "جارٍ الإنشاء...",
+      grantAccess: "منح الوصول",
+    },
+  },
   publicQuotePage: {
     nameRequiredError: "الرجاء إدخال اسمك للتأكيد",
     genericError: "تعذّر إتمام الإجراء",

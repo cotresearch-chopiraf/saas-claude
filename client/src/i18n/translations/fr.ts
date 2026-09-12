@@ -2038,6 +2038,27 @@ const fr = {
     emptyMessage: "Aucune activité pour le moment.",
     systemActor: "Système",
   },
+  platformOrganizationsPage: {
+    loadError: "Impossible de charger la liste des entreprises",
+    title: "Entreprises",
+    subtitle: "Liste des entreprises enregistrées sur la plateforme (lecture seule).",
+    searchPlaceholder: "Rechercher par nom d'entreprise",
+    columns: {
+      name: "Entreprise",
+      createdAt: "Date de création",
+    },
+    emptyMessageSearch: "Aucune entreprise ne correspond à la recherche",
+    emptyMessage: "Aucune entreprise pour le moment",
+    requestAccess: "Demander un accès de support",
+    requestModal: {
+      genericError: "Impossible de créer la session de support",
+      title: "Demande d'accès de support — {{organizationName}}",
+      description: "Accès en lecture seule, temporaire (30 minutes), et enregistré dans le journal d'audit à votre nom.",
+      reasonPlaceholder: "Motif de la demande d'accès",
+      creating: "Création en cours...",
+      grantAccess: "Accorder l'accès",
+    },
+  },
   publicQuotePage: {
     nameRequiredError: "Veuillez saisir votre nom pour confirmer",
     genericError: "Impossible de finaliser l'action",
