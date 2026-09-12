@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import type { ReactNode } from "react";
 import { useClientPortalAuth } from "../auth/ClientPortalAuthContext";
 import { useTranslation } from "../../i18n/I18nProvider";
+import { LanguageSwitcher } from "../../i18n/LanguageSwitcher";
 
 // MIDAD Phase B2 — deliberately its own layout, not ../../components/
 // Layout.tsx or ../../platform/components/PlatformLayout.tsx: a
@@ -23,14 +24,17 @@ export function PortalLayout({ children }: { children: ReactNode }) {
             <span className="text-base font-bold">MIDAD</span>
             <span className="text-xs text-stone-300">{t("portalLayout.tagline")}</span>
           </Link>
-          {portalUser && (
-            <div className="flex items-center gap-4 text-sm text-stone-300">
-              <span>{portalUser.name}</span>
-              <button onClick={logout} className="text-stone-400 hover:text-white">
-                {t("nav.logout")}
-              </button>
-            </div>
-          )}
+          <div className="flex items-center gap-4 text-sm text-stone-300">
+            <LanguageSwitcher />
+            {portalUser && (
+              <>
+                <span>{portalUser.name}</span>
+                <button onClick={logout} className="text-stone-400 hover:text-white">
+                  {t("nav.logout")}
+                </button>
+              </>
+            )}
+          </div>
         </div>
       </header>
       <main className="mx-auto max-w-4xl px-4 py-6 sm:px-6 sm:py-8">{children}</main>

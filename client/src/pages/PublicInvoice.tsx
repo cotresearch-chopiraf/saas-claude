@@ -3,6 +3,7 @@ import { useParams } from "react-router-dom";
 import { apiFetch } from "../api/client";
 import { formatMoney, formatDate } from "../lib/format";
 import { useTranslation } from "../i18n/I18nProvider";
+import { LanguageSwitcher } from "../i18n/LanguageSwitcher";
 
 interface PublicInvoiceData {
   invoiceNumber: string;
@@ -32,6 +33,9 @@ export function PublicInvoice() {
   if (notFound) {
     return (
       <div dir={direction} className="flex min-h-screen items-center justify-center bg-stone-50 px-6 text-center">
+        <div className="fixed top-4 end-4 z-20">
+          <LanguageSwitcher />
+        </div>
         <p className="text-stone-500">{t("publicInvoicePage.notFound")}</p>
       </div>
     );
@@ -43,6 +47,9 @@ export function PublicInvoice() {
 
   return (
     <div dir={direction} className="min-h-screen bg-stone-50 px-6 py-12">
+      <div className="fixed top-4 end-4 z-20">
+        <LanguageSwitcher />
+      </div>
       <div className="mx-auto max-w-lg rounded-xl border border-stone-200 bg-white p-8 shadow-sm">
         <p className="text-sm text-stone-500">{t("publicInvoicePage.invoiceFrom", { company: invoice.companyName })}</p>
         <h1 className="mb-1 text-xl font-bold text-primary">{invoice.invoiceNumber}</h1>

@@ -4,6 +4,7 @@ import { Card, Button, ErrorState } from "../../ui";
 import { ApiError } from "../../api/client";
 import { usePlatformAuth } from "../auth/PlatformAuthContext";
 import { useTranslation } from "../../i18n/I18nProvider";
+import { LanguageSwitcher } from "../../i18n/LanguageSwitcher";
 
 export function PlatformLogin() {
   const { t, direction } = useTranslation();
@@ -32,6 +33,9 @@ export function PlatformLogin() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-stone-100 px-4" dir={direction}>
+      <div className="fixed top-4 end-4 z-20">
+        <LanguageSwitcher />
+      </div>
       <Card className="w-full max-w-sm p-6">
         <h1 className="mb-6 text-center text-lg font-bold text-stone-800">{t("platformLogin.title")}</h1>
         <form onSubmit={onSubmit} className="space-y-3">

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { ClientPortalAuthProvider } from "../auth/ClientPortalAuthContext";
 import { I18nProvider } from "../../i18n/I18nProvider";
@@ -102,5 +102,19 @@ describe("<PortalDashboard/>", () => {
     await waitFor(() => expect(screen.getByText("مشروع الرياض")).toBeInTheDocument());
     const link = screen.getByText("مشروع الرياض").closest("a");
     expect(link).toHaveAttribute("href", "/portal/projects/proj-1");
+  });
+
+  it("offers a language switcher in the portal header, and switching updates document direction", async () => {
+    seedStoredUser();
+    vi.mocked(portalApiFetch).mockResolvedValue([fixtureProject]);
+    renderDashboard();
+
+    await waitFor(() => expect(screen.getByText("مشروع الرياض")).toBeInTheDocument());
+    const switcherButton = screen.getByRole("button", { name: "اللغة" });
+    fireEvent.click(switcherButton);
+    fireEvent.click(screen.getByRole("option", { name: "Français" }));
+
+    await waitFor(() => expect(document.documentElement.dir).toBe("ltr"));
+    expect(document.documentElement.lang).toBe("fr");
   });
 });

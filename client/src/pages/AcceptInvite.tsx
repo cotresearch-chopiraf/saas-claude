@@ -4,6 +4,7 @@ import { apiFetch, setToken, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import type { User } from "../api/types";
 import { useTranslation } from "../i18n/I18nProvider";
+import { LanguageSwitcher } from "../i18n/LanguageSwitcher";
 
 export function AcceptInvite() {
   const { t } = useTranslation();
@@ -38,6 +39,9 @@ export function AcceptInvite() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-stone-50 px-6">
+      <div className="fixed top-4 end-4 z-20">
+        <LanguageSwitcher />
+      </div>
       <div className="w-full max-w-sm rounded-xl border border-stone-200 bg-white p-8 shadow-sm">
         <h1 className="mb-6 text-xl font-bold text-primary">{t("auth.acceptInvite.title")}</h1>
 

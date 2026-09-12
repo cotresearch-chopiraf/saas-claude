@@ -159,6 +159,19 @@ describe("<PlatformDashboard/>", () => {
     expect(container.querySelector('[dir="rtl"]')).toBeTruthy();
   });
 
+  it("offers a language switcher in the authenticated platform header, and switching updates document direction", async () => {
+    mockDefault();
+    renderDashboard();
+    await waitFor(() => expect(screen.getAllByText("شركة الاختبار").length).toBeGreaterThan(0));
+
+    const switcherButton = screen.getByRole("button", { name: "اللغة" });
+    fireEvent.click(switcherButton);
+    fireEvent.click(screen.getByRole("option", { name: "English" }));
+
+    await waitFor(() => expect(document.documentElement.dir).toBe("ltr"));
+    expect(document.documentElement.lang).toBe("en");
+  });
+
   it("never triggers any tenant-auth API call", async () => {
     mockDefault();
     renderDashboard();
