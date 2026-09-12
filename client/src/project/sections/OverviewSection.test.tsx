@@ -487,7 +487,11 @@ describe("<OverviewSection/> (Executive Command Center)", () => {
     expect(screen.getByText(/300\.00/)).toBeInTheDocument();
     expect(screen.getByText(/200\.00/)).toBeInTheDocument();
     expect(screen.getByText(/543\.21/)).toBeInTheDocument();
-    expect(screen.getByText(/222\.22/)).toBeInTheDocument();
+    // Dashboard 2.0: the expected variance legitimately appears twice by
+    // design — once as one of the Executive Verdict hero's three headline
+    // numbers, once in the Performance panel's own variance callout — both
+    // read the same real forecast.methods.commitment_aware.variance figure.
+    expect(screen.getAllByText(/222\.22/).length).toBeGreaterThanOrEqual(2);
   });
 
   it("Financial Command Center: flags a negative variance as an over-budget forecast, never silently", async () => {
@@ -589,7 +593,12 @@ describe("<OverviewSection/> (Executive Command Center)", () => {
     mockApi("owner");
     renderSection();
     await waitFor(() => expect(screen.getByText("يحتاج إلى انتباه")).toBeInTheDocument());
-    expect(screen.getByText("لا توجد حالياً بنود تحتاج إلى انتباه.")).toBeInTheDocument();
+    // Dashboard 2.0: the same honest "nothing needs attention" fact
+    // legitimately appears twice by design — once as the Executive
+    // Verdict hero's "why" line (when there is no top attention item to
+    // show), once as the Risk panel's own empty state below — both are
+    // the same real fact, not two different claims.
+    expect(screen.getAllByText("لا توجد حالياً بنود تحتاج إلى انتباه.").length).toBeGreaterThanOrEqual(2);
   });
 
   it("Needs Attention: aggregates real risk signals from every domain — budget alert, overdue task, critical punch item, IPC awaiting certification, pending commitment, measurement awaiting approval", async () => {
