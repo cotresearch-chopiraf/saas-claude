@@ -310,8 +310,11 @@ export function OverviewSection() {
         headline={progressCostHeadline}
       />
 
-      <div className="grid grid-cols-1 gap-10 border-t border-stone-200 pt-10 xl:grid-cols-3 xl:gap-0 xl:divide-x xl:divide-x-reverse xl:divide-stone-200">
-        <div className="xl:px-8 xl:first:ps-0 xl:last:pe-0">
+      {/* Three distinct bordered cards, not a single row divided by thin
+          rules — each domain (Delivery, Cash, Commercial) gets its own
+          surface, matching every other section on this page now. */}
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+        <div className="rounded-xl border border-stone-200 bg-white p-5 shadow-sm sm:p-6">
           <DeliveryColumn
             projectId={projectId}
             tasks={data.tasks}
@@ -321,10 +324,10 @@ export function OverviewSection() {
             measurementsAwaitingApproval={measurementsAwaitingApproval}
           />
         </div>
-        <div className="xl:px-8">
+        <div className="rounded-xl border border-stone-200 bg-white p-5 shadow-sm sm:p-6">
           <CashColumn cashFlow={data.cashFlow} projectId={projectId} />
         </div>
-        <div className="xl:px-8">
+        <div className="rounded-xl border border-stone-200 bg-white p-5 shadow-sm sm:p-6">
           <CommercialColumn
             projectId={projectId}
             totalCommitted={totalCommitted}
@@ -341,11 +344,13 @@ export function OverviewSection() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-8 border-t border-stone-200 pt-8 xl:grid-cols-3 xl:gap-12">
-        <div className="xl:col-span-2">
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+        <div className="rounded-xl border border-stone-200 bg-white p-5 shadow-sm sm:p-6 xl:col-span-2">
           <ActivityPulse events={projectActivity} />
         </div>
-        <QuickActionsRow projectId={projectId} />
+        <div className="flex items-start">
+          <QuickActionsRow projectId={projectId} />
+        </div>
       </div>
     </div>
   );
@@ -522,15 +527,22 @@ function VerdictBlock({
           </div>
         </div>
 
-        <div className="flex shrink-0 flex-row items-center gap-6 border-t border-stone-100 pt-6 xl:flex-col xl:items-stretch xl:border-t-0 xl:border-s xl:ps-7 xl:pt-0">
-          <ProgressRing value={progress} locale={locale} />
-          <div className="min-w-0 flex-1 space-y-2.5 text-xs">
-            {startDate && <InfoRow icon={IconCalendar} label={t("dashboard.identity.startDate")} value={formatDate(startDate, locale)} />}
-            {endDate && <InfoRow icon={IconCalendar} label={t("dashboard.identity.expectedCompletion")} value={formatDate(endDate, locale)} />}
-            {daysRemaining !== null && daysRemaining >= 0 && (
-              <InfoRow icon={IconClipboard} label={t("dashboard.identity.expectedCompletion")} value={t("dashboard.identity.daysRemainingCount", { count: daysRemaining })} />
-            )}
-            {contract && <InfoRow icon={IconMoney} label={t("dashboard.identity.contractValue")} value={formatMoney(contract.revisedValue, contract.currency, locale)} />}
+        {/* A deliberately distinct dark brand panel (bg-primary, the app's
+            own token) stands in for the reference's project photo — this
+            codebase has no real photo of the project to show, so rather
+            than fabricate a stock image, the panel itself carries the
+            visual weight through color/contrast instead of imagery. */}
+        <div className="shrink-0 rounded-xl bg-primary p-5 xl:w-72">
+          <div className="flex flex-row items-center gap-5 xl:flex-col xl:items-stretch">
+            <Gauge value={progress} locale={locale} color="#2dd4bf" trackColor="rgba(255,255,255,0.14)" labelColor="text-white" />
+            <div className="min-w-0 flex-1 space-y-2.5 text-xs xl:mt-2 xl:w-full xl:border-t xl:border-white/10 xl:pt-4">
+              {startDate && <InfoRow dark icon={IconCalendar} label={t("dashboard.identity.startDate")} value={formatDate(startDate, locale)} />}
+              {endDate && <InfoRow dark icon={IconCalendar} label={t("dashboard.identity.expectedCompletion")} value={formatDate(endDate, locale)} />}
+              {daysRemaining !== null && daysRemaining >= 0 && (
+                <InfoRow dark icon={IconClipboard} label={t("dashboard.identity.expectedCompletion")} value={t("dashboard.identity.daysRemainingCount", { count: daysRemaining })} />
+              )}
+              {contract && <InfoRow dark icon={IconMoney} label={t("dashboard.identity.contractValue")} value={formatMoney(contract.revisedValue, contract.currency, locale)} />}
+            </div>
           </div>
         </div>
       </div>
@@ -580,10 +592,25 @@ function HeroStat({
 
 // The one genuine chart element in the hero: a single real percentage
 // (avgProgress, already computed once in OverviewSection()) rendered as an
-// SVG ring — never a fabricated time series.
-function ProgressRing({ value, locale }: { value: number | null; locale: string }) {
-  const size = 84;
-  const stroke = 8;
+// SVG ring — never a fabricated time series. Generalized (color/track/size)
+// so the same gauge also drives the Cost vs Progress pair below.
+function Gauge({
+  value,
+  locale,
+  color = "#0f766e",
+  trackColor = "#f1f5f9",
+  labelColor = "text-stone-900",
+  size = 84,
+  stroke = 8,
+}: {
+  value: number | null;
+  locale: string;
+  color?: string;
+  trackColor?: string;
+  labelColor?: string;
+  size?: number;
+  stroke?: number;
+}) {
   const r = (size - stroke) / 2;
   const circumference = 2 * Math.PI * r;
   const pct = Math.min(100, Math.max(0, value ?? 0));
@@ -591,14 +618,14 @@ function ProgressRing({ value, locale }: { value: number | null; locale: string 
   return (
     <div className="relative shrink-0" style={{ width: size, height: size }}>
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90">
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#f1f5f9" strokeWidth={stroke} />
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={trackColor} strokeWidth={stroke} />
         {value !== null && (
           <circle
             cx={size / 2}
             cy={size / 2}
             r={r}
             fill="none"
-            stroke="#0f766e"
+            stroke={color}
             strokeWidth={stroke}
             strokeLinecap="round"
             strokeDasharray={circumference}
@@ -607,18 +634,18 @@ function ProgressRing({ value, locale }: { value: number | null; locale: string 
         )}
       </svg>
       <div className="absolute inset-0 flex items-center justify-center">
-        <span className="text-base font-extrabold text-stone-900">{value !== null ? formatPercent(value, 0, locale) : "—"}</span>
+        <span className={`text-base font-extrabold ${labelColor}`}>{value !== null ? formatPercent(value, 0, locale) : "—"}</span>
       </div>
     </div>
   );
 }
 
-function InfoRow({ icon: Icon, label, value }: { icon: (p: IconProps) => JSX.Element; label: string; value: string }) {
+function InfoRow({ icon: Icon, label, value, dark }: { icon: (p: IconProps) => JSX.Element; label: string; value: string; dark?: boolean }) {
   return (
     <div className="flex items-center gap-2">
-      <Icon className="shrink-0 text-stone-300" />
-      <span className="min-w-0 flex-1 truncate text-stone-400">{label}</span>
-      <span className="shrink-0 whitespace-nowrap font-semibold text-stone-700">{value}</span>
+      <Icon className={`shrink-0 ${dark ? "text-white/40" : "text-stone-300"}`} />
+      <span className={`min-w-0 flex-1 truncate ${dark ? "text-white/60" : "text-stone-400"}`}>{label}</span>
+      <span className={`shrink-0 whitespace-nowrap font-semibold ${dark ? "text-white" : "text-stone-700"}`}>{value}</span>
     </div>
   );
 }
@@ -830,49 +857,48 @@ function FinancialControl({
   ];
 
   return (
-    <div>
+    <div className="rounded-xl border border-stone-200 bg-white p-5 shadow-sm sm:p-6">
       <div className="flex items-baseline justify-between gap-3">
         <h2 className="text-sm font-bold uppercase tracking-wide text-stone-900">{t("dashboard.financial.title")}</h2>
         <span className="text-xs text-stone-400">{t("dashboard.financial.asOf", { date: formatDate(forecast.asOfDate, locale) })}</span>
       </div>
 
-      <div className="mt-5 flex flex-wrap items-center gap-x-1 gap-y-4">
+      {/* A single connected pipeline, not five independent boxed chips: each
+          stage is icon-on-top (matching the reference), with only a thin
+          neutral rule between stages — never a directional arrow glyph,
+          which this codebase deliberately avoids everywhere since it
+          flips ambiguously in RTL (see IconChevron's mirror prop below
+          for the one place a direction genuinely is needed). */}
+      <div className="mt-6 flex flex-wrap items-start justify-between gap-x-2 gap-y-6">
         {stages.map((s, i) => (
-          <div key={s.label} className="flex items-center gap-1">
-            {i > 0 && <span className="mx-1 hidden h-px w-4 shrink-0 bg-stone-200 sm:block" aria-hidden="true" />}
-            <Link
-              to={`/projects/${projectId}/${s.href}`}
-              className="flex items-center gap-2.5 rounded-lg border border-stone-200 px-3 py-2.5 transition hover:border-stone-300 hover:bg-stone-50"
-            >
-              <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${s.iconTone}`}>
+          <div key={s.label} className="flex items-start gap-2 sm:gap-3">
+            {i > 0 && <span className="mt-5 hidden h-10 w-px shrink-0 bg-stone-200 sm:block" aria-hidden="true" />}
+            <Link to={`/projects/${projectId}/${s.href}`} className="flex flex-col items-center gap-2 px-1 text-center transition hover:opacity-70">
+              <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${s.iconTone}`}>
                 <s.icon />
               </span>
-              <span className="min-w-0">
-                <span className="block whitespace-nowrap text-[11px] font-medium uppercase tracking-wide text-stone-400">{s.label}</span>
-                <span className="block whitespace-nowrap text-sm font-bold tabular-nums text-stone-900">{formatMoney(s.value, forecast.currency, locale)}</span>
-              </span>
+              <span className="whitespace-nowrap text-[11px] font-medium uppercase tracking-wide text-stone-400">{s.label}</span>
+              <span className="whitespace-nowrap text-sm font-bold tabular-nums text-stone-900">{formatMoney(s.value, forecast.currency, locale)}</span>
             </Link>
           </div>
         ))}
-        <span className="mx-1 hidden h-px w-4 shrink-0 bg-stone-200 sm:block" aria-hidden="true" />
-        <div className={`flex items-center gap-2.5 rounded-lg border px-3 py-2.5 ${overBudget ? "border-danger-200 bg-danger-50" : "border-success-200 bg-success-50"}`}>
-          <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${overBudget ? "bg-danger-100 text-danger-700" : "bg-success-100 text-success-700"}`}>
+        <span className="mt-5 hidden h-10 w-px shrink-0 bg-stone-200 sm:block" aria-hidden="true" />
+        <div className={`flex flex-col items-center gap-2 rounded-lg px-3 py-2 text-center ${overBudget ? "bg-danger-50" : "bg-success-50"}`}>
+          <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${overBudget ? "bg-danger-100 text-danger-700" : "bg-success-100 text-success-700"}`}>
             {overBudget ? <IconAlertTriangle /> : <IconTrendUp />}
           </span>
-          <span className="min-w-0">
-            <span className={`block whitespace-nowrap text-[11px] font-medium uppercase tracking-wide ${overBudget ? "text-danger-600" : "text-success-600"}`}>
-              {t("dashboard.financial.expectedVariance")}
-              {overBudget ? t("dashboard.financial.overBudgetSuffix") : ""}
-            </span>
-            <span className={`block whitespace-nowrap text-sm font-extrabold tabular-nums ${overBudget ? "text-danger-700" : "text-success-700"}`}>
-              {formatMoney(m.variance, forecast.currency, locale)} ({formatPercent(m.variancePercent, 1, locale)})
-            </span>
+          <span className={`whitespace-nowrap text-[11px] font-medium uppercase tracking-wide ${overBudget ? "text-danger-600" : "text-success-600"}`}>
+            {t("dashboard.financial.expectedVariance")}
+            {overBudget ? t("dashboard.financial.overBudgetSuffix") : ""}
+          </span>
+          <span className={`whitespace-nowrap text-sm font-extrabold tabular-nums ${overBudget ? "text-danger-700" : "text-success-700"}`}>
+            {formatMoney(m.variance, forecast.currency, locale)} ({formatPercent(m.variancePercent, 1, locale)})
           </span>
         </div>
       </div>
 
       {revision && (
-        <p className="mt-4 text-xs text-stone-400">
+        <p className="mt-6 border-t border-stone-100 pt-4 text-xs text-stone-400">
           {t("dashboard.financial.boqRevision", { number: revision.revisionNumber })}{" "}
           <Badge tone={boqRevisionStatusTone[revision.status]}>{t(`dashboard.financial.boqRevisionStatus.${revision.status}`)}</Badge>{" "}
           <Link to={`/projects/${projectId}/boq`} className="text-primary hover:underline">
@@ -986,7 +1012,7 @@ function ExceptionsPanel({ items }: { items: AttentionItem[] }) {
   const { t, locale } = useTranslation();
   const mirrorChevron = locale === "ar";
   return (
-    <div>
+    <div className="h-full rounded-xl border border-stone-200 bg-white p-5 shadow-sm sm:p-6">
       <h2 className="text-sm font-bold uppercase tracking-wide text-stone-900">{t("dashboard.needsAttention.title")}</h2>
       {items.length === 0 ? (
         <p className="mt-4 text-sm text-stone-400">{t("dashboard.needsAttention.empty")}</p>
@@ -1047,15 +1073,44 @@ function CostVsProgress({
 }) {
   const { t, locale } = useTranslation();
   const costOverBudget = budget.totals.remaining < 0;
+  const costColor = warnGap ? "#dc2626" : "#059669";
 
   return (
-    <div className="border-t border-stone-200 pt-10">
+    <div className="rounded-xl border border-stone-200 bg-white p-5 shadow-sm sm:p-6">
       <h2 className="text-sm font-bold uppercase tracking-wide text-stone-900">{t("dashboard.costProgress.title")}</h2>
       <p className={`mt-2 text-sm font-semibold ${warnGap ? "text-warning-700" : gap !== null ? "text-success-700" : "text-stone-400"}`}>{headline}</p>
 
-      <div className="mt-6 max-w-2xl space-y-4">
-        <ComparisonBar label={t("dashboard.costProgress.actualProgress")} value={avgProgress} color="bg-stone-700" />
-        <ComparisonBar label={t("dashboard.costProgress.costConsumption")} value={costConsumption} color={warnGap ? "bg-danger-500" : "bg-success-500"} />
+      {/* A paired gauge, not two decorative bars: both real, already-
+          computed snapshot percentages (avgProgress / costConsumption —
+          the same two values the hero and the headline above already use),
+          never a fabricated month-by-month trend line — this codebase has
+          no real historical time series for either figure, so it never
+          pretends to. xl, not lg, for the same sidebar-collision reason
+          documented on every other multi-column switch on this page. */}
+      <div className="mt-6 flex flex-col gap-8 xl:flex-row xl:items-center">
+        <div className="flex shrink-0 items-center gap-8 sm:gap-10">
+          <div className="flex flex-col items-center gap-2">
+            <Gauge value={avgProgress} locale={locale} color="#0f766e" size={96} stroke={9} />
+            <span className="text-xs font-medium text-stone-500">{t("dashboard.costProgress.actualProgress")}</span>
+          </div>
+          <div className="flex flex-col items-center gap-2">
+            <Gauge value={costConsumption} locale={locale} color={costColor} size={96} stroke={9} />
+            <span className="text-xs font-medium text-stone-500">{t("dashboard.costProgress.costConsumption")}</span>
+          </div>
+        </div>
+
+        <div className="grid flex-1 grid-cols-2 gap-4 border-t border-stone-100 pt-6 xl:border-t-0 xl:border-s xl:ps-8 xl:pt-0">
+          <div>
+            <p className="text-3xl font-extrabold tabular-nums text-stone-900 sm:text-4xl">{avgProgress !== null ? formatPercent(avgProgress, 1, locale) : "—"}</p>
+            <p className="mt-1 text-xs font-medium text-stone-500">{t("dashboard.costProgress.actualProgress")}</p>
+          </div>
+          <div>
+            <p className={`text-3xl font-extrabold tabular-nums sm:text-4xl ${warnGap ? "text-danger-700" : "text-success-700"}`}>
+              {costConsumption !== null ? formatPercent(costConsumption, 1, locale) : "—"}
+            </p>
+            <p className="mt-1 text-xs font-medium text-stone-500">{t("dashboard.costProgress.costConsumption")}</p>
+          </div>
+        </div>
       </div>
 
       {/* grid-cols-1 below sm: at narrow widths, three-across left too
@@ -1064,7 +1119,7 @@ function CostVsProgress({
           leading digits (confirmed live: "152,000.00" rendered as
           "…2,000.00"). One column per row at narrow widths always gives a
           money value its full container width instead. */}
-      <div className="mt-6 grid max-w-2xl grid-cols-1 gap-4 border-t border-stone-200 pt-5 sm:grid-cols-3 sm:gap-6">
+      <div className="mt-6 grid grid-cols-1 gap-4 border-t border-stone-200 pt-5 sm:grid-cols-3 sm:gap-6">
         <PlainStat label={t("dashboard.costProgress.totalPlanned")} value={formatMoney(budget.totals.planned, "SAR", locale)} />
         <PlainStat label={t("dashboard.costProgress.totalSpent")} value={formatMoney(budget.totals.spent, "SAR", locale)} />
         <PlainStat
@@ -1072,22 +1127,6 @@ function CostVsProgress({
           value={formatMoney(budget.totals.remaining, "SAR", locale)}
           tone={costOverBudget ? "danger" : "default"}
         />
-      </div>
-    </div>
-  );
-}
-
-function ComparisonBar({ label, value, color }: { label: string; value: number | null; color: string }) {
-  const { locale } = useTranslation();
-  const pct = Math.min(100, Math.max(0, value ?? 0));
-  return (
-    <div>
-      <div className="mb-1.5 flex items-baseline justify-between text-sm">
-        <span className="font-medium text-stone-600">{label}</span>
-        <span className="font-bold tabular-nums text-stone-900">{value !== null ? formatPercent(value, 0, locale) : "—"}</span>
-      </div>
-      <div className="h-2 w-full overflow-hidden rounded-full bg-stone-100">
-        <div className={`h-full rounded-full ${color}`} style={{ width: `${pct}%` }} />
       </div>
     </div>
   );
@@ -1132,6 +1171,22 @@ function PlainRow({
   );
 }
 
+// A small colored count bubble for a bare, already-real count (never a
+// derived/estimated figure) — reused for the two IPC "awaiting" rows below.
+function CountBadge({ count, tone }: { count: number; tone: "purple" | "warning" | "success" }) {
+  const toneClass = tone === "purple" ? "bg-purple-100 text-purple-700" : tone === "warning" ? "bg-warning-100 text-warning-700" : "bg-success-100 text-success-700";
+  return <span className={`inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full px-1.5 text-[11px] font-bold tabular-nums ${toneClass}`}>{count}</span>;
+}
+
+function BadgeRow({ label, count, tone }: { label: string; count: number; tone: "purple" | "warning" | "success" }) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span className="min-w-0 truncate text-sm text-stone-600">{label}</span>
+      <CountBadge count={count} tone={count > 0 ? tone : "success"} />
+    </div>
+  );
+}
+
 // ── Delivery / Cash / Commercial — three quiet columns, divided by a thin
 // rule instead of three separate boxes ───────────────────────────────────
 function DeliveryColumn({
@@ -1150,27 +1205,30 @@ function DeliveryColumn({
   measurementsAwaitingApproval: Measurement[];
 }) {
   const { t, locale } = useTranslation();
+  const isOnTrack = overdueTasks.length === 0;
   return (
     <div>
-      <div className="flex items-baseline justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-bold text-stone-900">{t("dashboard.progressSchedule.title")}</h3>
-        <Link to={`/projects/${projectId}/schedule`} className="text-xs font-medium text-primary hover:underline">
-          {t("dashboard.progressSchedule.openSchedule")}
-        </Link>
+        {tasks.length > 0 && (
+          <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${isOnTrack ? "bg-success-100 text-success-700" : "bg-warning-100 text-warning-700"}`}>
+            {isOnTrack ? t("dashboard.progressSchedule.onTrack") : t("dashboard.progressSchedule.tasksOverdueCount", { count: overdueTasks.length })}
+          </span>
+        )}
       </div>
       {tasks.length === 0 ? (
         <p className="mt-3 text-sm text-stone-400">{t("dashboard.progressSchedule.noData")}</p>
       ) : (
-        <div className="mt-3 space-y-3">
+        <div className="mt-4 space-y-3">
           <PlainRow label={t("dashboard.progressSchedule.overallProgress")} value={avgProgress !== null ? formatPercent(avgProgress, 1, locale) : "—"} />
-          <PlainRow
-            label={t("dashboard.progressSchedule.scheduleStatus")}
-            value={overdueTasks.length > 0 ? t("dashboard.progressSchedule.tasksOverdueCount", { count: overdueTasks.length }) : t("dashboard.progressSchedule.onTrack")}
-            tone={overdueTasks.length > 0 ? "warning" : "success"}
-          />
           <PlainRow label={t("dashboard.progressSchedule.nextMilestone")} value={nextMilestone ? formatDate(nextMilestone.endDate, locale) : "—"} hint={nextMilestone?.name} />
         </div>
       )}
+      <p className="mt-4 text-end text-xs">
+        <Link to={`/projects/${projectId}/schedule`} className="font-medium text-primary hover:underline">
+          {t("dashboard.progressSchedule.openSchedule")}
+        </Link>
+      </p>
       {measurementsAwaitingApproval.length > 0 && (
         <p className="mt-3 text-xs text-stone-500">
           <Link to={`/projects/${projectId}/progress`} className="text-primary hover:underline">
@@ -1184,24 +1242,40 @@ function DeliveryColumn({
 
 function CashColumn({ cashFlow, projectId }: { cashFlow: CashFlowResult; projectId: string }) {
   const { t, locale } = useTranslation();
+  const netPositive = cashFlow.projected.net >= 0;
   return (
     <div>
-      <div className="flex items-baseline justify-between gap-2">
-        <h3 className="text-sm font-bold text-stone-900">{t("dashboard.cashFlow.title")}</h3>
-        <Link to={`/projects/${projectId}/cash-flow`} className="text-xs font-medium text-primary hover:underline">
-          {t("dashboard.cashFlow.fullDetails")}
-        </Link>
-      </div>
-      <div className="mt-3 space-y-3">
+      <h3 className="text-sm font-bold text-stone-900">{t("dashboard.cashFlow.title")}</h3>
+
+      {/* The one real headline figure this card has — cashFlow.projected.net,
+          already computed server-side — promoted to a hero stat instead of
+          buried in a list. No sparkline/trend badge sits beside it: this
+          codebase has no real historical cash-flow time series to plot, so
+          it never fakes one (unlike a reference dashboard's decorative
+          "+12%" trend chip). */}
+      {/* Intl's currency formatter joins the code to the number with a
+          non-breaking space ("-SAR 65,000.00") — at a hero font size
+          in this narrow (1-of-3) card, that single unbreakable run first
+          overflowed the card's own border, and reducing the font alone
+          only turned it into a ragged 3-line break with "00" stranded
+          alone on its own line (both confirmed live). Swapping the nbsp
+          for a normal space means it wraps at most once, cleanly, between
+          the currency code and the number — never mid-number. */}
+      <p className={`mt-3 text-xl font-extrabold tabular-nums sm:text-2xl ${netPositive ? "text-success-700" : "text-danger-700"}`}>
+        {formatMoney(cashFlow.projected.net, cashFlow.currency, locale).replace(/ /g, " ")}
+      </p>
+      <p className="mt-1 text-xs font-medium text-stone-500">{t("dashboard.cashFlow.projectedNet")}</p>
+
+      <div className="mt-5 space-y-3 border-t border-stone-100 pt-4">
         <PlainRow label={t("dashboard.cashFlow.collected")} value={formatMoney(cashFlow.historical.cashReceived, cashFlow.currency, locale)} />
         <PlainRow label={t("dashboard.cashFlow.incurredCost")} value={formatMoney(cashFlow.historical.incurredCost, cashFlow.currency, locale)} />
         <PlainRow label={t("dashboard.cashFlow.expectedReceivables")} value={formatMoney(cashFlow.projected.receivables, cashFlow.currency, locale)} />
-        <PlainRow
-          label={t("dashboard.cashFlow.projectedNet")}
-          value={formatMoney(cashFlow.projected.net, cashFlow.currency, locale)}
-          tone={cashFlow.projected.net < 0 ? "danger" : "success"}
-        />
       </div>
+      <p className="mt-4 text-end text-xs">
+        <Link to={`/projects/${projectId}/cash-flow`} className="font-medium text-primary hover:underline">
+          {t("dashboard.cashFlow.fullDetails")}
+        </Link>
+      </p>
     </div>
   );
 }
@@ -1263,8 +1337,8 @@ function CommercialColumn({
       </div>
       <div className="mt-2 space-y-3">
         <PlainRow label={t("dashboard.commercial.certifiedValueCount", { count: certifiedCount })} value={formatMoney(certifiedTotal, currency, locale)} tone="success" />
-        <PlainRow label={t("dashboard.commercial.awaitingCertification")} value={String(awaitingCertification)} tone={awaitingCertification > 0 ? "warning" : "default"} />
-        <PlainRow label={t("dashboard.commercial.awaitingApproval")} value={String(awaitingApproval)} tone={awaitingApproval > 0 ? "warning" : "default"} />
+        <BadgeRow label={t("dashboard.commercial.awaitingCertification")} count={awaitingCertification} tone="warning" />
+        <BadgeRow label={t("dashboard.commercial.awaitingApproval")} count={awaitingApproval} tone="purple" />
       </div>
 
       <div className="mt-4 flex items-baseline justify-between gap-2 border-t border-stone-200 pt-4">
@@ -1306,21 +1380,39 @@ function activityVerbLabel(t: (key: string) => string, action: string): string {
   return KNOWN_ACTIVITY_VERBS.has(action) ? t(`dashboard.activity.verbs.${action}`) : action;
 }
 
+// The activity feed's action strings are a fixed, already-known vocabulary
+// (KNOWN_ACTIVITY_VERBS above) — mapping their domain prefix to the same
+// icon already used for that domain elsewhere on this page (Financial
+// Control, Health line) is a presentation choice over real event data,
+// never a new classification.
+const activityDomainIcon: Record<string, (p: IconProps) => JSX.Element> = {
+  ipc: IconMoney,
+  commitment: IconPackage,
+  measurement: IconBars,
+  boq_revision: IconClipboard,
+};
+
 function ActivityPulse({ events }: { events: ActivityEvent[] }) {
   const { t, locale } = useTranslation();
   return (
     <div>
-      <h3 className="text-xs font-semibold uppercase tracking-wide text-stone-400">{t("dashboard.activity.title")}</h3>
+      <h3 className="text-sm font-bold text-stone-900">{t("dashboard.activity.title")}</h3>
       {events.length === 0 ? (
-        <p className="mt-2 text-sm text-stone-400">{t("dashboard.activity.empty")}</p>
+        <p className="mt-3 text-sm text-stone-400">{t("dashboard.activity.empty")}</p>
       ) : (
-        <ul className="mt-2 space-y-1.5">
-          {events.map((e) => (
-            <li key={e.id} className="flex items-center justify-between gap-3 text-xs">
-              <span className="text-stone-600">{activityVerbLabel(t, e.action)}</span>
-              <span className="shrink-0 text-stone-400">{formatDateTime(e.createdAt, locale)}</span>
-            </li>
-          ))}
+        <ul className="mt-4 space-y-3">
+          {events.map((e) => {
+            const Icon = activityDomainIcon[e.action.split(".")[0]] ?? IconInfo;
+            return (
+              <li key={e.id} className="flex items-center gap-3 text-sm">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-stone-100 text-stone-500">
+                  <Icon />
+                </span>
+                <span className="min-w-0 flex-1 truncate text-stone-700">{activityVerbLabel(t, e.action)}</span>
+                <span className="shrink-0 text-xs text-stone-400">{formatDateTime(e.createdAt, locale)}</span>
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>
