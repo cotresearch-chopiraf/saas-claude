@@ -35,6 +35,7 @@ import type {
   ComplianceStatus,
   CreateOverrideResult,
 } from "../api/types";
+import { useTranslation } from "../i18n/I18nProvider";
 
 // MIDAD Phase 4 — Compliance / Tax Center. A company-level page (like
 // Settings/Team/Suppliers, NOT a project section) that is purely a
@@ -68,21 +69,21 @@ function displayLocalized(label: Partial<Record<"ar" | "fr" | "en", string>> | u
 // without assuming it is a percentage — only the known ComplianceRules.vat
 // fields (a typed, backend-documented shape) are ever formatted with
 // formatPercent below.
-function renderRawValue(value: unknown): string {
-  if (typeof value === "boolean") return value ? "نعم" : "لا";
+function renderRawValue(t: (key: string) => string, value: unknown): string {
+  if (typeof value === "boolean") return value ? t("compliancePage.yes") : t("compliancePage.no");
   if (value === null || value === undefined) return "—";
   return String(value);
 }
 
-const TABS: TabItem[] = [
-  { key: "profile", label: "الملف الضريبي" },
-  { key: "status", label: "الحالة" },
-  { key: "rules", label: "القواعد المطبّقة" },
-  { key: "overrides", label: "الاستثناءات" },
-  { key: "history", label: "السجل" },
-];
-
 export function Compliance() {
+  const { t } = useTranslation();
+  const TABS: TabItem[] = [
+    { key: "profile", label: t("compliancePage.tabs.profile") },
+    { key: "status", label: t("compliancePage.tabs.status") },
+    { key: "rules", label: t("compliancePage.tabs.rules") },
+    { key: "overrides", label: t("compliancePage.tabs.overrides") },
+    { key: "history", label: t("compliancePage.tabs.history") },
+  ];
   const [activeTab, setActiveTab] = useState("profile");
 
   const [profile, setProfileState] = useState<ComplianceProfile | null>(null);
@@ -128,7 +129,7 @@ export function Compliance() {
         setProfileState(null);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "تعذّر تحميل بيانات الامتثال الضريبي");
+      setError(err instanceof Error ? err.message : t("compliancePage.loadError"));
     } finally {
       setLoaded(true);
     }
@@ -140,7 +141,7 @@ export function Compliance() {
   if (!loaded) {
     return (
       <Layout>
-        <PageHeader title="الامتثال الضريبي" subtitle="إعداد الدولة، القواعد الضريبية المطبّقة، والاستثناءات." />
+        <PageHeader title={t("compliancePage.title")} subtitle={t("compliancePage.subtitle")} />
         <Skeleton rows={6} />
       </Layout>
     );
@@ -149,7 +150,7 @@ export function Compliance() {
   if (error) {
     return (
       <Layout>
-        <PageHeader title="الامتثال الضريبي" subtitle="إعداد الدولة، القواعد الضريبية المطبّقة، والاستثناءات." />
+        <PageHeader title={t("compliancePage.title")} subtitle={t("compliancePage.subtitle")} />
         <ErrorState message={error} onRetry={load} />
       </Layout>
     );
@@ -159,7 +160,7 @@ export function Compliance() {
 
   return (
     <Layout>
-      <PageHeader title="الامتثال الضريبي" subtitle="إعداد الدولة، القواعد الضريبية المطبّقة، والاستثناءات." />
+      <PageHeader title={t("compliancePage.title")} subtitle={t("compliancePage.subtitle")} />
 
       {/* Tabs.tsx's own flex row has no wrap/scroll of its own — with 5
           Arabic labels it exceeds a 390px viewport unless the row itself
@@ -206,12 +207,13 @@ function ProfileTab({
   countries: ComplianceCountry[] | null;
   onSaved: () => void;
 }) {
+  const { t, locale } = useTranslation();
   if (notConfigured) {
     return (
       <Card className="p-5">
-        <h2 className="mb-2 font-semibold text-stone-800">لم يتم إعداد ملف الامتثال الضريبي لهذه الشركة بعد</h2>
+        <h2 className="mb-2 font-semibold text-stone-800">{t("compliancePage.profileTab.notConfiguredHeading")}</h2>
         <p className="mb-4 text-sm text-stone-500">
-          اختاري دولة التشغيل لتفعيل القواعد الضريبية الرسمية المعتمدة تلقائياً — لا حاجة لإدخال أي نسب يدوياً.
+          {t("compliancePage.profileTab.notConfiguredDescription")}
         </p>
         <Can permission="compliance.manage">
           <OnboardingForm countries={countries} onSaved={onSaved} />
@@ -225,17 +227,21 @@ function ProfileTab({
   return (
     <Card className="p-5">
       <dl className="grid grid-cols-1 gap-x-8 gap-y-3 text-sm sm:grid-cols-2">
-        <Field label="رمز الدولة" value={profile.countryCode} />
-        <Field label="الحالة" value={<Badge tone={profile.status === "configured" ? "success" : "warning"}>{profile.status}</Badge>} />
-        <Field label="نوع الكيان القانوني" value={profile.legalEntityType ?? "—"} />
-        <Field label="نشاط الأعمال" value={profile.businessActivity ?? "—"} />
-        <Field label="حالة التسجيل الضريبي" value={profile.taxRegistrationStatus ?? "—"} />
-        <Field label="آخر تحديث" value={formatDateTime(profile.updatedAt)} />
+        <Field label={t("compliancePage.fields.countryCode")} value={profile.countryCode} />
+        {/* profile.status rendered verbatim, never translated/relabeled — this
+            page never derives compliance status, per its own header comment
+            and Compliance.test.tsx's "renders the server-provided status
+            verbatim" assertion. */}
+        <Field label={t("compliancePage.fields.status")} value={<Badge tone={profile.status === "configured" ? "success" : "warning"}>{profile.status}</Badge>} />
+        <Field label={t("compliancePage.fields.legalEntityType")} value={profile.legalEntityType ?? "—"} />
+        <Field label={t("compliancePage.fields.businessActivity")} value={profile.businessActivity ?? "—"} />
+        <Field label={t("compliancePage.fields.taxRegistrationStatus")} value={profile.taxRegistrationStatus ?? "—"} />
+        <Field label={t("compliancePage.fields.lastUpdate")} value={formatDateTime(profile.updatedAt, locale)} />
       </dl>
 
       <Can permission="compliance.manage">
         <div className="mt-6 border-t border-stone-100 pt-5">
-          <h3 className="mb-3 font-semibold text-stone-700">تغيير الدولة</h3>
+          <h3 className="mb-3 font-semibold text-stone-700">{t("compliancePage.profileTab.changeCountryHeading")}</h3>
           <OnboardingForm countries={countries} onSaved={onSaved} initial={profile} />
         </div>
       </Can>
@@ -252,6 +258,7 @@ function OnboardingForm({
   onSaved: () => void;
   initial?: ComplianceProfile;
 }) {
+  const { t } = useTranslation();
   const [countryCode, setCountryCode] = useState(initial?.countryCode ?? countries?.[0]?.countryCode ?? "");
   const [legalEntityType, setLegalEntityType] = useState(initial?.legalEntityType ?? "");
   const [businessActivity, setBusinessActivity] = useState(initial?.businessActivity ?? "");
@@ -273,7 +280,7 @@ function OnboardingForm({
       });
       onSaved();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر حفظ الملف الضريبي");
+      setError(err instanceof ApiError ? err.message : t("compliancePage.profileTab.form.genericError"));
     } finally {
       setSubmitting(false);
     }
@@ -289,14 +296,14 @@ function OnboardingForm({
         </div>
       )}
       <label className="text-sm text-stone-600 sm:col-span-2">
-        الدولة
+        {t("compliancePage.profileTab.form.countryLabel")}
         <select
           required
           value={countryCode}
           onChange={(e) => setCountryCode(e.target.value)}
           className="mt-1 block w-full rounded-md border border-stone-300 px-3 py-2 text-sm"
         >
-          {countries.length === 0 && <option value="">لا توجد دول مدعومة حالياً</option>}
+          {countries.length === 0 && <option value="">{t("compliancePage.profileTab.form.noCountriesAvailable")}</option>}
           {countries.map((c) => (
             <option key={c.countryCode} value={c.countryCode}>
               {displayLocalized(c.displayName, c.countryCode)}
@@ -305,25 +312,25 @@ function OnboardingForm({
         </select>
       </label>
       <input
-        placeholder="نوع الكيان القانوني (اختياري)"
+        placeholder={t("compliancePage.profileTab.form.legalEntityTypePlaceholder")}
         value={legalEntityType}
         onChange={(e) => setLegalEntityType(e.target.value)}
         className="rounded-md border border-stone-300 px-3 py-2 text-sm"
       />
       <input
-        placeholder="نشاط الأعمال (اختياري)"
+        placeholder={t("compliancePage.profileTab.form.businessActivityPlaceholder")}
         value={businessActivity}
         onChange={(e) => setBusinessActivity(e.target.value)}
         className="rounded-md border border-stone-300 px-3 py-2 text-sm"
       />
       <input
-        placeholder="حالة التسجيل الضريبي (اختياري)"
+        placeholder={t("compliancePage.profileTab.form.taxRegistrationStatusPlaceholder")}
         value={taxRegistrationStatus}
         onChange={(e) => setTaxRegistrationStatus(e.target.value)}
         className="rounded-md border border-stone-300 px-3 py-2 text-sm sm:col-span-2"
       />
       <Button type="submit" disabled={submitting || !countryCode} className="sm:col-span-2">
-        {submitting ? "جارٍ الحفظ..." : initial ? "حفظ التغيير" : "تفعيل الامتثال الضريبي"}
+        {submitting ? t("compliancePage.profileTab.form.saving") : initial ? t("compliancePage.profileTab.form.saveChange") : t("compliancePage.profileTab.form.activate")}
       </Button>
     </form>
   );
@@ -332,31 +339,34 @@ function OnboardingForm({
 // --- Status --------------------------------------------------------------
 
 function StatusTab({ status }: { status: ComplianceStatus | null }) {
+  const { t, locale } = useTranslation();
   if (!status) return <Skeleton rows={4} />;
 
   if (status.status === "not_configured") {
-    return <EmptyState message="لا توجد حالة امتثال بعد — أكملي إعداد الملف الضريبي أولاً من تبويب «الملف الضريبي»." />;
+    return <EmptyState message={t("compliancePage.statusTab.emptyMessage")} />;
   }
 
   return (
     <Card className="p-5">
       <dl className="grid grid-cols-1 gap-x-8 gap-y-3 text-sm sm:grid-cols-2">
-        <Field label="الحالة" value={<Badge tone={status.status === "configured" ? "success" : "warning"}>{status.status}</Badge>} />
-        <Field label="رمز الدولة" value={status.countryCode} />
-        <Field label="نسخة القواعد النشطة" value={status.ruleVersion ?? "—"} />
-        <Field label="عدد الاستثناءات النشطة" value={String(status.overrideCount)} />
-        <Field label="آخر تحديث" value={formatDateTime(status.lastUpdate)} />
+        {/* status.status rendered verbatim — see the identical note on
+            profile.status in ProfileTab above. */}
+        <Field label={t("compliancePage.fields.status")} value={<Badge tone={status.status === "configured" ? "success" : "warning"}>{status.status}</Badge>} />
+        <Field label={t("compliancePage.fields.countryCode")} value={status.countryCode} />
+        <Field label={t("compliancePage.fields.ruleVersion")} value={status.ruleVersion ?? "—"} />
+        <Field label={t("compliancePage.fields.activeOverrideCount")} value={String(status.overrideCount)} />
+        <Field label={t("compliancePage.fields.lastUpdate")} value={formatDateTime(status.lastUpdate, locale)} />
       </dl>
 
       <div className="mt-5 border-t border-stone-100 pt-4">
-        <h3 className="mb-2 font-semibold text-stone-700">حالة الزكاة</h3>
+        <h3 className="mb-2 font-semibold text-stone-700">{t("compliancePage.statusTab.zakatHeading")}</h3>
         {status.zakat.status === "review_required" ? (
-          <p className="text-sm text-warning-700">قيد المراجعة — {status.zakat.reason}</p>
+          <p className="text-sm text-warning-700">{t("compliancePage.statusTab.zakatReviewRequired", { reason: status.zakat.reason })}</p>
         ) : (
           <dl className="grid grid-cols-1 gap-x-8 gap-y-2 text-sm sm:grid-cols-2">
-            <Field label="سارية" value={status.zakat.applicable ? "نعم" : "لا"} />
-            <Field label="تتطلب مراجعة" value={status.zakat.reviewRequired ? "نعم" : "لا"} />
-            {status.zakat.notes && <Field label="ملاحظات" value={status.zakat.notes} />}
+            <Field label={t("compliancePage.applicable")} value={status.zakat.applicable ? t("compliancePage.yes") : t("compliancePage.no")} />
+            <Field label={t("compliancePage.statusTab.reviewNeeded")} value={status.zakat.reviewRequired ? t("compliancePage.yes") : t("compliancePage.no")} />
+            {status.zakat.notes && <Field label={t("compliancePage.fields.notes")} value={status.zakat.notes} />}
           </dl>
         )}
       </div>
@@ -367,35 +377,36 @@ function StatusTab({ status }: { status: ComplianceStatus | null }) {
 // --- Rules (read-only viewer) --------------------------------------------
 
 function RulesTab({ rules }: { rules: ComplianceRulesResponse | null }) {
+  const { t } = useTranslation();
   if (!rules) return <Skeleton rows={4} />;
 
   if (rules.status === "review_required") {
-    return <EmptyState message={`القواعد قيد المراجعة — ${rules.reason}`} />;
+    return <EmptyState message={t("compliancePage.rulesTab.reviewRequired", { reason: rules.reason })} />;
   }
 
   const r = rules.rules;
   return (
     <div className="space-y-4">
       <Card className="p-5">
-        <h3 className="mb-3 font-semibold text-stone-700">ضريبة القيمة المضافة</h3>
+        <h3 className="mb-3 font-semibold text-stone-700">{t("compliancePage.rulesTab.vatHeading")}</h3>
         <dl className="grid grid-cols-1 gap-x-8 gap-y-2 text-sm sm:grid-cols-2">
-          <Field label="سارية" value={r.vat.applicable ? "نعم" : "لا"} />
-          <Field label="النسبة القياسية" value={formatPercent(r.vat.standardRatePercent)} />
+          <Field label={t("compliancePage.applicable")} value={r.vat.applicable ? t("compliancePage.yes") : t("compliancePage.no")} />
+          <Field label={t("compliancePage.rulesTab.standardRate")} value={formatPercent(r.vat.standardRatePercent)} />
         </dl>
         {r.vat.categories.length > 0 && (
           <div className="mt-3 overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-stone-200 text-right text-stone-500">
-                  <th className="py-1.5">الفئة</th>
-                  <th className="py-1.5">النسبة</th>
+                  <th className="py-1.5">{t("compliancePage.rulesTab.categoryColumn")}</th>
+                  <th className="py-1.5">{t("compliancePage.rulesTab.rateColumn")}</th>
                 </tr>
               </thead>
               <tbody>
                 {r.vat.categories.map((c) => (
                   <tr key={c.code} className="border-b border-stone-100">
                     <td className="py-1.5">{displayLocalized(c.label, c.code)}</td>
-                    <td className="py-1.5">{c.ratePercent !== null ? formatPercent(c.ratePercent) : "متغيّرة"}</td>
+                    <td className="py-1.5">{c.ratePercent !== null ? formatPercent(c.ratePercent) : t("compliancePage.rulesTab.variableRate")}</td>
                   </tr>
                 ))}
               </tbody>
@@ -405,16 +416,16 @@ function RulesTab({ rules }: { rules: ComplianceRulesResponse | null }) {
       </Card>
 
       <Card className="p-5">
-        <h3 className="mb-3 font-semibold text-stone-700">الاستقطاع الضريبي (Withholding)</h3>
-        <Field label="سارٍ" value={r.withholding.applicable ? "نعم" : "لا"} />
+        <h3 className="mb-3 font-semibold text-stone-700">{t("compliancePage.rulesTab.withholdingHeading")}</h3>
+        <Field label={t("compliancePage.rulesTab.withholdingApplicable")} value={r.withholding.applicable ? t("compliancePage.yes") : t("compliancePage.no")} />
         {r.withholding.rules.length > 0 && (
           <div className="mt-3 overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-stone-200 text-right text-stone-500">
-                  <th className="py-1.5">نوع المورّد</th>
-                  <th className="py-1.5">فئة الخدمة</th>
-                  <th className="py-1.5">النسبة</th>
+                  <th className="py-1.5">{t("compliancePage.rulesTab.vendorTypeColumn")}</th>
+                  <th className="py-1.5">{t("compliancePage.rulesTab.serviceCategoryColumn")}</th>
+                  <th className="py-1.5">{t("compliancePage.rulesTab.rateColumn")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -432,21 +443,21 @@ function RulesTab({ rules }: { rules: ComplianceRulesResponse | null }) {
       </Card>
 
       <Card className="p-5">
-        <h3 className="mb-3 font-semibold text-stone-700">الفوترة الإلكترونية والمتطلبات</h3>
+        <h3 className="mb-3 font-semibold text-stone-700">{t("compliancePage.rulesTab.eInvoicingHeading")}</h3>
         <dl className="grid grid-cols-1 gap-x-8 gap-y-2 text-sm sm:grid-cols-2">
-          <Field label="مطلوبة" value={r.eInvoicing.required ? "نعم" : "لا"} />
-          <Field label="المعيار" value={r.eInvoicing.profile ?? "—"} />
-          <Field label="ثنائية اللغة مطلوبة" value={r.invoice.bilingualRequired ? "نعم" : "لا"} />
-          <Field label="العملة" value={r.localization.currency} />
+          <Field label={t("compliancePage.rulesTab.required")} value={r.eInvoicing.required ? t("compliancePage.yes") : t("compliancePage.no")} />
+          <Field label={t("compliancePage.rulesTab.standard")} value={r.eInvoicing.profile ?? "—"} />
+          <Field label={t("compliancePage.rulesTab.bilingualRequired")} value={r.invoice.bilingualRequired ? t("compliancePage.yes") : t("compliancePage.no")} />
+          <Field label={t("compliancePage.rulesTab.currency")} value={r.localization.currency} />
         </dl>
         {r.invoice.requiredFields.length > 0 && (
-          <p className="mt-3 text-sm text-stone-600">الحقول المطلوبة في الفاتورة: {r.invoice.requiredFields.join("، ")}</p>
+          <p className="mt-3 text-sm text-stone-600">{t("compliancePage.rulesTab.requiredInvoiceFields", { fields: r.invoice.requiredFields.join(t("compliancePage.rulesTab.listSeparator")) })}</p>
         )}
         {r.identifiers.length > 0 && (
           <ul className="mt-3 list-inside list-disc text-sm text-stone-600">
             {r.identifiers.map((id) => (
               <li key={id.type}>
-                {displayLocalized(id.label, id.type)} {id.required ? "(مطلوب)" : "(اختياري)"}
+                {displayLocalized(id.label, id.type)} {id.required ? t("compliancePage.rulesTab.identifierRequired") : t("compliancePage.rulesTab.identifierOptional")}
               </li>
             ))}
           </ul>
@@ -473,6 +484,7 @@ function OverridesTab({
   notConfigured: boolean;
   onChanged: () => void;
 }) {
+  const { t, locale } = useTranslation();
   const [showCreate, setShowCreate] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resettingId, setResettingId] = useState<string | null>(null);
@@ -485,7 +497,7 @@ function OverridesTab({
       await resetOverride(id);
       onChanged();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر إعادة تعيين الاستثناء");
+      setError(err instanceof ApiError ? err.message : t("compliancePage.overridesTab.resetError"));
     } finally {
       setResettingId(null);
     }
@@ -498,10 +510,10 @@ function OverridesTab({
       <Can permission="compliance.manage">
         <div className="flex justify-end">
           {notConfigured ? (
-            <p className="text-sm text-stone-500">أكملي إعداد الملف الضريبي أولاً قبل إنشاء استثناء.</p>
+            <p className="text-sm text-stone-500">{t("compliancePage.overridesTab.notConfiguredHint")}</p>
           ) : (
             <Button size="sm" onClick={() => setShowCreate((v) => !v)}>
-              {showCreate ? "إلغاء" : "+ استثناء جديد"}
+              {showCreate ? t("common.cancel") : t("compliancePage.overridesTab.newOverride")}
             </Button>
           )}
         </div>
@@ -520,16 +532,16 @@ function OverridesTab({
       {!overrides ? (
         <Skeleton rows={3} />
       ) : overrides.length === 0 ? (
-        <EmptyState message="لا توجد استثناءات نشطة حالياً — القيم الرسمية للدولة مطبّقة كما هي." />
+        <EmptyState message={t("compliancePage.overridesTab.emptyMessage")} />
       ) : (
         <Table>
           <thead>
             <tr className="border-b border-stone-200 text-right text-stone-500">
-              <th className="px-4 py-2">الإعداد</th>
-              <th className="px-4 py-2">القيمة الحالية</th>
-              <th className="px-4 py-2">القيمة الرسمية عند الإنشاء</th>
-              <th className="px-4 py-2">سارٍ من</th>
-              <th className="px-4 py-2">الحالة</th>
+              <th className="px-4 py-2">{t("compliancePage.overridesTab.columns.setting")}</th>
+              <th className="px-4 py-2">{t("compliancePage.overridesTab.columns.currentValue")}</th>
+              <th className="px-4 py-2">{t("compliancePage.overridesTab.columns.officialValueAtCreation")}</th>
+              <th className="px-4 py-2">{t("compliancePage.overridesTab.columns.effectiveFrom")}</th>
+              <th className="px-4 py-2">{t("compliancePage.fields.status")}</th>
               <th className="px-4 py-2"></th>
             </tr>
           </thead>
@@ -537,10 +549,12 @@ function OverridesTab({
             {overrides.map((o) => (
               <tr key={o.id} className="border-b border-stone-100">
                 <td className="px-4 py-2">{overrideKeyLabel(o.settingKey)}</td>
-                <td className="px-4 py-2">{renderRawValue(o.overrideValue)}</td>
-                <td className="px-4 py-2">{renderRawValue(o.officialDefaultSnapshot)}</td>
-                <td className="px-4 py-2">{formatDate(o.effectiveFrom)}</td>
+                <td className="px-4 py-2">{renderRawValue(t, o.overrideValue)}</td>
+                <td className="px-4 py-2">{renderRawValue(t, o.officialDefaultSnapshot)}</td>
+                <td className="px-4 py-2">{formatDate(o.effectiveFrom, locale)}</td>
                 <td className="px-4 py-2">
+                  {/* o.status rendered verbatim — see the note on
+                      profile.status/status.status above. */}
                   <Badge tone={overrideStatusTone[o.status]}>{o.status}</Badge>
                 </td>
                 <td className="px-4 py-2">
@@ -551,7 +565,7 @@ function OverridesTab({
                       disabled={resettingId === o.id}
                       className="text-sm text-primary hover:underline disabled:text-stone-400"
                     >
-                      {resettingId === o.id ? "جارٍ إعادة التعيين..." : "إعادة تعيين"}
+                      {resettingId === o.id ? t("compliancePage.overridesTab.resetting") : t("compliancePage.overridesTab.reset")}
                     </button>
                   </Can>
                 </td>
@@ -583,6 +597,7 @@ function CreateOverrideForm({
   rules: ComplianceRulesResponse | null;
   onDone: () => void;
 }) {
+  const { t } = useTranslation();
   const [settingKey, setSettingKey] = useState(overridableKeys?.[0] ?? "");
   const [rawValue, setRawValue] = useState("");
   const [effectiveFrom, setEffectiveFrom] = useState("");
@@ -634,7 +649,7 @@ function CreateOverrideForm({
         onDone();
       }
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر إنشاء الاستثناء");
+      setError(err instanceof ApiError ? err.message : t("compliancePage.createOverrideForm.genericError"));
       setPending(null);
     } finally {
       setSubmitting(false);
@@ -659,14 +674,14 @@ function CreateOverrideForm({
           </div>
         )}
         <label className="text-sm text-stone-600">
-          الإعداد
+          {t("compliancePage.overridesTab.columns.setting")}
           <select
             required
             value={settingKey}
             onChange={(e) => setSettingKey(e.target.value)}
             className="mt-1 block w-full rounded-md border border-stone-300 px-3 py-2 text-sm"
           >
-            {(overridableKeys ?? []).length === 0 && <option value="">لا توجد إعدادات قابلة للاستثناء</option>}
+            {(overridableKeys ?? []).length === 0 && <option value="">{t("compliancePage.createOverrideForm.noOverridableSettings")}</option>}
             {(overridableKeys ?? []).map((k) => (
               <option key={k} value={k}>
                 {overrideKeyLabel(k)}
@@ -677,21 +692,21 @@ function CreateOverrideForm({
 
         {isBooleanSetting ? (
           <label className="text-sm text-stone-600">
-            القيمة الجديدة
+            {t("compliancePage.createOverrideForm.newValueLabel")}
             <select
               required
               value={rawValue}
               onChange={(e) => setRawValue(e.target.value)}
               className="mt-1 block w-full rounded-md border border-stone-300 px-3 py-2 text-sm"
             >
-              <option value="">اختاري القيمة</option>
-              <option value="true">نعم</option>
-              <option value="false">لا</option>
+              <option value="">{t("compliancePage.createOverrideForm.selectValuePlaceholder")}</option>
+              <option value="true">{t("compliancePage.yes")}</option>
+              <option value="false">{t("compliancePage.no")}</option>
             </select>
           </label>
         ) : (
           <label className="text-sm text-stone-600">
-            القيمة الجديدة
+            {t("compliancePage.createOverrideForm.newValueLabel")}
             <input
               required
               value={rawValue}
@@ -702,7 +717,7 @@ function CreateOverrideForm({
         )}
 
         <label className="text-sm text-stone-600">
-          سارٍ من
+          {t("compliancePage.overridesTab.columns.effectiveFrom")}
           <input
             required
             type="date"
@@ -712,7 +727,7 @@ function CreateOverrideForm({
           />
         </label>
         <label className="text-sm text-stone-600">
-          سارٍ حتى (اختياري)
+          {t("compliancePage.createOverrideForm.effectiveToLabel")}
           <input
             type="date"
             value={effectiveTo}
@@ -721,14 +736,14 @@ function CreateOverrideForm({
           />
         </label>
         <input
-          placeholder="سبب الاستثناء (اختياري)"
+          placeholder={t("compliancePage.createOverrideForm.reasonPlaceholder")}
           value={reason}
           onChange={(e) => setReason(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm sm:col-span-2"
         />
 
         <Button type="submit" disabled={submitting || !settingKey} className="sm:col-span-2">
-          {submitting ? "جارٍ الإرسال..." : "إرسال الاستثناء"}
+          {submitting ? t("compliancePage.createOverrideForm.submitting") : t("compliancePage.createOverrideForm.submit")}
         </Button>
       </form>
 
@@ -736,20 +751,20 @@ function CreateOverrideForm({
           significantDeviationWarning contract exactly: the server's own
           warning text and officialDefault are shown verbatim, never
           reworded, and the resend only fires on this explicit click. */}
-      <Modal open={pending !== null} onClose={() => setPending(null)} title="تأكيد الانحراف عن القيمة الرسمية">
+      <Modal open={pending !== null} onClose={() => setPending(null)} title={t("compliancePage.createOverrideForm.confirmModal.title")}>
         {pending && (
           <div className="space-y-3">
             <p className="text-sm text-stone-700">{pending.warning}</p>
             <dl className="grid grid-cols-2 gap-2 text-sm">
-              <Field label="القيمة الرسمية" value={renderRawValue(pending.officialDefault)} />
-              <Field label="القيمة المطلوبة" value={renderRawValue(pending.value)} />
+              <Field label={t("compliancePage.createOverrideForm.confirmModal.officialValue")} value={renderRawValue(t, pending.officialDefault)} />
+              <Field label={t("compliancePage.createOverrideForm.confirmModal.requestedValue")} value={renderRawValue(t, pending.value)} />
             </dl>
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="secondary" size="sm" onClick={() => setPending(null)}>
-                إلغاء
+                {t("common.cancel")}
               </Button>
               <Button size="sm" disabled={submitting} onClick={() => submit(true)}>
-                {submitting ? "جارٍ التأكيد..." : "تأكيد المتابعة"}
+                {submitting ? t("compliancePage.createOverrideForm.confirmModal.confirming") : t("compliancePage.createOverrideForm.confirmModal.confirm")}
               </Button>
             </div>
           </div>
@@ -768,36 +783,37 @@ function HistoryTab({
   overrideHistory: ComplianceOverride[] | null;
   history: ComplianceAuditEvent[] | null;
 }) {
+  const { t, locale } = useTranslation();
   return (
     <div className="space-y-5">
       <Card className="p-5">
-        <h3 className="mb-3 font-semibold text-stone-700">سجل الاستثناءات (نشطة + معاد تعيينها)</h3>
+        <h3 className="mb-3 font-semibold text-stone-700">{t("compliancePage.historyTab.overrideHistoryHeading")}</h3>
         {!overrideHistory ? (
           <Skeleton rows={3} />
         ) : overrideHistory.length === 0 ? (
-          <EmptyState message="لا يوجد سجل استثناءات بعد." />
+          <EmptyState message={t("compliancePage.historyTab.overrideHistoryEmptyMessage")} />
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-stone-200 text-right text-stone-500">
-                  <th className="py-1.5">الإعداد</th>
-                  <th className="py-1.5">القيمة</th>
-                  <th className="py-1.5">الحالة</th>
-                  <th className="py-1.5">تاريخ الإنشاء</th>
-                  <th className="py-1.5">تاريخ إعادة التعيين</th>
+                  <th className="py-1.5">{t("compliancePage.overridesTab.columns.setting")}</th>
+                  <th className="py-1.5">{t("compliancePage.historyTab.columns.value")}</th>
+                  <th className="py-1.5">{t("compliancePage.fields.status")}</th>
+                  <th className="py-1.5">{t("compliancePage.historyTab.columns.createdAt")}</th>
+                  <th className="py-1.5">{t("compliancePage.historyTab.columns.resetAt")}</th>
                 </tr>
               </thead>
               <tbody>
                 {overrideHistory.map((o) => (
                   <tr key={o.id} className="border-b border-stone-100">
                     <td className="py-1.5">{overrideKeyLabel(o.settingKey)}</td>
-                    <td className="py-1.5">{renderRawValue(o.overrideValue)}</td>
+                    <td className="py-1.5">{renderRawValue(t, o.overrideValue)}</td>
                     <td className="py-1.5">
                       <Badge tone={overrideStatusTone[o.status]}>{o.status}</Badge>
                     </td>
-                    <td className="py-1.5">{formatDate(o.createdAt)}</td>
-                    <td className="py-1.5">{o.resetAt ? formatDate(o.resetAt) : "—"}</td>
+                    <td className="py-1.5">{formatDate(o.createdAt, locale)}</td>
+                    <td className="py-1.5">{o.resetAt ? formatDate(o.resetAt, locale) : "—"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -807,17 +823,17 @@ function HistoryTab({
       </Card>
 
       <Card className="p-5">
-        <h3 className="mb-3 font-semibold text-stone-700">سجل التدقيق العام للامتثال الضريبي</h3>
+        <h3 className="mb-3 font-semibold text-stone-700">{t("compliancePage.historyTab.auditHeading")}</h3>
         {!history ? (
           <Skeleton rows={3} />
         ) : history.length === 0 ? (
-          <EmptyState message="لا يوجد سجل تدقيق بعد." />
+          <EmptyState message={t("compliancePage.historyTab.auditEmptyMessage")} />
         ) : (
           <ul className="space-y-2">
             {history.map((e) => (
               <li key={e.id} className="flex items-baseline justify-between border-b border-stone-100 pb-2 text-sm">
                 <span className="text-stone-700">{e.action}</span>
-                <span className="text-stone-400">{formatDateTime(e.createdAt)}</span>
+                <span className="text-stone-400">{formatDateTime(e.createdAt, locale)}</span>
               </li>
             ))}
           </ul>
