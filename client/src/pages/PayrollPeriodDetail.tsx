@@ -33,14 +33,8 @@ import type {
   PayrollPeriodWithRecords,
   PayrollRecord,
 } from "../api/types";
+import { useTranslation } from "../i18n/I18nProvider";
 
-const statusLabel: Record<PayrollPeriodStatus, string> = {
-  draft: "مسودة",
-  submitted: "بانتظار الاعتماد",
-  approved: "معتمدة",
-  posted: "مرحّلة",
-  rejected: "مرفوضة",
-};
 const statusTone: Record<PayrollPeriodStatus, "neutral" | "warning" | "success" | "danger"> = {
   draft: "neutral",
   submitted: "warning",
@@ -63,6 +57,7 @@ const EDITABLE_STATUSES: PayrollPeriodStatus[] = ["draft", "rejected"];
 // records have no status of their own; editability is governed entirely by
 // this period's status.
 export function PayrollPeriodDetail() {
+  const { t, locale } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const [period, setPeriod] = useState<PayrollPeriodWithRecords | null>(null);
   const [employees, setEmployees] = useState<Employee[] | null>(null);
@@ -79,7 +74,7 @@ export function PayrollPeriodDetail() {
     setPeriod(null);
     getPayrollPeriod(id)
       .then(setPeriod)
-      .catch((err) => setError(err instanceof Error ? err.message : "تعذّر تحميل فترة الرواتب"));
+      .catch((err) => setError(err instanceof Error ? err.message : t("payrollPeriodDetailPage.loadError")));
   }
   useEffect(load, [id]);
   useEffect(() => {
@@ -110,7 +105,7 @@ export function PayrollPeriodDetail() {
       await submitPayrollPeriod(period.id);
       load();
     } catch (err) {
-      setActionError(err instanceof ApiError ? err.message : "تعذّر إرسال الفترة");
+      setActionError(err instanceof ApiError ? err.message : t("payrollPeriodDetailPage.submitError"));
     } finally {
       setActionBusy(false);
     }
@@ -124,7 +119,7 @@ export function PayrollPeriodDetail() {
       await approvePayrollPeriod(period.id);
       load();
     } catch (err) {
-      setActionError(err instanceof ApiError ? err.message : "تعذّر اعتماد الفترة");
+      setActionError(err instanceof ApiError ? err.message : t("payrollPeriodDetailPage.approveError"));
     } finally {
       setActionBusy(false);
     }
@@ -139,7 +134,7 @@ export function PayrollPeriodDetail() {
       setShowRejectModal(false);
       load();
     } catch (err) {
-      setActionError(err instanceof ApiError ? err.message : "تعذّر رفض الفترة");
+      setActionError(err instanceof ApiError ? err.message : t("payrollPeriodDetailPage.rejectError"));
     } finally {
       setActionBusy(false);
     }
@@ -153,7 +148,7 @@ export function PayrollPeriodDetail() {
       await postPayrollPeriod(period.id);
       load();
     } catch (err) {
-      setActionError(err instanceof ApiError ? err.message : "تعذّر ترحيل تكلفة العمالة");
+      setActionError(err instanceof ApiError ? err.message : t("payrollPeriodDetailPage.postError"));
       throw err;
     } finally {
       setActionBusy(false);
@@ -161,18 +156,18 @@ export function PayrollPeriodDetail() {
   }
 
   const columns: FinancialColumn<PayrollRecord>[] = [
-    { key: "employee", header: "الموظف", render: (r) => r.employee.name },
-    { key: "employeeNumber", header: "الرقم", render: (r) => r.employee.employeeNumber },
-    { key: "grossAmount", header: "الأساسي", render: (r) => formatMoney(r.grossAmount) },
-    { key: "deductionsAmount", header: "الخصومات", render: (r) => formatMoney(r.deductionsAmount) },
-    { key: "netAmount", header: "الصافي", render: (r) => formatMoney(r.netAmount) },
+    { key: "employee", header: t("payrollPeriodDetailPage.columns.employee"), render: (r) => r.employee.name },
+    { key: "employeeNumber", header: t("payrollPeriodDetailPage.columns.employeeNumber"), render: (r) => r.employee.employeeNumber },
+    { key: "grossAmount", header: t("payrollPeriodDetailPage.columns.grossAmount"), render: (r) => formatMoney(r.grossAmount, undefined, locale) },
+    { key: "deductionsAmount", header: t("payrollPeriodDetailPage.columns.deductionsAmount"), render: (r) => formatMoney(r.deductionsAmount, undefined, locale) },
+    { key: "netAmount", header: t("payrollPeriodDetailPage.columns.netAmount"), render: (r) => formatMoney(r.netAmount, undefined, locale) },
   ];
 
   return (
     <Layout>
       <div className="mb-4">
         <Link to="/payroll" className="text-sm text-primary hover:underline">
-          العودة إلى الرواتب
+          {t("payrollPeriodDetailPage.backToPayroll")}
         </Link>
       </div>
 
@@ -182,24 +177,24 @@ export function PayrollPeriodDetail() {
       {period && (
         <>
           <PageHeader
-            title={`رواتب ${formatDate(period.periodStart)} – ${formatDate(period.periodEnd)}`}
-            subtitle="سجل الرواتب الداخلي لهذه الفترة."
+            title={t("payrollPeriodDetailPage.title", { start: formatDate(period.periodStart, locale), end: formatDate(period.periodEnd, locale) })}
+            subtitle={t("payrollPeriodDetailPage.subtitle")}
             actions={
               <div className="flex items-center gap-2">
-                <Badge tone={statusTone[period.status]}>{statusLabel[period.status]}</Badge>
+                <Badge tone={statusTone[period.status]}>{t(`payrollPage.status.${period.status}`)}</Badge>
                 <Can permission="payroll.manage">
                   {period.status === "draft" || period.status === "rejected" ? (
                     <Button size="sm" onClick={onSubmitPeriod} disabled={actionBusy}>
-                      إرسال للاعتماد
+                      {t("payrollPeriodDetailPage.submitForApproval")}
                     </Button>
                   ) : null}
                   {period.status === "submitted" ? (
                     <>
                       <Button size="sm" onClick={onApprovePeriod} disabled={actionBusy}>
-                        اعتماد
+                        {t("payrollPeriodDetailPage.approve")}
                       </Button>
                       <Button size="sm" variant="secondary" onClick={() => setShowRejectModal(true)} disabled={actionBusy}>
-                        رفض
+                        {t("payrollPeriodDetailPage.reject")}
                       </Button>
                     </>
                   ) : null}
@@ -221,21 +216,21 @@ export function PayrollPeriodDetail() {
 
           {period.status === "rejected" && period.rejectionReason && (
             <div className="mb-4 rounded-md border border-danger-200 bg-danger-50 px-3 py-2 text-sm text-danger-700">
-              سبب الرفض: {period.rejectionReason}
+              {t("payrollPeriodDetailPage.rejectionReasonLabel", { reason: period.rejectionReason })}
             </div>
           )}
 
           {!editable && (
             <div className="mb-4 rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-sm text-stone-600">
-              لا يمكن تعديل سجلات هذه الفترة — تم إرسالها أو اعتمادها بالفعل.
+              {t("payrollPeriodDetailPage.notEditableNotice")}
             </div>
           )}
 
           <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-4">
-            <MetricCard label="عدد الموظفين" value={String(period.summary.employeeCount)} />
-            <MetricCard label="إجمالي الأساسي" value={formatMoney(period.summary.totalGross)} />
-            <MetricCard label="إجمالي الخصومات" value={formatMoney(period.summary.totalDeductions)} />
-            <MetricCard label="صافي الرواتب" value={formatMoney(period.summary.totalNet)} tone="success" />
+            <MetricCard label={t("payrollPeriodDetailPage.metrics.employeeCount")} value={String(period.summary.employeeCount)} />
+            <MetricCard label={t("payrollPeriodDetailPage.metrics.totalGross")} value={formatMoney(period.summary.totalGross, undefined, locale)} />
+            <MetricCard label={t("payrollPeriodDetailPage.metrics.totalDeductions")} value={formatMoney(period.summary.totalDeductions, undefined, locale)} />
+            <MetricCard label={t("payrollPeriodDetailPage.metrics.totalNet")} value={formatMoney(period.summary.totalNet, undefined, locale)} tone="success" />
           </div>
 
           {period.status === "posted" && (
@@ -248,7 +243,7 @@ export function PayrollPeriodDetail() {
             <Can permission="payroll.manage">
               <div className="mb-4">
                 <Button size="sm" onClick={() => setShowAdd((v) => !v)}>
-                  {showAdd ? "إلغاء" : "+ إضافة سجل راتب"}
+                  {showAdd ? t("common.cancel") : t("payrollPeriodDetailPage.addRecord")}
                 </Button>
               </div>
               {showAdd && employees && (
@@ -271,11 +266,11 @@ export function PayrollPeriodDetail() {
             columns={columns}
             rows={period.records}
             rowKey={(r) => r.id}
-            emptyMessage="لا توجد سجلات رواتب في هذه الفترة بعد"
+            emptyMessage={t("payrollPeriodDetailPage.recordsEmptyMessage")}
             rowActions={(r) => (
               <div className="flex justify-end gap-3">
                 <Link to={`/payroll/${period.id}/records/${r.id}/allocate`} className="text-sm text-primary hover:underline">
-                  توزيع
+                  {t("payrollPeriodDetailPage.allocateLink")}
                 </Link>
                 {editable && (
                   <Can permission="payroll.manage">
@@ -309,6 +304,7 @@ function AddRecordForm({
   existingEmployeeIds: string[];
   onCreated: () => void;
 }) {
+  const { t, locale } = useTranslation();
   const available = useMemo(
     () => employees.filter((e) => !existingEmployeeIds.includes(e.id)),
     [employees, existingEmployeeIds],
@@ -327,7 +323,7 @@ function AddRecordForm({
     e.preventDefault();
     setError(null);
     if (!employeeId) {
-      setError("اختر الموظف");
+      setError(t("payrollPeriodDetailPage.form.selectEmployeeError"));
       return;
     }
     setSubmitting(true);
@@ -340,7 +336,7 @@ function AddRecordForm({
       });
       onCreated();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر إضافة سجل الراتب");
+      setError(err instanceof ApiError ? err.message : t("payrollPeriodDetailPage.form.genericError"));
     } finally {
       setSubmitting(false);
     }
@@ -349,7 +345,7 @@ function AddRecordForm({
   if (available.length === 0) {
     return (
       <Card className="p-5">
-        <p className="text-sm text-stone-500">تمت إضافة جميع الموظفين إلى هذه الفترة بالفعل.</p>
+        <p className="text-sm text-stone-500">{t("payrollPeriodDetailPage.form.allEmployeesAdded")}</p>
       </Card>
     );
   }
@@ -378,7 +374,7 @@ function AddRecordForm({
           type="number"
           min="0"
           step="0.01"
-          placeholder="الأساسي"
+          placeholder={t("payrollPeriodDetailPage.form.grossPlaceholder")}
           value={grossAmount}
           onChange={(e) => setGrossAmount(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
@@ -387,17 +383,17 @@ function AddRecordForm({
           type="number"
           min="0"
           step="0.01"
-          placeholder="الخصومات (اختياري)"
+          placeholder={t("payrollPeriodDetailPage.form.deductionsPlaceholder")}
           value={deductionsAmount}
           onChange={(e) => setDeductionsAmount(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
         />
         <div className="flex items-center justify-between rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-sm">
-          <span className="text-stone-500">الصافي</span>
-          <span className="font-medium text-stone-800">{formatMoney(netPreview)}</span>
+          <span className="text-stone-500">{t("payrollPeriodDetailPage.form.netLabel")}</span>
+          <span className="font-medium text-stone-800">{formatMoney(netPreview, undefined, locale)}</span>
         </div>
         <Button type="submit" disabled={submitting} className="sm:col-span-4">
-          {submitting ? "جارٍ الحفظ..." : "حفظ السجل"}
+          {submitting ? t("payrollPeriodDetailPage.form.saving") : t("payrollPeriodDetailPage.form.save")}
         </Button>
       </form>
     </Card>
@@ -405,6 +401,7 @@ function AddRecordForm({
 }
 
 function RecordRowActions({ record, onChanged }: { record: PayrollRecord; onChanged: () => void }) {
+  const { t } = useTranslation();
   const [editing, setEditing] = useState(false);
   const [grossAmount, setGrossAmount] = useState(record.grossAmount);
   const [deductionsAmount, setDeductionsAmount] = useState(record.deductionsAmount);
@@ -422,7 +419,7 @@ function RecordRowActions({ record, onChanged }: { record: PayrollRecord; onChan
       setEditing(false);
       onChanged();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر حفظ التعديل");
+      setError(err instanceof ApiError ? err.message : t("payrollPeriodDetailPage.rowActions.saveError"));
     } finally {
       setBusy(false);
     }
@@ -450,10 +447,10 @@ function RecordRowActions({ record, onChanged }: { record: PayrollRecord; onChan
             className="w-24 rounded-md border border-stone-300 px-2 py-1 text-xs"
           />
           <Button size="sm" onClick={onSave} disabled={busy}>
-            حفظ
+            {t("common.save")}
           </Button>
           <Button size="sm" variant="secondary" onClick={() => setEditing(false)} disabled={busy}>
-            إلغاء
+            {t("common.cancel")}
           </Button>
         </div>
       </div>
@@ -464,7 +461,7 @@ function RecordRowActions({ record, onChanged }: { record: PayrollRecord; onChan
     <div className="flex justify-end gap-3">
       {error && <span className="text-xs text-danger-600">{error}</span>}
       <button type="button" onClick={() => setEditing(true)} className="text-sm text-primary hover:underline">
-        تعديل
+        {t("common.edit")}
       </button>
     </div>
   );
@@ -494,6 +491,7 @@ function RejectPeriodModal({
   onClose: () => void;
   onReject: (reason: string) => Promise<void>;
 }) {
+  const { t } = useTranslation();
   const [reason, setReason] = useState("");
 
   function handleSubmit(e: FormEvent) {
@@ -503,11 +501,11 @@ function RejectPeriodModal({
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="رفض فترة الرواتب" className="mx-4 w-full max-w-md">
+    <Modal open={open} onClose={onClose} title={t("payrollPeriodDetailPage.rejectModal.title")} className="mx-4 w-full max-w-md">
       <form onSubmit={handleSubmit} className="space-y-3">
         <textarea
           required
-          placeholder="سبب الرفض"
+          placeholder={t("payrollPeriodDetailPage.rejectModal.reasonPlaceholder")}
           value={reason}
           onChange={(e) => setReason(e.target.value)}
           className="w-full rounded-md border border-stone-300 px-3 py-2 text-sm"
@@ -515,10 +513,10 @@ function RejectPeriodModal({
         />
         <div className="flex justify-end gap-2">
           <Button type="button" variant="secondary" size="sm" onClick={onClose} disabled={busy}>
-            إلغاء
+            {t("common.cancel")}
           </Button>
           <Button type="submit" size="sm" variant="danger" disabled={busy || !reason.trim()}>
-            {busy ? "جارٍ الرفض..." : "تأكيد الرفض"}
+            {busy ? t("payrollPeriodDetailPage.rejectModal.rejecting") : t("payrollPeriodDetailPage.rejectModal.confirm")}
           </Button>
         </div>
       </form>
@@ -535,6 +533,7 @@ function PostAction({
   busy: boolean;
   onPost: () => Promise<void>;
 }) {
+  const { t, locale } = useTranslation();
   const [open, setOpen] = useState(false);
   const [allocations, setAllocations] = useState<LaborAllocation[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -546,7 +545,7 @@ function PostAction({
     setAllocations(null);
     listLaborAllocations({ payrollPeriodId: period.id })
       .then(setAllocations)
-      .catch((err) => setLoadError(err instanceof ApiError ? err.message : "تعذّر تحميل بيانات التوزيع"));
+      .catch((err) => setLoadError(err instanceof ApiError ? err.message : t("payrollPeriodDetailPage.postAction.loadError")));
   }
 
   const totalToPost = allocations ? allocations.reduce((sum, a) => sum + Number(a.amount), 0) : 0;
@@ -559,46 +558,43 @@ function PostAction({
       await onPost();
       setOpen(false);
     } catch (err) {
-      setConfirmError(err instanceof ApiError ? err.message : "تعذّر ترحيل تكلفة العمالة");
+      setConfirmError(err instanceof ApiError ? err.message : t("payrollPeriodDetailPage.postError"));
     }
   }
 
   return (
     <>
       <Button size="sm" onClick={openPreview} disabled={busy}>
-        ترحيل تكلفة العمالة
+        {t("payrollPeriodDetailPage.postAction.trigger")}
       </Button>
-      <Modal open={open} onClose={() => setOpen(false)} title="تأكيد ترحيل تكلفة العمالة" className="mx-4 w-full max-w-lg">
+      <Modal open={open} onClose={() => setOpen(false)} title={t("payrollPeriodDetailPage.postAction.modalTitle")} className="mx-4 w-full max-w-lg">
         {loadError && <ErrorState message={loadError} />}
         {!loadError && !allocations && <Skeleton rows={3} />}
         {allocations && (
           <div className="space-y-4">
-            <p className="text-sm text-stone-600">
-              سيؤدي هذا إلى إنشاء مصروفات فعلية على المشاريع المتأثرة، وستدخل ضمن التكلفة الفعلية لهذه المشاريع فوراً. لا يمكن
-              التراجع عن هذا الإجراء إلا عبر عملية عكس منفصلة لكل توزيع على حدة.
-            </p>
+            <p className="text-sm text-stone-600">{t("payrollPeriodDetailPage.postAction.warning")}</p>
             <div className="grid grid-cols-2 gap-3">
-              <MetricCard label="عدد التوزيعات" value={String(allocations.length)} />
-              <MetricCard label="إجمالي المبلغ المرحَّل" value={formatMoney(totalToPost)} tone="success" />
-              <MetricCard label="المبلغ غير الموزَّع" value={formatMoney(unallocated)} />
-              <MetricCard label="عدد المشاريع المتأثرة" value={String(projectNames.length)} />
+              <MetricCard label={t("payrollPeriodDetailPage.postAction.metrics.allocationCount")} value={String(allocations.length)} />
+              <MetricCard label={t("payrollPeriodDetailPage.postAction.metrics.totalAmount")} value={formatMoney(totalToPost, undefined, locale)} tone="success" />
+              <MetricCard label={t("payrollPeriodDetailPage.postAction.metrics.unallocated")} value={formatMoney(unallocated, undefined, locale)} />
+              <MetricCard label={t("payrollPeriodDetailPage.postAction.metrics.projectCount")} value={String(projectNames.length)} />
             </div>
             {projectNames.length > 0 && (
               <div className="text-sm text-stone-600">
-                <span className="font-medium text-stone-700">المشاريع: </span>
-                {projectNames.join("، ")}
+                <span className="font-medium text-stone-700">{t("payrollPeriodDetailPage.postAction.projectsLabel")}</span>
+                {projectNames.join(t("payrollPeriodDetailPage.postAction.listSeparator"))}
               </div>
             )}
             {allocations.length === 0 && (
-              <p className="text-sm text-danger-600">لا يوجد أي توزيع تكلفة عمالة لترحيله في هذه الفترة.</p>
+              <p className="text-sm text-danger-600">{t("payrollPeriodDetailPage.postAction.noAllocations")}</p>
             )}
             {confirmError && <ErrorState message={confirmError} />}
             <div className="flex justify-end gap-2">
               <Button variant="secondary" size="sm" onClick={() => setOpen(false)} disabled={busy}>
-                إلغاء
+                {t("common.cancel")}
               </Button>
               <Button size="sm" onClick={onConfirm} disabled={busy || allocations.length === 0}>
-                {busy ? "جارٍ الترحيل..." : "تأكيد الترحيل"}
+                {busy ? t("payrollPeriodDetailPage.postAction.posting") : t("payrollPeriodDetailPage.postAction.confirm")}
               </Button>
             </div>
           </div>
@@ -623,6 +619,7 @@ function PostedSummary({
   postings: LaborCostPosting[] | null;
   onReversed: () => void;
 }) {
+  const { t, locale } = useTranslation();
   const [reverseTarget, setReverseTarget] = useState<LaborCostPosting | null>(null);
   const [reverseBusy, setReverseBusy] = useState(false);
   const [reverseError, setReverseError] = useState<string | null>(null);
@@ -639,31 +636,31 @@ function PostedSummary({
       setReverseTarget(null);
       onReversed();
     } catch (err) {
-      setReverseError(err instanceof ApiError ? err.message : "تعذّر عكس الترحيل");
+      setReverseError(err instanceof ApiError ? err.message : t("payrollPeriodDetailPage.postedSummary.reverseError"));
     } finally {
       setReverseBusy(false);
     }
   }
 
   const columns: FinancialColumn<LaborCostPosting>[] = [
-    { key: "project", header: "المشروع", render: (p) => p.laborAllocation?.project.name ?? "—" },
-    { key: "costCode", header: "بند التكلفة", render: (p) => p.laborAllocation?.costCode?.code ?? "—" },
+    { key: "project", header: t("payrollPeriodDetailPage.postedSummary.columns.project"), render: (p) => p.laborAllocation?.project.name ?? "—" },
+    { key: "costCode", header: t("payrollPeriodDetailPage.postedSummary.columns.costCode"), render: (p) => p.laborAllocation?.costCode?.code ?? "—" },
     {
       key: "amount",
-      header: "المبلغ",
-      render: (p) => formatMoney(p.expense?.amount ?? "0"),
+      header: t("payrollPeriodDetailPage.postedSummary.columns.amount"),
+      render: (p) => formatMoney(p.expense?.amount ?? "0", undefined, locale),
     },
-    { key: "kind", header: "النوع", render: (p) => (p.kind === "posting" ? "ترحيل" : "عكس") },
-    { key: "date", header: "التاريخ", render: (p) => formatDate(p.postedAt) },
+    { key: "kind", header: t("payrollPeriodDetailPage.postedSummary.columns.kind"), render: (p) => t(`payrollPeriodDetailPage.postedSummary.kind.${p.kind === "posting" ? "posting" : "reversal"}`) },
+    { key: "date", header: t("payrollPeriodDetailPage.postedSummary.columns.date"), render: (p) => formatDate(p.postedAt, locale) },
   ];
 
   return (
     <Card className="p-5">
-      <h2 className="mb-3 font-semibold text-stone-800">ترحيل تكلفة العمالة</h2>
+      <h2 className="mb-3 font-semibold text-stone-800">{t("payrollPeriodDetailPage.postAction.trigger")}</h2>
       <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <MetricCard label="الحالة" value="مرحّلة" tone="success" />
-        <MetricCard label="تاريخ الترحيل" value={period.postedAt ? formatDate(period.postedAt) : "—"} />
-        <MetricCard label="إجمالي المبلغ المرحّل" value={formatMoney(totalPosted)} tone="success" />
+        <MetricCard label={t("payrollPeriodDetailPage.postedSummary.metrics.status")} value={t("payrollPage.status.posted")} tone="success" />
+        <MetricCard label={t("payrollPeriodDetailPage.postedSummary.metrics.postedDate")} value={period.postedAt ? formatDate(period.postedAt, locale) : "—"} />
+        <MetricCard label={t("payrollPeriodDetailPage.postedSummary.metrics.totalPosted")} value={formatMoney(totalPosted, undefined, locale)} tone="success" />
       </div>
 
       {reverseError && (
@@ -678,7 +675,7 @@ function PostedSummary({
           columns={columns}
           rows={postings}
           rowKey={(p) => p.id}
-          emptyMessage="لا يوجد سجل ترحيل لعرضه"
+          emptyMessage={t("payrollPeriodDetailPage.postedSummary.emptyMessage")}
           rowActions={(p) =>
             p.kind === "posting" && !reversedPostingIds.has(p.id) ? (
               <Can permission="payroll.post">
@@ -687,7 +684,7 @@ function PostedSummary({
                   onClick={() => setReverseTarget(p)}
                   className="text-sm text-danger-600 hover:underline"
                 >
-                  عكس
+                  {t("payrollPeriodDetailPage.postedSummary.reverseAction")}
                 </button>
               </Can>
             ) : null
@@ -697,9 +694,9 @@ function PostedSummary({
 
       <ConfirmDialog
         open={reverseTarget !== null}
-        title="تأكيد عكس الترحيل"
-        message="سيؤدي هذا إلى إنشاء قيد مصروف مقابل بمبلغ سالب يلغي الأثر المالي لهذا الترحيل. لن يتم حذف أو تعديل السجل الأصلي — يبقى محفوظاً في السجل المالي بالكامل."
-        confirmLabel={reverseBusy ? "جارٍ العكس..." : "تأكيد العكس"}
+        title={t("payrollPeriodDetailPage.postedSummary.reverseConfirm.title")}
+        message={t("payrollPeriodDetailPage.postedSummary.reverseConfirm.message")}
+        confirmLabel={reverseBusy ? t("payrollPeriodDetailPage.postedSummary.reverseConfirm.reversing") : t("payrollPeriodDetailPage.postedSummary.reverseConfirm.confirm")}
         destructive
         onConfirm={onConfirmReverse}
         onCancel={() => setReverseTarget(null)}
