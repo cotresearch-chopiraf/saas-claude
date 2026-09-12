@@ -31,6 +31,7 @@ import type {
   ZatcaComplianceDocumentType,
   ZatcaInvoiceFamily,
 } from "../../api/types";
+import { useTranslation } from "../../i18n/I18nProvider";
 
 // ZATCA Customer Onboarding & Compliance Center — the real, customer-facing
 // CSR -> OTP -> Compliance CSID -> Compliance Invoice -> Production CSID ->
@@ -48,13 +49,14 @@ import type {
 // workflow (each EGS unit has its own CSR/CSID/certificate lifecycle).
 
 function ErrorPanel({ presented }: { presented: PresentedZatcaError }) {
+  const { t } = useTranslation();
   return (
     <div className="rounded-md border border-danger-200 bg-danger-50 p-3 text-sm text-danger-800">
       <p className="font-medium">{presented.title}</p>
       <p className="mt-1">{presented.message}</p>
       <p className="mt-1 text-xs text-danger-600">
         {presented.retryGuidanceText}
-        {presented.needsAdminOrSupport && " قد تحتاجين لتدخّل مسؤول الشركة أو الدعم الفني."}
+        {presented.needsAdminOrSupport && t("zatcaOnboardingPanel.needsAdminOrSupportSuffix")}
       </p>
     </div>
   );
@@ -65,34 +67,25 @@ function ErrorPanel({ presented }: { presented: PresentedZatcaError }) {
 // anywhere, never logged, never stored in localStorage/sessionStorage. See
 // this Center's overall security review for the full audit of this claim.
 function OtpInput({ value, onChange, egsUnitName }: { value: string; onChange: (v: string) => void; egsUnitName: string }) {
+  const { t } = useTranslation();
   return (
     <label className="block text-sm text-stone-600">
-      رمز التحقق (OTP) — الخاص بوحدة "{egsUnitName}"
+      {t("zatcaOnboardingPanel.otp.label", { name: egsUnitName })}
       <input
         type="password"
         autoComplete="off"
         required
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        placeholder="أدخلي رمز OTP من بوابة فاتورة (ZATCA)"
+        placeholder={t("zatcaOnboardingPanel.otp.placeholder")}
         className="mt-1 block w-full rounded-md border border-stone-300 px-3 py-2 text-sm"
       />
       <span className="mt-1 block text-xs text-stone-400">
-        احصلي على هذا الرمز من بوابة فاتورة (Fatoora) الخاصة بـ ZATCA خارج MIDAD، ثم أدخليه هنا فقط. لا يُخزَّن هذا الرمز
-        أو يُسجَّل في أي مكان — يُستخدم لمرة واحدة فقط عند الإرسال.
+        {t("zatcaOnboardingPanel.otp.description")}
       </span>
     </label>
   );
 }
-
-const csidStatusLabel: Record<ZatcaEgsUnit["csidStatus"], string> = {
-  none: "لا يوجد",
-  compliance_pending: "بانتظار شهادة الامتثال",
-  compliance_issued: "تم إصدار شهادة الامتثال",
-  production_issued: "تم إصدار شهادة الإنتاج",
-  expired: "منتهية الصلاحية",
-  revoked: "ملغاة",
-};
 
 export function ZatcaOnboardingPanel({
   unit,
@@ -103,21 +96,22 @@ export function ZatcaOnboardingPanel({
   identity: ZatcaTenantIdentity;
   onChanged: () => void;
 }) {
+  const { t } = useTranslation();
   const [tab, setTab] = useState("csr");
 
   return (
     <div className="rounded-lg border border-stone-200 bg-stone-50/50 p-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm font-medium text-stone-700">الإعداد الحقيقي مع ZATCA لوحدة "{unit.name}"</p>
-        <Badge tone="neutral">حالة الشهادة: {csidStatusLabel[unit.csidStatus]}</Badge>
+        <p className="text-sm font-medium text-stone-700">{t("zatcaOnboardingPanel.header.title", { name: unit.name })}</p>
+        <Badge tone="neutral">{t("zatcaOnboardingPanel.header.certificateStatus", { status: t(`zatcaSettingsPage.csidStatus.${unit.csidStatus}`) })}</Badge>
       </div>
       <Tabs
         items={[
-          { key: "csr", label: "١. طلب CSR" },
-          { key: "compliance-csid", label: "٢. شهادة الامتثال" },
-          { key: "compliance-invoice", label: "٣. فاتورة اختبار الامتثال" },
-          { key: "production-csid", label: "٤. تفعيل الإنتاج" },
-          { key: "renewal", label: "٥. التجديد" },
+          { key: "csr", label: t("zatcaOnboardingPanel.tabs.csr") },
+          { key: "compliance-csid", label: t("zatcaOnboardingPanel.tabs.complianceCsid") },
+          { key: "compliance-invoice", label: t("zatcaOnboardingPanel.tabs.complianceInvoice") },
+          { key: "production-csid", label: t("zatcaOnboardingPanel.tabs.productionCsid") },
+          { key: "renewal", label: t("zatcaOnboardingPanel.tabs.renewal") },
         ]}
         active={tab}
         onChange={setTab}
@@ -136,6 +130,7 @@ export function ZatcaOnboardingPanel({
 // --- Step 1: CSR ------------------------------------------------------------
 
 function CsrStep({ unit, identity, onChanged }: { unit: ZatcaEgsUnit; identity: ZatcaTenantIdentity; onChanged: () => void }) {
+  const { t, locale } = useTranslation();
   const [current, setCurrent] = useState<ZatcaCsrInstance | null | undefined>(undefined);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -161,7 +156,7 @@ function CsrStep({ unit, identity, onChanged }: { unit: ZatcaEgsUnit; identity: 
     setLoadError(null);
     getZatcaCsrInstance(unit.id)
       .then((res) => setCurrent(res.csrInstance))
-      .catch((err) => setLoadError(err instanceof Error ? err.message : "تعذّر تحميل حالة CSR"));
+      .catch((err) => setLoadError(err instanceof Error ? err.message : t("zatcaOnboardingPanel.csr.loadError")));
   }
   useEffect(load, [unit.id]);
 
@@ -177,7 +172,7 @@ function CsrStep({ unit, identity, onChanged }: { unit: ZatcaEgsUnit; identity: 
       load();
       onChanged();
     } catch (err) {
-      setPresentedError(presentZatcaError(err, "تعذّر إنشاء طلب CSR"));
+      setPresentedError(presentZatcaError(err, t("zatcaOnboardingPanel.csr.genericError")));
     } finally {
       setSubmitting(false);
     }
@@ -188,60 +183,57 @@ function CsrStep({ unit, identity, onChanged }: { unit: ZatcaEgsUnit; identity: 
   return (
     <div className="space-y-3">
       {loadError && <ErrorState message={loadError} onRetry={load} />}
-      {current === null && <EmptyState message="لا يوجد طلب CSR لهذه الوحدة بعد." />}
+      {current === null && <EmptyState message={t("zatcaOnboardingPanel.csr.emptyMessage")} />}
       {current && (
         <div className="rounded-md bg-white p-3 text-sm text-stone-600 ring-1 ring-stone-200">
           <p>
-            يوجد طلب CSR حالي (نوع الفاتورة: {current.invoiceType}) — أُنشئ في {formatDateTime(current.generatedAt)}.
+            {t("zatcaOnboardingPanel.csr.currentInfo", { invoiceType: current.invoiceType, date: formatDateTime(current.generatedAt, locale) })}
           </p>
           <p className="mt-1 text-xs text-stone-400">
-            إنشاء طلب CSR جديد يستبدل هذا الطلب لغرض الإصدار (لن يُحذف السجل التاريخي).
+            {t("zatcaOnboardingPanel.csr.replaceHint")}
           </p>
         </div>
       )}
 
       {!showForm ? (
         <Button size="sm" variant="secondary" onClick={() => setShowForm(true)}>
-          {current ? "إنشاء طلب CSR جديد" : "بدء إنشاء طلب CSR"}
+          {current ? t("zatcaOnboardingPanel.csr.newRequest") : t("zatcaOnboardingPanel.csr.startRequest")}
         </Button>
       ) : (
         <form onSubmit={onSubmit} className="space-y-3 rounded-md bg-white p-4 ring-1 ring-stone-200">
           <p className="text-xs text-stone-500">
-            سيولّد MIDAD زوج مفاتيح حقيقي (ECDSA) وطلب توقيع شهادة (CSR) حقيقي لهذه الوحدة، ويُخزّن المفتاح الخاص بأمان
-            على الخادم — لن يظهر المفتاح الخاص في المتصفح أبداً.
+            {t("zatcaOnboardingPanel.csr.formIntro")}
           </p>
           <OtpInput value={otp} onChange={setOtp} egsUnitName={unit.name} />
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <TextField label="الاسم الشائع (Common Name)" value={fields.commonName} onChange={(v) => setFields({ ...fields, commonName: v })} />
+            <TextField label={t("zatcaOnboardingPanel.csr.fields.commonName")} value={fields.commonName} onChange={(v) => setFields({ ...fields, commonName: v })} />
             <TextField
-              label="الرقم الضريبي (يجب أن يطابق الرقم المسجّل للشركة)"
+              label={t("zatcaOnboardingPanel.csr.fields.organizationIdentifier")}
               value={fields.organizationIdentifier}
               onChange={(v) => setFields({ ...fields, organizationIdentifier: v })}
             />
-            <TextField label="اسم المنشأة" value={fields.organizationName} onChange={(v) => setFields({ ...fields, organizationName: v })} />
-            <TextField label="الوحدة التنظيمية (الفرع)" value={fields.organizationUnitName} onChange={(v) => setFields({ ...fields, organizationUnitName: v })} />
-            <TextField label="رمز الدولة (SA)" value={fields.countryCode} onChange={(v) => setFields({ ...fields, countryCode: v.toUpperCase() })} />
-            <TextField label="الرقم التسلسلي لوحدة الفوترة (EGS Serial Number)" value={fields.egsSerialNumber} onChange={(v) => setFields({ ...fields, egsSerialNumber: v })} />
-            <TextField label="نوع الفاتورة (TSXY، مثال: 1100)" value={fields.invoiceType} onChange={(v) => setFields({ ...fields, invoiceType: v })} />
-            <TextField label="الموقع" value={fields.location} onChange={(v) => setFields({ ...fields, location: v })} />
-            <TextField label="النشاط/القطاع" value={fields.industry} onChange={(v) => setFields({ ...fields, industry: v })} />
+            <TextField label={t("zatcaOnboardingPanel.csr.fields.organizationName")} value={fields.organizationName} onChange={(v) => setFields({ ...fields, organizationName: v })} />
+            <TextField label={t("zatcaOnboardingPanel.csr.fields.organizationUnitName")} value={fields.organizationUnitName} onChange={(v) => setFields({ ...fields, organizationUnitName: v })} />
+            <TextField label={t("zatcaOnboardingPanel.csr.fields.countryCode")} value={fields.countryCode} onChange={(v) => setFields({ ...fields, countryCode: v.toUpperCase() })} />
+            <TextField label={t("zatcaOnboardingPanel.csr.fields.egsSerialNumber")} value={fields.egsSerialNumber} onChange={(v) => setFields({ ...fields, egsSerialNumber: v })} />
+            <TextField label={t("zatcaOnboardingPanel.csr.fields.invoiceType")} value={fields.invoiceType} onChange={(v) => setFields({ ...fields, invoiceType: v })} />
+            <TextField label={t("zatcaOnboardingPanel.csr.fields.location")} value={fields.location} onChange={(v) => setFields({ ...fields, location: v })} />
+            <TextField label={t("zatcaOnboardingPanel.csr.fields.industry")} value={fields.industry} onChange={(v) => setFields({ ...fields, industry: v })} />
           </div>
 
           <button type="button" onClick={() => setShowOids((v) => !v)} className="text-xs text-primary underline">
-            {showOids ? "إخفاء الإعدادات المتقدمة" : "إعدادات متقدمة (معرّفات OID لحقول ZATCA المخصصة)"}
+            {showOids ? t("zatcaOnboardingPanel.csr.hideAdvanced") : t("zatcaOnboardingPanel.csr.showAdvanced")}
           </button>
           {showOids && (
             <div className="rounded-md bg-stone-50 p-3 text-xs text-stone-500">
               <p className="mb-2">
-                بعض حقول CSR (الرقم التسلسلي، نوع الفاتورة، الموقع، النشاط) هي حقول خاصة بـ ZATCA وليست معياراً عاماً —
-                معرّفاتها التقنية (OID) غير موثّقة رسمياً في هذه النسخة، ولا تُخمّنها MIDAD. إن لم تُدخليها، سيرفض
-                الخادم الطلب صراحةً بدلاً من تخمين قيمة قد تكون خاطئة.
+                {t("zatcaOnboardingPanel.csr.advancedHint")}
               </p>
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                <TextField label="OID — الرقم التسلسلي" value={oids.egsSerialNumber ?? ""} onChange={(v) => setOids({ ...oids, egsSerialNumber: v || undefined })} />
-                <TextField label="OID — نوع الفاتورة" value={oids.invoiceType ?? ""} onChange={(v) => setOids({ ...oids, invoiceType: v || undefined })} />
-                <TextField label="OID — الموقع" value={oids.location ?? ""} onChange={(v) => setOids({ ...oids, location: v || undefined })} />
-                <TextField label="OID — النشاط" value={oids.industry ?? ""} onChange={(v) => setOids({ ...oids, industry: v || undefined })} />
+                <TextField label={t("zatcaOnboardingPanel.csr.oidFields.egsSerialNumber")} value={oids.egsSerialNumber ?? ""} onChange={(v) => setOids({ ...oids, egsSerialNumber: v || undefined })} />
+                <TextField label={t("zatcaOnboardingPanel.csr.oidFields.invoiceType")} value={oids.invoiceType ?? ""} onChange={(v) => setOids({ ...oids, invoiceType: v || undefined })} />
+                <TextField label={t("zatcaOnboardingPanel.csr.oidFields.location")} value={oids.location ?? ""} onChange={(v) => setOids({ ...oids, location: v || undefined })} />
+                <TextField label={t("zatcaOnboardingPanel.csr.oidFields.industry")} value={oids.industry ?? ""} onChange={(v) => setOids({ ...oids, industry: v || undefined })} />
               </div>
             </div>
           )}
@@ -250,10 +242,10 @@ function CsrStep({ unit, identity, onChanged }: { unit: ZatcaEgsUnit; identity: 
 
           <div className="flex gap-2">
             <Button type="submit" size="sm" disabled={submitting}>
-              {submitting ? "جارٍ الإنشاء..." : "إنشاء طلب CSR"}
+              {submitting ? t("zatcaOnboardingPanel.csr.creating") : t("zatcaOnboardingPanel.csr.create")}
             </Button>
             <Button type="button" size="sm" variant="secondary" onClick={() => setShowForm(false)}>
-              إلغاء
+              {t("common.cancel")}
             </Button>
           </div>
         </form>
@@ -261,10 +253,9 @@ function CsrStep({ unit, identity, onChanged }: { unit: ZatcaEgsUnit; identity: 
 
       {result && (
         <div className="rounded-md bg-success-50 p-3 text-sm text-success-800 ring-1 ring-success-200">
-          <p className="font-medium">تم إنشاء طلب CSR بنجاح.</p>
+          <p className="font-medium">{t("zatcaOnboardingPanel.csr.successHeading")}</p>
           <p className="mt-1 text-xs">
-            انسخي محتوى CSR أدناه لاستخدامه عند طلب شهادة الامتثال (الخطوة التالية) — لن يُعرض هذا الطلب مرة أخرى تلقائياً
-            بعد مغادرة الصفحة، لكن يمكنك استرجاع حالته (دون محتواه الكامل) من هنا لاحقاً.
+            {t("zatcaOnboardingPanel.csr.successDescription")}
           </p>
           <textarea readOnly rows={4} value={result.csrPem} className="mt-2 block w-full rounded-md border border-success-300 bg-white p-2 font-mono text-xs" />
         </div>
@@ -290,6 +281,7 @@ function TextField({ label, value, onChange }: { label: string; value: string; o
 // --- Step 2: Compliance CSID -------------------------------------------------
 
 function ComplianceCsidStep({ unit, onChanged }: { unit: ZatcaEgsUnit; onChanged: () => void }) {
+  const { t, locale } = useTranslation();
   const [lifecycle, setLifecycle] = useState<ZatcaComplianceLifecycle | null | undefined>(undefined);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [otp, setOtp] = useState("");
@@ -308,7 +300,7 @@ function ComplianceCsidStep({ unit, onChanged }: { unit: ZatcaEgsUnit; onChanged
     setLoadError(null);
     getZatcaComplianceLifecycle(unit.id)
       .then((res) => setLifecycle(res.complianceLifecycle))
-      .catch((err) => setLoadError(err instanceof Error ? err.message : "تعذّر تحميل حالة شهادة الامتثال"));
+      .catch((err) => setLoadError(err instanceof Error ? err.message : t("zatcaOnboardingPanel.complianceCsid.loadError")));
   }
   useEffect(load, [unit.id]);
 
@@ -323,7 +315,7 @@ function ComplianceCsidStep({ unit, onChanged }: { unit: ZatcaEgsUnit; onChanged
       setOtp("");
       load();
     } catch (err) {
-      setRequestError(presentZatcaError(err, "تعذّر طلب شهادة الامتثال"));
+      setRequestError(presentZatcaError(err, t("zatcaOnboardingPanel.complianceCsid.requestError")));
     } finally {
       setRequesting(false);
     }
@@ -340,7 +332,7 @@ function ComplianceCsidStep({ unit, onChanged }: { unit: ZatcaEgsUnit; onChanged
       setConfirmSecret("");
       onChanged();
     } catch (err) {
-      setConfirmError(presentZatcaError(err, "تعذّر تأكيد شهادة الامتثال"));
+      setConfirmError(presentZatcaError(err, t("zatcaOnboardingPanel.complianceCsid.confirmError")));
     } finally {
       setConfirming(false);
     }
@@ -353,61 +345,56 @@ function ComplianceCsidStep({ unit, onChanged }: { unit: ZatcaEgsUnit; onChanged
       {loadError && <ErrorState message={loadError} onRetry={load} />}
 
       <div>
-        <h3 className="mb-1 text-sm font-semibold text-stone-800">أ. طلب شهادة الامتثال من ZATCA (اتصال حقيقي)</h3>
-        {lifecycle === null && <EmptyState message="لم يُطلب شهادة امتثال لطلب CSR الحالي بعد." />}
+        <h3 className="mb-1 text-sm font-semibold text-stone-800">{t("zatcaOnboardingPanel.complianceCsid.requestHeading")}</h3>
+        {lifecycle === null && <EmptyState message={t("zatcaOnboardingPanel.complianceCsid.emptyMessage")} />}
         {lifecycle && (
           <div className="mb-2 rounded-md bg-white p-3 text-sm text-stone-600 ring-1 ring-stone-200">
-            تم طلب شهادة الامتثال مسبقاً (رقم الطلب: {lifecycle.requestId}) — {lifecycle.dispositionMessage}، بتاريخ{" "}
-            {formatDateTime(lifecycle.startedAt)}.
+            {t("zatcaOnboardingPanel.complianceCsid.existingInfo", { requestId: lifecycle.requestId, disposition: lifecycle.dispositionMessage, date: formatDateTime(lifecycle.startedAt, locale) })}
           </div>
         )}
         {!lifecycle && (
           <form onSubmit={onRequest} className="space-y-3 rounded-md bg-white p-4 ring-1 ring-stone-200">
             <OtpInput value={otp} onChange={setOtp} egsUnitName={unit.name} />
             <label className="block text-sm text-stone-600">
-              محتوى طلب CSR (Base64)
+              {t("zatcaOnboardingPanel.complianceCsid.csrBase64Label")}
               <textarea
                 required
                 rows={3}
                 value={csrBase64}
                 onChange={(e) => setCsrBase64(e.target.value)}
-                placeholder="الصقي csrDerBase64 من خطوة CSR أعلاه"
+                placeholder={t("zatcaOnboardingPanel.complianceCsid.csrBase64Placeholder")}
                 className="mt-1 block w-full rounded-md border border-stone-300 px-3 py-2 font-mono text-xs"
               />
             </label>
             {requestError && <ErrorPanel presented={requestError} />}
             <Button type="submit" size="sm" disabled={requesting}>
-              {requesting ? "جارٍ الإرسال إلى ZATCA..." : "طلب شهادة الامتثال من ZATCA"}
+              {requesting ? t("zatcaOnboardingPanel.sendingToZatca") : t("zatcaOnboardingPanel.complianceCsid.requestAction")}
             </Button>
           </form>
         )}
         {requestResult && (
           <div className="mt-2 rounded-md bg-success-50 p-3 text-sm text-success-800 ring-1 ring-success-200">
-            <p className="font-medium">أصدرت ZATCA شهادة امتثال لهذا الطلب (رقم الطلب: {requestResult.requestId}).</p>
+            <p className="font-medium">{t("zatcaOnboardingPanel.complianceCsid.issuedHeading", { requestId: requestResult.requestId })}</p>
             <p className="mt-1 text-xs">
-              لأسباب أمنية، لا تعرض MIDAD بيانات الاعتماد الفعلية (binarySecurityToken/المفتاح السري) التي أرجعتها ZATCA
-              لهذا الطلب مباشرةً — إن كانت هذه هي بيانات الاعتماد التي تحتاجينها في القسم "ب" أدناه لتفعيل الاتصال،
-              احصلي عليها من نفس القناة التي استخدمتها لإتمام إعداد ZATCA (مثل بوابة فاتورة أو سجلاتك الخاصة) ثم
-              أدخليها هناك.
+              {t("zatcaOnboardingPanel.complianceCsid.issuedDescription")}
             </p>
           </div>
         )}
       </div>
 
       <div className="border-t border-stone-200 pt-4">
-        <h3 className="mb-1 text-sm font-semibold text-stone-800">ب. تأكيد شهادة الامتثال (تفعيل الاتصال)</h3>
+        <h3 className="mb-1 text-sm font-semibold text-stone-800">{t("zatcaOnboardingPanel.complianceCsid.confirmHeading")}</h3>
         <p className="mb-2 text-xs text-stone-500">
-          هذه الخطوة منفصلة عمداً عن "أ" أعلاه — أدخلي هنا شهادة الامتثال (binarySecurityToken) والمفتاح السري الفعليين
-          اللذين حصلتِ عليهما من ZATCA (من أي قناة)، ليتم التحقق من تطابقهما مع طلب CSR وتفعيلهما كاتصال هذه الوحدة.
+          {t("zatcaOnboardingPanel.complianceCsid.confirmDescription")}
         </p>
         {unit.csidStatus === "compliance_issued" || unit.csidStatus === "production_issued" ? (
           <div className="rounded-md bg-success-50 p-3 text-sm text-success-700 ring-1 ring-success-200">
-            تم تأكيد شهادة الامتثال لهذه الوحدة بالفعل.
+            {t("zatcaOnboardingPanel.complianceCsid.alreadyConfirmed")}
           </div>
         ) : (
           <form onSubmit={onConfirm} className="space-y-3 rounded-md bg-white p-4 ring-1 ring-stone-200">
             <label className="block text-sm text-stone-600">
-              binarySecurityToken (الشهادة)
+              {t("zatcaOnboardingPanel.complianceCsid.tokenLabel")}
               <textarea
                 required
                 rows={3}
@@ -417,7 +404,7 @@ function ComplianceCsidStep({ unit, onChanged }: { unit: ZatcaEgsUnit; onChanged
               />
             </label>
             <label className="block text-sm text-stone-600">
-              المفتاح السري (secret)
+              {t("zatcaSettingsPage.credentialModal.secretLabel")}
               <input
                 required
                 type="password"
@@ -427,12 +414,12 @@ function ComplianceCsidStep({ unit, onChanged }: { unit: ZatcaEgsUnit; onChanged
               />
             </label>
             {confirmError && <ErrorPanel presented={confirmError} />}
-            {confirmed && <p className="text-sm text-success-700">تم التأكيد بنجاح.</p>}
+            {confirmed && <p className="text-sm text-success-700">{t("zatcaOnboardingPanel.complianceCsid.confirmedNotice")}</p>}
             <Button type="submit" size="sm" disabled={confirming || unit.csidStatus !== "compliance_pending"}>
-              {confirming ? "جارٍ التأكيد..." : "تأكيد شهادة الامتثال"}
+              {confirming ? t("zatcaOnboardingPanel.complianceCsid.confirming") : t("zatcaOnboardingPanel.complianceCsid.confirmAction")}
             </Button>
             {unit.csidStatus !== "compliance_pending" && (
-              <p className="text-xs text-warning-700">يجب إنشاء طلب CSR أولاً (الحالة الحالية: {csidStatusLabel[unit.csidStatus]}).</p>
+              <p className="text-xs text-warning-700">{t("zatcaOnboardingPanel.complianceCsid.needsCsrFirst", { status: t(`zatcaSettingsPage.csidStatus.${unit.csidStatus}`) })}</p>
             )}
           </form>
         )}
@@ -444,6 +431,7 @@ function ComplianceCsidStep({ unit, onChanged }: { unit: ZatcaEgsUnit; onChanged
 // --- Step 3: Compliance Invoice (test) --------------------------------------
 
 function ComplianceInvoiceStep({ unit }: { unit: ZatcaEgsUnit }) {
+  const { t, locale } = useTranslation();
   const [attempts, setAttempts] = useState<ZatcaComplianceAttempt[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [documentType, setDocumentType] = useState<ZatcaComplianceDocumentType>("388");
@@ -459,7 +447,7 @@ function ComplianceInvoiceStep({ unit }: { unit: ZatcaEgsUnit }) {
     setLoadError(null);
     listZatcaComplianceAttempts(unit.id)
       .then((res) => setAttempts(res.attempts))
-      .catch((err) => setLoadError(err instanceof Error ? err.message : "تعذّر تحميل سجل محاولات اختبار الامتثال"));
+      .catch((err) => setLoadError(err instanceof Error ? err.message : t("zatcaOnboardingPanel.complianceInvoice.loadError")));
   }
   useEffect(load, [unit.id]);
 
@@ -479,7 +467,7 @@ function ComplianceInvoiceStep({ unit }: { unit: ZatcaEgsUnit }) {
       setOutcome(res.status);
       load();
     } catch (err) {
-      setPresentedError(presentZatcaError(err, "تعذّر إرسال مستند اختبار الامتثال"));
+      setPresentedError(presentZatcaError(err, t("zatcaOnboardingPanel.complianceInvoice.submitError")));
     } finally {
       setSubmitting(false);
     }
@@ -488,65 +476,62 @@ function ComplianceInvoiceStep({ unit }: { unit: ZatcaEgsUnit }) {
   return (
     <div className="space-y-4">
       <p className="text-xs text-stone-500">
-        هذا اختبار امتثال منفصل تماماً عن فواتيرك الحقيقية — لا يستخدم فواتير MIDAD ولا يُنشئ أو يوقّع مستنداً تلقائياً
-        (هذه نقطة تصميم متعمّدة في هذا الإصدار: مسار اختبار الامتثال مستقل عن محرك التوقيع الحقيقي المستخدم لاحقاً في
-        إرسال الفواتير الفعلية عبر Clearance/Reporting). أدخلي هنا مباشرة محتوى مستند الاختبار (XML بصيغة Base64
-        وتجزئته) كما تطلبه واجهة ZATCA لاختبار الامتثال.
+        {t("zatcaOnboardingPanel.complianceInvoice.intro")}
       </p>
 
       <form onSubmit={onSubmit} className="space-y-3 rounded-md bg-white p-4 ring-1 ring-stone-200">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <label className="block text-sm text-stone-600">
-            نوع المستند
+            {t("zatcaOnboardingPanel.complianceInvoice.documentTypeLabel")}
             <select value={documentType} onChange={(e) => setDocumentType(e.target.value as ZatcaComplianceDocumentType)} className="mt-1 block w-full rounded-md border border-stone-300 px-3 py-2 text-sm">
-              <option value="388">فاتورة (388)</option>
-              <option value="381">إشعار دائن (381)</option>
-              <option value="383">إشعار مدين (383)</option>
+              <option value="388">{t("zatcaOnboardingPanel.complianceInvoice.documentTypes.invoice")}</option>
+              <option value="381">{t("zatcaOnboardingPanel.complianceInvoice.documentTypes.creditNote")}</option>
+              <option value="383">{t("zatcaOnboardingPanel.complianceInvoice.documentTypes.debitNote")}</option>
             </select>
           </label>
           <label className="block text-sm text-stone-600">
-            نوع الفوترة
+            {t("zatcaOnboardingPanel.complianceInvoice.invoiceFamilyLabel")}
             <select value={invoiceFamily} onChange={(e) => setInvoiceFamily(e.target.value as ZatcaInvoiceFamily)} className="mt-1 block w-full rounded-md border border-stone-300 px-3 py-2 text-sm">
-              <option value="standard">قياسية (B2B)</option>
-              <option value="simplified">مبسّطة (B2C)</option>
+              <option value="standard">{t("zatcaOnboardingPanel.complianceInvoice.invoiceFamilies.standard")}</option>
+              <option value="simplified">{t("zatcaOnboardingPanel.complianceInvoice.invoiceFamilies.simplified")}</option>
             </select>
           </label>
         </div>
         <label className="block text-sm text-stone-600">
-          محتوى المستند (Base64)
+          {t("zatcaOnboardingPanel.complianceInvoice.documentContentLabel")}
           <textarea required rows={3} value={xml} onChange={(e) => setXml(e.target.value)} className="mt-1 block w-full rounded-md border border-stone-300 px-3 py-2 font-mono text-xs" />
         </label>
         <label className="block text-sm text-stone-600">
-          تجزئة المستند (Base64)
+          {t("zatcaOnboardingPanel.complianceInvoice.documentHashLabel")}
           <input required value={hash} onChange={(e) => setHash(e.target.value)} className="mt-1 block w-full rounded-md border border-stone-300 px-3 py-2 font-mono text-xs" />
         </label>
         <label className="block text-sm text-stone-600">
-          UUID
+          {t("zatcaOnboardingPanel.complianceInvoice.uuidLabel")}
           <div className="mt-1 flex gap-2">
             <input required value={uuid} onChange={(e) => setUuid(e.target.value)} className="block w-full rounded-md border border-stone-300 px-3 py-2 font-mono text-xs" />
             <Button type="button" size="sm" variant="secondary" onClick={() => setUuid(crypto.randomUUID())}>
-              توليد
+              {t("zatcaOnboardingPanel.complianceInvoice.generate")}
             </Button>
           </div>
         </label>
         {presentedError && <ErrorPanel presented={presentedError} />}
-        {outcome && <p className="text-sm text-stone-700">نتيجة ZATCA الفعلية: {outcome}</p>}
+        {outcome && <p className="text-sm text-stone-700">{t("zatcaOnboardingPanel.complianceInvoice.outcome", { outcome })}</p>}
         <Button type="submit" size="sm" disabled={submitting}>
-          {submitting ? "جارٍ الإرسال..." : "إرسال مستند الاختبار إلى ZATCA"}
+          {submitting ? t("zatcaOnboardingPanel.complianceInvoice.submitting") : t("zatcaOnboardingPanel.complianceInvoice.submitAction")}
         </Button>
       </form>
 
       <div>
-        <h3 className="mb-2 text-sm font-semibold text-stone-800">سجل محاولات اختبار الامتثال</h3>
+        <h3 className="mb-2 text-sm font-semibold text-stone-800">{t("zatcaOnboardingPanel.complianceInvoice.attemptsHeading")}</h3>
         {loadError && <ErrorState message={loadError} onRetry={load} />}
         {!loadError && attempts === null && <Skeleton rows={2} />}
-        {!loadError && attempts && attempts.length === 0 && <EmptyState message="لا توجد محاولات بعد." />}
+        {!loadError && attempts && attempts.length === 0 && <EmptyState message={t("zatcaOnboardingPanel.complianceInvoice.attemptsEmptyMessage")} />}
         {!loadError && attempts && attempts.length > 0 && (
           <div className="space-y-2">
             {attempts.map((a) => (
               <div key={a.id} className="rounded-md border border-stone-200 bg-white p-2 text-xs text-stone-600">
                 <span className="font-medium">{a.documentType}</span> · {a.invoiceFamily} ·{" "}
-                {a.normalizedOutcome ?? a.errorCategory ?? "—"} · {formatDateTime(a.attemptedAt)}
+                {a.normalizedOutcome ?? a.errorCategory ?? "—"} · {formatDateTime(a.attemptedAt, locale)}
               </div>
             ))}
           </div>
@@ -559,6 +544,7 @@ function ComplianceInvoiceStep({ unit }: { unit: ZatcaEgsUnit }) {
 // --- Step 4: Production CSID ------------------------------------------------
 
 function ProductionCsidStep({ unit, onChanged }: { unit: ZatcaEgsUnit; onChanged: () => void }) {
+  const { t, locale } = useTranslation();
   const [operations, setOperations] = useState<ZatcaProviderOperation[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [requesting, setRequesting] = useState(false);
@@ -574,7 +560,7 @@ function ProductionCsidStep({ unit, onChanged }: { unit: ZatcaEgsUnit; onChanged
     setLoadError(null);
     listZatcaProductionCsidOperations(unit.id)
       .then((res) => setOperations(res.operations))
-      .catch((err) => setLoadError(err instanceof Error ? err.message : "تعذّر تحميل سجل عمليات شهادة الإنتاج"));
+      .catch((err) => setLoadError(err instanceof Error ? err.message : t("zatcaOnboardingPanel.productionCsid.loadError")));
   }
   useEffect(load, [unit.id]);
 
@@ -587,7 +573,7 @@ function ProductionCsidStep({ unit, onChanged }: { unit: ZatcaEgsUnit; onChanged
       setResult(res);
       load();
     } catch (err) {
-      setPresentedError(presentZatcaError(err, "تعذّر طلب شهادة الإنتاج"));
+      setPresentedError(presentZatcaError(err, t("zatcaOnboardingPanel.productionCsid.requestError")));
     } finally {
       setRequesting(false);
     }
@@ -603,7 +589,7 @@ function ProductionCsidStep({ unit, onChanged }: { unit: ZatcaEgsUnit; onChanged
       setConfirmSecret("");
       onChanged();
     } catch (err) {
-      setConfirmError(presentZatcaError(err, "تعذّر تأكيد شهادة الإنتاج"));
+      setConfirmError(presentZatcaError(err, t("zatcaOnboardingPanel.productionCsid.confirmError")));
     } finally {
       setConfirming(false);
     }
@@ -615,25 +601,23 @@ function ProductionCsidStep({ unit, onChanged }: { unit: ZatcaEgsUnit; onChanged
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center gap-2 text-xs">
-        <Badge tone={complianceReady || productionActive ? "success" : "neutral"}>بيئة الامتثال (Compliance)</Badge>
+        <Badge tone={complianceReady || productionActive ? "success" : "neutral"}>{t("zatcaOnboardingPanel.productionCsid.complianceBadge")}</Badge>
         <span className="text-stone-400">←</span>
-        <Badge tone={productionActive ? "success" : "neutral"}>بيئة الإنتاج (Production)</Badge>
-        <span className="text-stone-400">— بيئتان منفصلتان تماماً، لا تُستخدم شهادة إحداهما في الأخرى.</span>
+        <Badge tone={productionActive ? "success" : "neutral"}>{t("zatcaOnboardingPanel.productionCsid.productionBadge")}</Badge>
+        <span className="text-stone-400">{t("zatcaOnboardingPanel.productionCsid.separateEnvsNote")}</span>
       </div>
 
       {!complianceReady && !productionActive && (
-        <ErrorState message={`لا يمكن تفعيل بيئة الإنتاج قبل إتمام شهادة الامتثال أولاً (الحالة الحالية: ${csidStatusLabel[unit.csidStatus]}).`} />
+        <ErrorState message={t("zatcaOnboardingPanel.productionCsid.notReadyError", { status: t(`zatcaSettingsPage.csidStatus.${unit.csidStatus}`) })} />
       )}
 
       <div>
-        <h3 className="mb-1 text-sm font-semibold text-stone-800">أ. طلب شهادة الإنتاج (Onboarding)</h3>
+        <h3 className="mb-1 text-sm font-semibold text-stone-800">{t("zatcaOnboardingPanel.productionCsid.requestHeading")}</h3>
         <div className="mb-2 rounded-md bg-warning-50 p-2 text-xs text-warning-800 ring-1 ring-warning-200">
-          حالة معلّقة على التحقق الحي من ZATCA Sandbox: التوثيق المتاح لهذه المنصة يذكر حقل "currentCCSID" كخطأ محتمل لهذا
-          الطلب، لكن دون تأكيد ما إذا كان مطلوباً فعلياً. لا يرسل MIDAD هذا الحقل حالياً تجنباً للتخمين — إن رفضت ZATCA
-          الطلب لهذا السبب، ستظهر رسالة الخطأ الفعلية أدناه دون أي محاولة لإخفائها.
+          {t("zatcaOnboardingPanel.productionCsid.currentCcsidWarning")}
         </div>
         <Button size="sm" disabled={requesting || !complianceReady} onClick={onRequest}>
-          {requesting ? "جارٍ الإرسال إلى ZATCA..." : "طلب شهادة الإنتاج من ZATCA"}
+          {requesting ? t("zatcaOnboardingPanel.sendingToZatca") : t("zatcaOnboardingPanel.productionCsid.requestAction")}
         </Button>
         {presentedError && (
           <div className="mt-2">
@@ -642,47 +626,45 @@ function ProductionCsidStep({ unit, onChanged }: { unit: ZatcaEgsUnit; onChanged
         )}
         {result && (
           <div className="mt-2 rounded-md bg-success-50 p-3 text-sm text-success-800 ring-1 ring-success-200">
-            أصدرت ZATCA شهادة إنتاج لهذا الطلب (رقم الطلب: {result.requestId}) — {result.dispositionMessage}. أكملي
-            القسم "ب" أدناه لتفعيلها فعلياً على هذه الوحدة (بيانات الاعتماد الفعلية لا تُعرض هنا لأسباب أمنية — راجعي
-            القناة التي استخدمتها للحصول عليها).
+            {t("zatcaOnboardingPanel.productionCsid.issuedNotice", { requestId: result.requestId, disposition: result.dispositionMessage })}
           </div>
         )}
       </div>
 
       <div className="border-t border-stone-200 pt-4">
-        <h3 className="mb-1 text-sm font-semibold text-stone-800">ب. تأكيد شهادة الإنتاج (تفعيل بيئة الإنتاج)</h3>
+        <h3 className="mb-1 text-sm font-semibold text-stone-800">{t("zatcaOnboardingPanel.productionCsid.confirmHeading")}</h3>
         {productionActive ? (
-          <div className="rounded-md bg-success-50 p-3 text-sm text-success-700 ring-1 ring-success-200">بيئة الإنتاج مفعّلة لهذه الوحدة.</div>
+          <div className="rounded-md bg-success-50 p-3 text-sm text-success-700 ring-1 ring-success-200">{t("zatcaOnboardingPanel.productionCsid.alreadyActive")}</div>
         ) : (
           <form onSubmit={onConfirm} className="space-y-3 rounded-md bg-white p-4 ring-1 ring-stone-200">
             <label className="block text-sm text-stone-600">
-              binarySecurityToken (شهادة الإنتاج)
+              {t("zatcaOnboardingPanel.productionCsid.tokenLabel")}
               <textarea required rows={3} value={confirmToken} onChange={(e) => setConfirmToken(e.target.value)} className="mt-1 block w-full rounded-md border border-stone-300 px-3 py-2 font-mono text-xs" />
             </label>
             <label className="block text-sm text-stone-600">
-              المفتاح السري (secret)
+              {t("zatcaSettingsPage.credentialModal.secretLabel")}
               <input required type="password" value={confirmSecret} onChange={(e) => setConfirmSecret(e.target.value)} className="mt-1 block w-full rounded-md border border-stone-300 px-3 py-2 text-sm" />
             </label>
             {confirmError && <ErrorPanel presented={confirmError} />}
             <Button type="submit" size="sm" disabled={confirming || !complianceReady}>
-              {confirming ? "جارٍ التأكيد..." : "تأكيد شهادة الإنتاج"}
+              {confirming ? t("zatcaOnboardingPanel.productionCsid.confirming") : t("zatcaOnboardingPanel.productionCsid.confirmAction")}
             </Button>
           </form>
         )}
       </div>
 
       <div className="border-t border-stone-200 pt-4">
-        <h3 className="mb-2 text-sm font-semibold text-stone-800">سجل عمليات شهادة الإنتاج</h3>
+        <h3 className="mb-2 text-sm font-semibold text-stone-800">{t("zatcaOnboardingPanel.productionCsid.operationsHeading")}</h3>
         {loadError && <ErrorState message={loadError} onRetry={load} />}
         {!loadError && operations === null && <Skeleton rows={2} />}
-        {!loadError && operations && operations.length === 0 && <EmptyState message="لا توجد عمليات بعد." />}
+        {!loadError && operations && operations.length === 0 && <EmptyState message={t("zatcaOnboardingPanel.productionCsid.operationsEmptyMessage")} />}
         {!loadError && operations && operations.length > 0 && (
           <div className="space-y-2">
             {operations.map((o) => (
               <div key={o.id} className="rounded-md border border-stone-200 bg-white p-2 text-xs text-stone-600">
-                <span className="font-medium">{o.operationType === "production_csid_onboarding" ? "طلب أولي" : "تجديد"}</span> ·{" "}
-                {o.internalStatus === "response_received" ? o.providerOutcome ?? "تم الاستلام" : `فشل (${o.errorCategory})`} ·{" "}
-                {formatDateTime(o.startedAt)}
+                <span className="font-medium">{o.operationType === "production_csid_onboarding" ? t("zatcaOnboardingPanel.productionCsid.operationType.onboarding") : t("zatcaOnboardingPanel.productionCsid.operationType.renewal")}</span> ·{" "}
+                {o.internalStatus === "response_received" ? o.providerOutcome ?? t("zatcaOnboardingPanel.productionCsid.operationReceived") : t("zatcaOnboardingPanel.productionCsid.operationFailed", { category: o.errorCategory ?? "—" })} ·{" "}
+                {formatDateTime(o.startedAt, locale)}
               </div>
             ))}
           </div>
@@ -695,6 +677,7 @@ function ProductionCsidStep({ unit, onChanged }: { unit: ZatcaEgsUnit; onChanged
 // --- Step 5: Renewal ---------------------------------------------------------
 
 function RenewalStep({ unit }: { unit: ZatcaEgsUnit }) {
+  const { t, locale } = useTranslation();
   const [otp, setOtp] = useState("");
   const [csrBase64, setCsrBase64] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -715,7 +698,7 @@ function RenewalStep({ unit }: { unit: ZatcaEgsUnit }) {
       setOutcome(res);
       setOtp("");
     } catch (err) {
-      setPresentedError(presentZatcaError(err, "تعذّر تجديد شهادة الإنتاج"));
+      setPresentedError(presentZatcaError(err, t("zatcaOnboardingPanel.renewal.genericError")));
     } finally {
       setSubmitting(false);
     }
@@ -724,24 +707,22 @@ function RenewalStep({ unit }: { unit: ZatcaEgsUnit }) {
   return (
     <div className="space-y-3">
       <div className="rounded-md bg-white p-3 text-sm text-stone-600 ring-1 ring-stone-200">
-        <p>حالة الشهادة الحالية: {csidStatusLabel[unit.csidStatus]}</p>
+        <p>{t("zatcaOnboardingPanel.renewal.currentStatus", { status: t(`zatcaSettingsPage.csidStatus.${unit.csidStatus}`) })}</p>
         <p className="mt-1">
-          تاريخ انتهاء الشهادة: {expiresAt ? formatDateTime(expiresAt) : "غير معروف"}
-          {daysLeft !== null && daysLeft <= 30 && <span className="text-warning-700"> — تنتهي خلال {daysLeft} يوم تقريباً</span>}
+          {t("zatcaOnboardingPanel.renewal.expiresAt", { date: expiresAt ? formatDateTime(expiresAt, locale) : t("zatcaOnboardingPanel.renewal.unknownExpiry") })}
+          {daysLeft !== null && daysLeft <= 30 && <span className="text-warning-700">{t("zatcaOnboardingPanel.renewal.expiresInDays", { days: daysLeft })}</span>}
         </p>
-        {!eligible && <p className="mt-1 text-xs text-warning-700">التجديد متاح فقط بعد تفعيل بيئة الإنتاج لهذه الوحدة.</p>}
+        {!eligible && <p className="mt-1 text-xs text-warning-700">{t("zatcaOnboardingPanel.renewal.notEligible")}</p>}
       </div>
 
       <p className="text-xs text-stone-500">
-        لا تُحذف بيانات الاعتماد الحالية عند التجديد — بيانات الاعتماد الجديدة التي ترجعها ZATCA تُسجَّل كعملية تاريخية
-        منفصلة فقط، ولن تُفعَّل تلقائياً على هذه الوحدة. بعد نجاح التجديد، استخدمي خطوة "ربط بيانات الاعتماد" (أعلى هذه
-        الصفحة) لتفعيل بيانات الاعتماد الجديدة يدوياً — لا يوجد استبدال تلقائي للشهادة الحالية.
+        {t("zatcaOnboardingPanel.renewal.intro")}
       </p>
 
       <form onSubmit={onSubmit} className="space-y-3 rounded-md bg-white p-4 ring-1 ring-stone-200">
         <OtpInput value={otp} onChange={setOtp} egsUnitName={unit.name} />
         <label className="block text-sm text-stone-600">
-          محتوى طلب CSR للتجديد (Base64)
+          {t("zatcaOnboardingPanel.renewal.csrLabel")}
           <textarea required rows={3} value={csrBase64} onChange={(e) => setCsrBase64(e.target.value)} className="mt-1 block w-full rounded-md border border-stone-300 px-3 py-2 font-mono text-xs" />
         </label>
         {presentedError && <ErrorPanel presented={presentedError} />}
@@ -752,12 +733,12 @@ function RenewalStep({ unit }: { unit: ZatcaEgsUnit }) {
             }`}
           >
             {outcome.outcome === "issued"
-              ? `أصدرت ZATCA شهادة إنتاج جديدة (رقم الطلب: ${outcome.requestId}) — ${outcome.dispositionMessage}. أكملي خطوة "ربط بيانات الاعتماد" لتفعيلها.`
-              : `أفادت ZATCA أن الوحدة غير مستوفية لشروط التجديد حالياً (${outcome.dispositionMessage}). لم يتغيّر أي شيء في بيانات الاعتماد الحالية.`}
+              ? t("zatcaOnboardingPanel.renewal.issuedOutcome", { requestId: outcome.requestId, disposition: outcome.dispositionMessage })
+              : t("zatcaOnboardingPanel.renewal.notEligibleOutcome", { disposition: outcome.dispositionMessage })}
           </div>
         )}
         <Button type="submit" size="sm" disabled={submitting || !eligible}>
-          {submitting ? "جارٍ الإرسال إلى ZATCA..." : "طلب التجديد من ZATCA"}
+          {submitting ? t("zatcaOnboardingPanel.sendingToZatca") : t("zatcaOnboardingPanel.renewal.requestAction")}
         </Button>
       </form>
     </div>
