@@ -13,6 +13,7 @@ import { ApiError, apiFetch } from "../api/client";
 import { formatMoney, formatDateTime } from "../lib/format";
 import { listBudgetAlerts, evaluateBudgetAlerts, acknowledgeBudgetAlert, resolveBudgetAlert } from "../api/budgetAlerts";
 import type { BudgetAlert, BudgetAlertSeverity, BudgetAlertStatus, Project } from "../api/types";
+import { useTranslation } from "../i18n/I18nProvider";
 
 // MIDAD Phase E — Proactive Budget Overrun Alerts.
 //
@@ -26,13 +27,12 @@ import type { BudgetAlert, BudgetAlertSeverity, BudgetAlertStatus, Project } fro
 // Absence of an alert is never presented as a health guarantee: the empty
 // state below deliberately avoids any "آمن"/"safe" wording.
 
-const severityLabel: Record<BudgetAlertSeverity, string> = { info: "معلومات", warning: "تحذير", critical: "حرج" };
 const severityTone: Record<BudgetAlertSeverity, "info" | "warning" | "danger"> = { info: "info", warning: "warning", critical: "danger" };
 const severityEmoji: Record<BudgetAlertSeverity, string> = { info: "ℹ️", warning: "🟠", critical: "🔴" };
-const statusLabel: Record<BudgetAlertStatus, string> = { open: "مفتوح", acknowledged: "تمت المشاهدة", resolved: "تم الحل" };
 const statusTone: Record<BudgetAlertStatus, "warning" | "info" | "success"> = { open: "warning", acknowledged: "info", resolved: "success" };
 
 export function BudgetAlerts() {
+  const { t, locale } = useTranslation();
   const [alerts, setAlerts] = useState<BudgetAlert[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -49,7 +49,7 @@ export function BudgetAlerts() {
     setError(null);
     listBudgetAlerts(projectFilter ? { projectId: projectFilter } : {})
       .then(setAlerts)
-      .catch((err) => setError(err instanceof ApiError ? err.message : "تعذّر تحميل تنبيهات الميزانية"));
+      .catch((err) => setError(err instanceof ApiError ? err.message : t("budgetAlertsPage.loadError")));
   }
   useEffect(load, [projectFilter]);
   useEffect(() => {
@@ -63,7 +63,7 @@ export function BudgetAlerts() {
       await evaluateBudgetAlerts(projectFilter || undefined);
       load();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر تحديث التنبيهات");
+      setError(err instanceof ApiError ? err.message : t("budgetAlertsPage.refreshError"));
     } finally {
       setEvaluating(false);
     }
@@ -80,11 +80,11 @@ export function BudgetAlerts() {
   return (
     <Layout>
       <PageHeader
-        title="تنبيهات الميزانية"
-        subtitle="مراقبة استباقية لمؤشرات المخاطر المالية المستخلصة من بيانات المشاريع الحالية — بدون أي ذكاء اصطناعي أو توقع احتمالي."
+        title={t("budgetAlertsPage.title")}
+        subtitle={t("budgetAlertsPage.subtitle")}
         actions={
           <Button size="sm" onClick={onEvaluate} disabled={evaluating}>
-            {evaluating ? "جارٍ التحديث..." : "تحديث التنبيهات"}
+            {evaluating ? t("budgetAlertsPage.refreshing") : t("budgetAlertsPage.refresh")}
           </Button>
         }
       />
@@ -101,7 +101,7 @@ export function BudgetAlerts() {
           onChange={(e) => setProjectFilter(e.target.value)}
           className="rounded-md border border-stone-300 px-3 py-2 text-sm"
         >
-          <option value="">كل المشاريع</option>
+          <option value="">{t("budgetAlertsPage.allProjects")}</option>
           {projects.map((p) => (
             <option key={p.id} value={p.id}>{p.name}</option>
           ))}
@@ -116,7 +116,7 @@ export function BudgetAlerts() {
                 statusFilter === s ? "border-primary bg-primary/10 text-primary" : "border-stone-300 text-stone-500 hover:bg-stone-50"
               }`}
             >
-              {s === "active" ? "نشطة" : statusLabel[s]}
+              {s === "active" ? t("budgetAlertsPage.statusFilterActive") : t(`budgetAlertsPage.status.${s}`)}
             </button>
           ))}
         </div>
@@ -126,8 +126,8 @@ export function BudgetAlerts() {
       {!error && visible === null && <Skeleton rows={5} />}
       {!error && visible && visible.length === 0 && (
         <EmptyState
-          message="لا توجد تنبيهات مالية حالية"
-          action={<p className="text-xs text-stone-400">لا توجد حالياً مؤشرات مالية تتجاوز قواعد التنبيه المحددة.</p>}
+          message={t("budgetAlertsPage.emptyMessage")}
+          action={<p className="text-xs text-stone-400">{t("dashboardPage.needsAttention.noIssues")}</p>}
         />
       )}
       {!error && visible && visible.length > 0 && (
@@ -153,6 +153,7 @@ export function BudgetAlerts() {
 }
 
 function SummaryCard({ alerts, onSelect }: { alerts: BudgetAlert[]; onSelect: (id: string) => void }) {
+  const { t } = useTranslation();
   const active = alerts.filter((a) => a.status !== "resolved");
   const counts: Record<BudgetAlertSeverity, number> = {
     critical: active.filter((a) => a.severity === "critical").length,
@@ -169,33 +170,33 @@ function SummaryCard({ alerts, onSelect }: { alerts: BudgetAlert[]; onSelect: (i
 
   return (
     <Card className="p-5">
-      <h2 className="mb-3 font-semibold text-stone-800">يحتاج إلى انتباه</h2>
+      <h2 className="mb-3 font-semibold text-stone-800">{t("dashboardPage.needsAttention.heading")}</h2>
       <div className="mb-4 grid grid-cols-3 gap-3">
         <div className="rounded-md bg-danger-50 p-3 text-center">
           <p className="text-2xl font-bold text-danger-700">{counts.critical}</p>
-          <p className="text-xs text-danger-600">تنبيهات حرجة</p>
+          <p className="text-xs text-danger-600">{t("budgetAlertsPage.summary.criticalCount")}</p>
         </div>
         <div className="rounded-md bg-warning-50 p-3 text-center">
           <p className="text-2xl font-bold text-warning-700">{counts.warning}</p>
-          <p className="text-xs text-warning-600">تنبيهات تحذيرية</p>
+          <p className="text-xs text-warning-600">{t("budgetAlertsPage.summary.warningCount")}</p>
         </div>
         <div className="rounded-md bg-info-50 p-3 text-center">
           <p className="text-2xl font-bold text-info-700">{counts.info}</p>
-          <p className="text-xs text-info-600">تنبيهات معلوماتية</p>
+          <p className="text-xs text-info-600">{t("budgetAlertsPage.summary.infoCount")}</p>
         </div>
       </div>
 
       {topAlerts.length === 0 ? (
-        <p className="text-sm text-stone-400">لا توجد حالياً مؤشرات مالية تتجاوز قواعد التنبيه المحددة.</p>
+        <p className="text-sm text-stone-400">{t("dashboardPage.needsAttention.noIssues")}</p>
       ) : (
         <div>
-          <p className="mb-2 text-xs font-semibold text-stone-500">أهم التنبيهات</p>
+          <p className="mb-2 text-xs font-semibold text-stone-500">{t("budgetAlertsPage.summary.topAlertsHeading")}</p>
           <ul className="space-y-1">
             {topAlerts.map((a) => (
               <li key={a.id} className="flex cursor-pointer items-start gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-stone-50" onClick={() => onSelect(a.id)}>
                 <span>{severityEmoji[a.severity]}</span>
                 <span className="flex-1">
-                  <span className="font-medium text-stone-800">{a.project?.name ?? "مشروع"}</span>
+                  <span className="font-medium text-stone-800">{a.project?.name ?? t("budgetAlertsPage.summary.defaultProjectName")}</span>
                   <span className="text-stone-500"> — {a.title}</span>
                 </span>
               </li>
@@ -208,7 +209,8 @@ function SummaryCard({ alerts, onSelect }: { alerts: BudgetAlert[]; onSelect: (i
 }
 
 function AlertRow({ alert, projects, onSelect }: { alert: BudgetAlert; projects: Project[]; onSelect: () => void }) {
-  const projectName = alert.project?.name ?? projects.find((p) => p.id === alert.projectId)?.name ?? "مشروع";
+  const { t, locale } = useTranslation();
+  const projectName = alert.project?.name ?? projects.find((p) => p.id === alert.projectId)?.name ?? t("budgetAlertsPage.summary.defaultProjectName");
   return (
     <li className="cursor-pointer rounded-md border border-stone-100 px-3 py-2 text-sm hover:bg-stone-50" onClick={onSelect}>
       <div className="flex items-center justify-between">
@@ -217,21 +219,14 @@ function AlertRow({ alert, projects, onSelect }: { alert: BudgetAlert; projects:
           <span className="text-stone-500"> — {alert.title}</span>
         </span>
         <div className="flex items-center gap-2">
-          <Badge tone={severityTone[alert.severity]}>{severityLabel[alert.severity]}</Badge>
-          <Badge tone={statusTone[alert.status]}>{statusLabel[alert.status]}</Badge>
+          <Badge tone={severityTone[alert.severity]}>{t(`dashboardPage.severity.${alert.severity}`)}</Badge>
+          <Badge tone={statusTone[alert.status]}>{t(`budgetAlertsPage.status.${alert.status}`)}</Badge>
         </div>
       </div>
-      <p className="mt-1 text-xs text-stone-400">اكتُشف في {formatDateTime(alert.createdAt)}</p>
+      <p className="mt-1 text-xs text-stone-400">{t("budgetAlertsPage.discoveredAt", { date: formatDateTime(alert.createdAt, locale) })}</p>
     </li>
   );
 }
-
-const ruleLabel: Record<BudgetAlert["ruleCode"], string> = {
-  budget_consumption_threshold: "استهلاك الميزانية",
-  forecast_over_budget: "التوقع يتجاوز الميزانية",
-  actual_commitments_over_budget: "التكلفة الفعلية والالتزامات تتجاوز الميزانية",
-  cost_code_risk: "مخاطر بند تكلفة",
-};
 
 function AlertDetail({
   alert,
@@ -244,6 +239,7 @@ function AlertDetail({
   onChanged: () => void;
   onClose: () => void;
 }) {
+  const { t, locale } = useTranslation();
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -254,7 +250,7 @@ function AlertDetail({
       await acknowledgeBudgetAlert(alert.id);
       onChanged();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر تأكيد مشاهدة التنبيه");
+      setError(err instanceof ApiError ? err.message : t("budgetAlertsPage.detail.acknowledgeError"));
     } finally {
       setSubmitting(false);
     }
@@ -266,7 +262,7 @@ function AlertDetail({
       await resolveBudgetAlert(alert.id);
       onChanged();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "تعذّر حل التنبيه");
+      setError(err instanceof ApiError ? err.message : t("budgetAlertsPage.detail.resolveError"));
     } finally {
       setSubmitting(false);
     }
@@ -278,11 +274,11 @@ function AlertDetail({
         <div>
           <h3 className="font-semibold text-stone-800">{alert.title}</h3>
           <div className="mt-1 flex items-center gap-2">
-            <Badge tone={severityTone[alert.severity]}>{severityLabel[alert.severity]}</Badge>
-            <Badge tone={statusTone[alert.status]}>{statusLabel[alert.status]}</Badge>
+            <Badge tone={severityTone[alert.severity]}>{t(`dashboardPage.severity.${alert.severity}`)}</Badge>
+            <Badge tone={statusTone[alert.status]}>{t(`budgetAlertsPage.status.${alert.status}`)}</Badge>
           </div>
         </div>
-        <button type="button" onClick={onClose} className="text-stone-400 hover:text-stone-600" aria-label="إغلاق التفاصيل">✕</button>
+        <button type="button" onClick={onClose} className="text-stone-400 hover:text-stone-600" aria-label={t("budgetAlertsPage.detail.closeAriaLabel")}>✕</button>
       </div>
 
       {error && (
@@ -292,39 +288,39 @@ function AlertDetail({
       )}
 
       <dl className="mb-4 text-sm">
-        <Row label="المشروع" value={projectName ?? "—"} />
-        {alert.costCode && <Row label="بند التكلفة" value={`${alert.costCode.code} — ${alert.costCode.name}`} />}
-        <Row label="القاعدة" value={ruleLabel[alert.ruleCode]} />
-        <Row label="اكتُشف في (عند إنشاء التنبيه)" value={formatDateTime(alert.createdAt)} />
+        <Row label={t("budgetAlertsPage.detail.project")} value={projectName ?? "—"} />
+        {alert.costCode && <Row label={t("budgetAlertsPage.detail.costCode")} value={`${alert.costCode.code} — ${alert.costCode.name}`} />}
+        <Row label={t("budgetAlertsPage.detail.rule")} value={t(`budgetAlertsPage.rules.${alert.ruleCode}`)} />
+        <Row label={t("budgetAlertsPage.detail.discoveredAtLabel")} value={formatDateTime(alert.createdAt, locale)} />
       </dl>
 
       <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        {alert.budgetAmount !== null && <MiniStat label="الميزانية" value={formatMoney(alert.budgetAmount, alert.currency)} />}
-        {alert.actualAmount !== null && <MiniStat label="التكلفة الفعلية" value={formatMoney(alert.actualAmount, alert.currency)} />}
-        {alert.commitmentAmount !== null && <MiniStat label="الالتزامات" value={formatMoney(alert.commitmentAmount, alert.currency)} />}
-        {alert.forecastAmount !== null && <MiniStat label="التوقع (EAC)" value={formatMoney(alert.forecastAmount, alert.currency)} />}
+        {alert.budgetAmount !== null && <MiniStat label={t("budgetAlertsPage.detail.metrics.budget")} value={formatMoney(alert.budgetAmount, alert.currency, locale)} />}
+        {alert.actualAmount !== null && <MiniStat label={t("budgetAlertsPage.detail.metrics.actual")} value={formatMoney(alert.actualAmount, alert.currency, locale)} />}
+        {alert.commitmentAmount !== null && <MiniStat label={t("budgetAlertsPage.detail.metrics.commitments")} value={formatMoney(alert.commitmentAmount, alert.currency, locale)} />}
+        {alert.forecastAmount !== null && <MiniStat label={t("budgetAlertsPage.detail.metrics.forecast")} value={formatMoney(alert.forecastAmount, alert.currency, locale)} />}
       </div>
-      <p className="mb-4 text-xs text-stone-400">القيم أعلاه هي لقطة عند إنشاء التنبيه، وقد تختلف عن البيانات المالية الحالية للمشروع.</p>
+      <p className="mb-4 text-xs text-stone-400">{t("budgetAlertsPage.detail.snapshotNotice")}</p>
 
       <div className="mb-4 rounded-md bg-stone-50 p-3">
-        <p className="mb-1 text-xs font-semibold text-stone-500">لماذا ظهر هذا التنبيه؟</p>
+        <p className="mb-1 text-xs font-semibold text-stone-500">{t("budgetAlertsPage.detail.whyHeading")}</p>
         <p className="text-sm text-stone-700">{alert.description}</p>
       </div>
       <div className="mb-4 rounded-md bg-stone-50 p-3">
-        <p className="mb-1 text-xs font-semibold text-stone-500">ماذا يجب أن أفعل؟</p>
+        <p className="mb-1 text-xs font-semibold text-stone-500">{t("budgetAlertsPage.detail.whatToDoHeading")}</p>
         <p className="text-sm text-stone-700">{alert.recommendedAction}</p>
       </div>
 
-      {alert.acknowledgedAt && <p className="mb-1 text-xs text-stone-400">تمت المشاهدة في {formatDateTime(alert.acknowledgedAt)}</p>}
-      {alert.resolvedAt && <p className="mb-3 text-xs text-stone-400">تم الحل في {formatDateTime(alert.resolvedAt)}</p>}
+      {alert.acknowledgedAt && <p className="mb-1 text-xs text-stone-400">{t("budgetAlertsPage.detail.acknowledgedAt", { date: formatDateTime(alert.acknowledgedAt, locale) })}</p>}
+      {alert.resolvedAt && <p className="mb-3 text-xs text-stone-400">{t("budgetAlertsPage.detail.resolvedAt", { date: formatDateTime(alert.resolvedAt, locale) })}</p>}
 
       <Can permission="budgetAlert.manage">
         <div className="flex gap-2">
           {alert.status === "open" && (
-            <Button size="sm" disabled={submitting} onClick={onAcknowledge}>تأكيد المشاهدة</Button>
+            <Button size="sm" disabled={submitting} onClick={onAcknowledge}>{t("budgetAlertsPage.detail.acknowledge")}</Button>
           )}
           {(alert.status === "open" || alert.status === "acknowledged") && (
-            <Button size="sm" variant="secondary" disabled={submitting} onClick={onResolve}>تحديد كمحلول</Button>
+            <Button size="sm" variant="secondary" disabled={submitting} onClick={onResolve}>{t("budgetAlertsPage.detail.markResolved")}</Button>
           )}
         </div>
       </Can>
