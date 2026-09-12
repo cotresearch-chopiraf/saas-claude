@@ -9,6 +9,7 @@ import { listOrganizations } from "../api/organizations";
 import { listMySupportSessions } from "../api/supportSessions";
 import { listPlatformActivity } from "../api/auditEvents";
 import type { Organization, SupportSessionSummary, PlatformActivityEvent, SupportSessionStatus } from "../api/types";
+import { useTranslation } from "../../i18n/I18nProvider";
 
 // MIDAD Admin Dashboard — the real operational landing page for platform
 // operators (per docs/MIDAD_MASTER_PROMPT.md Part XI). Every figure here
@@ -19,7 +20,6 @@ import type { Organization, SupportSessionSummary, PlatformActivityEvent, Suppor
 // (an error/incident store), this page says so explicitly rather than
 // fabricating one — see the note at the bottom of the activity section.
 
-const supportStatusLabel: Record<SupportSessionStatus, string> = { active: "نشطة", expired: "منتهية", revoked: "ملغاة" };
 const supportStatusTone: Record<SupportSessionStatus, "success" | "warning" | "danger"> = {
   active: "success",
   expired: "warning",
@@ -29,6 +29,7 @@ const supportStatusTone: Record<SupportSessionStatus, "success" | "warning" | "d
 type Health = { value: HealthStatus | null; error: string | null; checkedAt: string | null };
 
 export function PlatformDashboard() {
+  const { t, locale } = useTranslation();
   const [live, setLive] = useState<Health>({ value: null, error: null, checkedAt: null });
   const [ready, setReady] = useState<Health>({ value: null, error: null, checkedAt: null });
 
@@ -47,10 +48,10 @@ export function PlatformDashboard() {
     const now = new Date().toISOString();
     checkHealthLive()
       .then((value) => setLive({ value, error: null, checkedAt: now }))
-      .catch((err) => setLive({ value: null, error: err instanceof ApiError ? err.message : "تعذّر الاتصال", checkedAt: now }));
+      .catch((err) => setLive({ value: null, error: err instanceof ApiError ? err.message : t("platformDashboardPage.connectionError"), checkedAt: now }));
     checkHealthReady()
       .then((value) => setReady({ value, error: null, checkedAt: now }))
-      .catch((err) => setReady({ value: null, error: err instanceof ApiError ? err.message : "تعذّر الاتصال", checkedAt: now }));
+      .catch((err) => setReady({ value: null, error: err instanceof ApiError ? err.message : t("platformDashboardPage.connectionError"), checkedAt: now }));
   }
 
   function loadOrgs() {
@@ -58,7 +59,7 @@ export function PlatformDashboard() {
     setOrgsError(null);
     listOrganizations(5, 0)
       .then((page) => setOrgs(page.organizations))
-      .catch((err) => setOrgsError(err instanceof ApiError ? err.message : "تعذّر تحميل المؤسسات"));
+      .catch((err) => setOrgsError(err instanceof ApiError ? err.message : t("platformDashboardPage.orgsLoadError")));
   }
 
   function loadSessions() {
@@ -66,7 +67,7 @@ export function PlatformDashboard() {
     setSessionsError(null);
     listMySupportSessions(5, 0)
       .then((page) => setSessions(page.sessions))
-      .catch((err) => setSessionsError(err instanceof ApiError ? err.message : "تعذّر تحميل جلسات الدعم"));
+      .catch((err) => setSessionsError(err instanceof ApiError ? err.message : t("platformSupportSessionsPage.loadError")));
   }
 
   function loadActivity() {
@@ -77,7 +78,7 @@ export function PlatformDashboard() {
         setActivity(page.events);
         setActivityHasMore(page.hasMore);
       })
-      .catch((err) => setActivityError(err instanceof ApiError ? err.message : "تعذّر تحميل النشاط"));
+      .catch((err) => setActivityError(err instanceof ApiError ? err.message : t("platformSupportSessionPage.loadError")));
   }
 
   async function loadMoreActivity() {
@@ -88,7 +89,7 @@ export function PlatformDashboard() {
       setActivity([...activity, ...page.events]);
       setActivityHasMore(page.hasMore);
     } catch (err) {
-      setActivityError(err instanceof ApiError ? err.message : "تعذّر تحميل المزيد");
+      setActivityError(err instanceof ApiError ? err.message : t("platformSupportSessionsPage.loadMoreError"));
     } finally {
       setLoadingMoreActivity(false);
     }
@@ -108,53 +109,53 @@ export function PlatformDashboard() {
 
   return (
     <PlatformLayout>
-      <PageHeader title="لوحة التحكم" subtitle="نظرة تشغيلية حقيقية على حالة المنصة والعمليات — كل رقم هنا مصدره API فعلي." />
+      <PageHeader title={t("platformLayout.dashboard")} subtitle={t("platformDashboardPage.subtitle")} />
 
       <section className="mb-8">
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-stone-700">صحة النظام</h2>
+          <h2 className="text-sm font-semibold text-stone-700">{t("platformDashboardPage.healthHeading")}</h2>
           <Button variant="secondary" size="sm" onClick={loadHealth}>
-            إعادة الفحص
+            {t("platformDashboardPage.rerunCheck")}
           </Button>
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <MetricCard
-            label="حالة API"
-            value={live.checkedAt === null ? "جارٍ الفحص..." : live.value?.status === "ok" ? "يعمل" : "غير متاح"}
+            label={t("platformDashboardPage.apiStatusLabel")}
+            value={live.checkedAt === null ? t("platformDashboardPage.checking") : live.value?.status === "ok" ? t("platformDashboardPage.apiUp") : t("platformDashboardPage.apiDown")}
             tone={live.checkedAt === null ? "default" : live.value?.status === "ok" ? "success" : "danger"}
             hint={live.error ?? undefined}
           />
           <MetricCard
-            label="حالة قاعدة البيانات"
-            value={ready.checkedAt === null ? "جارٍ الفحص..." : ready.value?.status === "ok" ? "جاهزة" : "غير جاهزة"}
+            label={t("platformDashboardPage.dbStatusLabel")}
+            value={ready.checkedAt === null ? t("platformDashboardPage.checking") : ready.value?.status === "ok" ? t("platformDashboardPage.dbReady") : t("platformDashboardPage.dbNotReady")}
             tone={ready.checkedAt === null ? "default" : ready.value?.status === "ok" ? "success" : "danger"}
             hint={ready.error ?? undefined}
           />
           <MetricCard
-            label="الحالة العامة"
-            value={!overallKnown ? "جارٍ الفحص..." : overallOk ? "سليمة" : "تحتاج انتباه"}
+            label={t("platformDashboardPage.overallStatusLabel")}
+            value={!overallKnown ? t("platformDashboardPage.checking") : overallOk ? t("platformDashboardPage.overallHealthy") : t("platformDashboardPage.overallNeedsAttention")}
             tone={!overallKnown ? "default" : overallOk ? "success" : "danger"}
-            hint={live.checkedAt ? `آخر فحص: ${formatDateTime(live.checkedAt)}` : undefined}
+            hint={live.checkedAt ? t("platformDashboardPage.lastCheckedHint", { date: formatDateTime(live.checkedAt, locale) }) : undefined}
           />
         </div>
       </section>
 
       <section className="mb-8">
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-stone-700">المؤسسات</h2>
+          <h2 className="text-sm font-semibold text-stone-700">{t("platformLayout.organizations")}</h2>
           <Link to="/platform/organizations" className="text-sm text-primary hover:underline">
-            عرض كل المؤسسات
+            {t("platformDashboardPage.viewAllOrganizations")}
           </Link>
         </div>
         {orgsError && <ErrorState message={orgsError} onRetry={loadOrgs} />}
         {!orgsError && !orgs && <Skeleton rows={3} />}
-        {!orgsError && orgs && orgs.length === 0 && <EmptyState message="لا توجد مؤسسات بعد" />}
+        {!orgsError && orgs && orgs.length === 0 && <EmptyState message={t("platformDashboardPage.orgsEmptyMessage")} />}
         {!orgsError && orgs && orgs.length > 0 && (
           <Card className="divide-y divide-stone-100">
             {orgs.map((org) => (
               <div key={org.id} className="flex items-center justify-between px-4 py-3 text-sm">
                 <span className="font-medium text-stone-800">{org.name}</span>
-                <span className="text-xs text-stone-400">{formatDateTime(org.createdAt)}</span>
+                <span className="text-xs text-stone-400">{formatDateTime(org.createdAt, locale)}</span>
               </div>
             ))}
           </Card>
@@ -164,15 +165,15 @@ export function PlatformDashboard() {
       <section className="mb-8">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-sm font-semibold text-stone-700">
-            جلسات الدعم النشطة {sessions && activeSessionCount !== undefined ? `(${activeSessionCount})` : ""}
+            {t("platformDashboardPage.activeSupportSessionsHeading")} {sessions && activeSessionCount !== undefined ? `(${activeSessionCount})` : ""}
           </h2>
           <Link to="/platform/support-sessions" className="text-sm text-primary hover:underline">
-            عرض كل الجلسات
+            {t("platformDashboardPage.viewAllSessions")}
           </Link>
         </div>
         {sessionsError && <ErrorState message={sessionsError} onRetry={loadSessions} />}
         {!sessionsError && !sessions && <Skeleton rows={3} />}
-        {!sessionsError && sessions && sessions.length === 0 && <EmptyState message="لا توجد لديك جلسات دعم حتى الآن." />}
+        {!sessionsError && sessions && sessions.length === 0 && <EmptyState message={t("platformSupportSessionsPage.emptyMessage")} />}
         {!sessionsError && sessions && sessions.length > 0 && (
           <Card className="divide-y divide-stone-100">
             {sessions.map((session) => (
@@ -182,10 +183,10 @@ export function PlatformDashboard() {
                 className="flex items-center justify-between px-4 py-3 text-sm hover:bg-stone-50"
               >
                 <div className="min-w-0">
-                  <p className="font-medium text-stone-800">{session.targetCompanyName ?? "شركة غير معروفة"}</p>
-                  <p className="mt-0.5 text-xs text-stone-400">أُنشئت {formatDateTime(session.createdAt)}</p>
+                  <p className="font-medium text-stone-800">{session.targetCompanyName ?? t("platformSupportSessionsPage.unknownCompany")}</p>
+                  <p className="mt-0.5 text-xs text-stone-400">{t("platformDashboardPage.createdAt", { date: formatDateTime(session.createdAt, locale) })}</p>
                 </div>
-                <Badge tone={supportStatusTone[session.status]}>{supportStatusLabel[session.status]}</Badge>
+                <Badge tone={supportStatusTone[session.status]}>{t(`platformSupportSessionsPage.status.${session.status}`)}</Badge>
               </Link>
             ))}
           </Card>
@@ -194,12 +195,12 @@ export function PlatformDashboard() {
 
       <section>
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-stone-700">آخر نشاط إداري لي</h2>
+          <h2 className="text-sm font-semibold text-stone-700">{t("platformDashboardPage.recentActivityHeading")}</h2>
         </div>
         {activityError && <ErrorState message={activityError} onRetry={loadActivity} />}
         {!activityError && !activity && <Skeleton rows={4} />}
         {!activityError && activity && activity.length === 0 && (
-          <EmptyState message="لا يوجد نشاط إداري مسجّل لك بعد." />
+          <EmptyState message={t("platformDashboardPage.activityEmptyMessage")} />
         )}
         {!activityError && activity && activity.length > 0 && (
           <>
@@ -208,13 +209,13 @@ export function PlatformDashboard() {
                 <div key={event.id} className="px-4 py-3 text-sm">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="font-medium text-stone-800">
-                      {event.action === "supportSession.granted" && "منح وصول دعم"}
-                      {event.action === "supportSession.revoked" && "إلغاء وصول دعم"}
+                      {event.action === "supportSession.granted" && t("platformDashboardPage.actionGranted")}
+                      {event.action === "supportSession.revoked" && t("platformDashboardPage.actionRevoked")}
                       {event.action !== "supportSession.granted" && event.action !== "supportSession.revoked" && event.action}
                       {" — "}
-                      {event.companyName ?? "شركة غير معروفة"}
+                      {event.companyName ?? t("platformSupportSessionsPage.unknownCompany")}
                     </span>
-                    <span className="text-xs text-stone-400">{formatDateTime(event.createdAt)}</span>
+                    <span className="text-xs text-stone-400">{formatDateTime(event.createdAt, locale)}</span>
                   </div>
                   {event.reason && <p className="mt-1 text-xs text-stone-500">{event.reason}</p>}
                 </div>
@@ -223,16 +224,14 @@ export function PlatformDashboard() {
             {activityHasMore && (
               <div className="mt-3 text-center">
                 <Button variant="secondary" size="sm" disabled={loadingMoreActivity} onClick={loadMoreActivity}>
-                  {loadingMoreActivity ? "جارٍ التحميل..." : "تحميل المزيد"}
+                  {loadingMoreActivity ? t("quotesPage.loadingMore") : t("quotesPage.loadMore")}
                 </Button>
               </div>
             )}
           </>
         )}
         <p className="mt-3 text-xs text-stone-400">
-          لتشخيص مشكلة عميل محددة: افتح المؤسسة المعنية، ثم استخدم "طلب وصول دعم" لبدء جلسة تحقيق للقراءة فقط، وراجع سجل
-          نشاطها من صفحة الجلسة. لا يوجد حالياً نظام مركزي لتتبع الأخطاء التقنية التفصيلية — السجلات المهيكلة (Structured
-          Logs) مع Request ID هي الوسيلة الحالية للتشخيص على مستوى الخادم.
+          {t("platformDashboardPage.diagnosticsNote")}
         </p>
       </section>
     </PlatformLayout>
