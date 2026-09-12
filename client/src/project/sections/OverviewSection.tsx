@@ -270,16 +270,26 @@ export function OverviewSection() {
 
   return (
     <div className="flex flex-col gap-6 lg:gap-7">
-      <VerdictHero
+      {/* The instrument cluster: a familiar top row of stat cards (the same
+          "icon + big number + label" convention Procore/Buildertrend/
+          Autodesk Construction Cloud all use for their own dashboards) so a
+          user coming from any of those platforms recognizes this screen
+          immediately, plus one slim warning-light strip underneath for the
+          verdict — never a full-width colored takeover. Everything MIDAD-
+          specific (the connected financial chain, the prioritized risk
+          rail, the cost-vs-progress relationship) still lives one scroll
+          down, unchanged — this row is the dashboard, not the whole car. */}
+      <KpiRow
         project={project}
         contract={mainContract}
         avgProgress={avgProgress}
+        budget={data.budget}
         forecastMethod={forecastMethod}
         currency={data.forecast.currency}
-        health={health}
-        topAttention={needsAttention[0]}
-        lastActivityAt={data.activity[0]?.createdAt ?? project.createdAt}
+        overdueTasks={overdueTasks}
+        scheduleHasData={scheduleTasks.length > 0}
       />
+      <AlertStrip verdict={deriveVerdict(health)} topAttention={needsAttention[0]} lastActivityAt={data.activity[0]?.createdAt ?? project.createdAt} />
 
       {/* Risk sits at the reading-start position (right in Arabic, left in
           English/French) ahead of Performance — priority order, not detail
@@ -561,117 +571,172 @@ function StatBlock({ label, value, tone = "default" }: { label: string; value: s
   );
 }
 
-// ── Executive Verdict ───────────────────────────────────────────────────
-// One headline, its one biggest reason, and the three numbers a
-// construction executive checks first — the dominant element on the page,
-// not a small pill in a corner. `deriveVerdict` is unchanged: worst tone
-// wins across the already-computed health array (one critical indicator
-// makes the whole verdict critical, regardless of how many others are
-// healthy) — a summary of facts already shown individually below, never a
-// new score.
+// ── Instrument cluster: KPI row + verdict strip ─────────────────────────
+// `deriveVerdict` is unchanged: worst tone wins across the already-computed
+// health array (one critical indicator makes the whole verdict critical,
+// regardless of how many others are healthy) — a summary of facts already
+// shown individually below, never a new score.
 function deriveVerdict(health: HealthIndicator[]): "healthy" | "watch" | "critical" {
   if (health.some((h) => h.tone === "critical")) return "critical";
   if (health.some((h) => h.tone === "watch")) return "watch";
   return "healthy";
 }
-const verdictSurface: Record<"healthy" | "watch" | "critical", string> = {
-  healthy: "border-success-200 bg-success-50",
-  watch: "border-warning-200 bg-warning-50",
-  critical: "border-danger-200 bg-danger-50",
-};
-const verdictHeadlineColor: Record<"healthy" | "watch" | "critical", string> = {
-  healthy: "text-success-800",
-  watch: "text-warning-800",
-  critical: "text-danger-800",
-};
-const verdictDivider: Record<"healthy" | "watch" | "critical", string> = {
-  healthy: "border-success-200/70",
-  watch: "border-warning-200/70",
-  critical: "border-danger-200/70",
-};
 
-function VerdictHero({
-  project,
-  contract,
-  avgProgress,
-  forecastMethod,
-  currency,
-  health,
-  topAttention,
-  lastActivityAt,
+// One card = one instrument (speedometer, fuel gauge, warning light) — the
+// same "icon + big number + label" tile every competitor dashboard
+// (Procore, Buildertrend, Autodesk Construction Cloud) leads with, so a
+// user coming from any of them recognizes this row immediately. Deeper,
+// MIDAD-specific analysis (the connected financial chain, the prioritized
+// risk rail, the cost-vs-progress relationship) is one scroll down,
+// unabridged — this row is only the familiar entry point, not a
+// replacement for the depth.
+function StatCard({
+  icon,
+  tone = "primary",
+  label,
+  value,
+  valueTone = "default",
+  hint,
 }: {
-  project: Project;
-  contract: Contract | null;
-  avgProgress: number | null;
-  forecastMethod: ForecastResult["methods"]["commitment_aware"];
-  currency: string;
-  health: HealthIndicator[];
-  topAttention?: AttentionItem;
-  lastActivityAt: string;
+  icon: (p: IconProps) => JSX.Element;
+  tone?: keyof typeof badgeTone;
+  label: string;
+  value: string;
+  valueTone?: "default" | "success" | "warning" | "danger";
+  hint?: string;
 }) {
-  const { t, locale } = useTranslation();
-  const verdict = deriveVerdict(health);
-  const overBudget = forecastMethod.variance < 0;
-  const statusDot: Record<Project["status"], string> = { active: "bg-success-500", on_hold: "bg-warning-500", completed: "bg-stone-400" };
-
+  const valueColor =
+    valueTone === "danger" ? "text-danger-700" : valueTone === "success" ? "text-success-700" : valueTone === "warning" ? "text-warning-700" : "text-stone-900";
+  // min-w-0 + break-words: same MetricCard-documented fix as every other
+  // stat component on this page — a long formatted money string must wrap
+  // inside its own card, never overlap the next one.
   return (
-    <div className={`rounded-xl border p-5 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_1px_8px_rgba(15,23,42,0.03)] lg:p-7 ${verdictSurface[verdict]}`}>
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="min-w-0">
-          <p className="text-xs font-semibold uppercase tracking-wide text-stone-500">{t("dashboard.headerSkeletonTitle")}</p>
-          <span className={`mt-2 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${statusTone[project.status] === "success" ? "bg-success-100 text-success-700" : statusTone[project.status] === "warning" ? "bg-warning-100 text-warning-700" : "bg-stone-100 text-stone-600"}`}>
-            <span className={`h-1.5 w-1.5 rounded-full ${statusDot[project.status]}`} aria-hidden="true" />
-            {t(`dashboard.status.${project.status}`)}
-          </span>
-          <h1 className={`mt-2 text-2xl font-extrabold tracking-tight lg:text-3xl ${verdictHeadlineColor[verdict]}`}>
-            {t(`dashboard.verdict.${verdict}`)}
-          </h1>
-          <p className="mt-2 max-w-2xl text-sm text-stone-600">
-            {topAttention ? (
-              <Link to={topAttention.href} className="inline items-center font-medium hover:underline">
-                {topAttention.text}
-                {topAttention.metric && <span className="font-bold"> — {topAttention.metric}</span>}
-              </Link>
-            ) : (
-              t("dashboard.needsAttention.empty")
-            )}
-          </p>
-        </div>
-        <div className="flex shrink-0 items-center gap-1.5 text-xs text-stone-400">
-          <IconClock width={14} height={14} />
-          {t("dashboard.identity.lastUpdated")} {formatDateTime(lastActivityAt, locale)}
-        </div>
+    <div className="min-w-0 rounded-lg border border-stone-200 bg-white p-3.5 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+      <div className="flex items-center gap-2">
+        <IconBadge icon={icon} tone={tone} tier="secondary" />
+        <span className="truncate text-xs font-medium text-stone-500">{label}</span>
       </div>
-
-      <div className={`mt-6 grid grid-cols-1 gap-5 border-t pt-5 sm:grid-cols-3 ${verdictDivider[verdict]}`}>
-        <HeroKpi label={t("dashboard.identity.contractValue")} value={contract ? formatMoney(contract.revisedValue, contract.currency, locale) : "—"} />
-        <HeroKpi
-          label={t("dashboard.identity.progress")}
-          value={avgProgress !== null ? formatPercent(avgProgress, 1, locale) : t("dashboard.identity.noData")}
-          hint={avgProgress !== null ? t("dashboard.identity.fromSchedule") : undefined}
-        />
-        <HeroKpi
-          label={t("dashboard.financial.expectedVariance")}
-          value={`${formatMoney(forecastMethod.variance, currency, locale)} (${formatPercent(forecastMethod.variancePercent, 1, locale)})`}
-          tone={overBudget ? "danger" : "success"}
-        />
-      </div>
+      <p className={`mt-2 break-words text-xl font-extrabold tracking-tight ${valueColor}`}>{value}</p>
+      {hint && <p className="mt-0.5 truncate text-[11px] text-stone-400">{hint}</p>}
     </div>
   );
 }
 
-function HeroKpi({ label, value, hint, tone = "default" }: { label: string; value: string; hint?: string; tone?: "default" | "danger" | "success" }) {
-  const valueColor = tone === "danger" ? "text-danger-700" : tone === "success" ? "text-success-700" : "text-stone-900";
-  // min-w-0 overrides a grid item's default min-width:auto — without it, a
-  // long formatted money string forces this column wider than its 1/3
-  // track share and overlaps the next column's text instead of wrapping
-  // (same real bug ui/MetricCard.tsx's own fix documents; confirmed here
-  // via live browser screenshot at 1024px, not just theorized).
+function KpiRow({
+  project,
+  contract,
+  avgProgress,
+  budget,
+  forecastMethod,
+  currency,
+  overdueTasks,
+  scheduleHasData,
+}: {
+  project: Project;
+  contract: Contract | null;
+  avgProgress: number | null;
+  budget: BudgetSummary;
+  forecastMethod: ForecastResult["methods"]["commitment_aware"];
+  currency: string;
+  overdueTasks: ProjectTask[];
+  scheduleHasData: boolean;
+}) {
+  const { t, locale } = useTranslation();
+  const overBudget = forecastMethod.variance < 0;
+  const costConsumption = budget.totals.planned > 0 ? (budget.totals.spent / budget.totals.planned) * 100 : null;
+
   return (
-    <div className="min-w-0">
-      <p className="text-xs font-medium text-stone-500">{label}</p>
-      <p className={`mt-1 break-words text-2xl font-extrabold tracking-tight lg:text-[28px] ${valueColor}`}>{value}</p>
-      {hint && <p className="mt-0.5 text-xs text-stone-400">{hint}</p>}
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
+      <StatCard
+        icon={IconShield}
+        tone={statusTone[project.status] === "success" ? "success" : statusTone[project.status] === "warning" ? "warning" : "neutral"}
+        label={t("common.status")}
+        value={t(`dashboard.status.${project.status}`)}
+      />
+      <StatCard icon={IconMoney} label={t("dashboard.identity.contractValue")} value={contract ? formatMoney(contract.revisedValue, contract.currency, locale) : "—"} />
+      <StatCard
+        icon={IconBars}
+        label={t("dashboard.identity.progress")}
+        value={avgProgress !== null ? formatPercent(avgProgress, 1, locale) : t("dashboard.identity.noData")}
+        hint={avgProgress !== null ? t("dashboard.identity.fromSchedule") : undefined}
+      />
+      <StatCard
+        icon={IconTrend}
+        label={t("dashboard.costProgress.costConsumption")}
+        value={costConsumption !== null ? formatPercent(costConsumption, 1, locale) : "—"}
+      />
+      <StatCard
+        icon={overBudget ? IconAlertTriangle : IconTrend}
+        tone={overBudget ? "danger" : "success"}
+        label={t("dashboard.financial.expectedVariance")}
+        value={`${formatMoney(forecastMethod.variance, currency, locale)} (${formatPercent(forecastMethod.variancePercent, 1, locale)})`}
+        valueTone={overBudget ? "danger" : "success"}
+      />
+      <StatCard
+        icon={IconCalendar}
+        tone={!scheduleHasData ? "neutral" : overdueTasks.length > 0 ? "warning" : "success"}
+        label={t("dashboard.progressSchedule.scheduleStatus")}
+        value={
+          !scheduleHasData
+            ? t("dashboard.health.scheduleNoData")
+            : overdueTasks.length > 0
+              ? t("dashboard.progressSchedule.tasksOverdueCount", { count: overdueTasks.length })
+              : t("dashboard.progressSchedule.onTrack")
+        }
+        valueTone={scheduleHasData && overdueTasks.length > 0 ? "warning" : "default"}
+      />
+    </div>
+  );
+}
+
+// The one warning light on the instrument cluster — a single-line strip,
+// never a full-width colored takeover, still carrying the verdict headline
+// plus its one biggest reason (or an honest all-clear) so the executive
+// read stays a single glance even though the KPI row above no longer
+// states it directly.
+function AlertStrip({
+  verdict,
+  topAttention,
+  lastActivityAt,
+}: {
+  verdict: "healthy" | "watch" | "critical";
+  topAttention?: AttentionItem;
+  lastActivityAt: string;
+}) {
+  const { t, locale } = useTranslation();
+  const toneClass: Record<"healthy" | "watch" | "critical", string> = {
+    healthy: "border-success-200 bg-success-50 text-success-700",
+    watch: "border-warning-200 bg-warning-50 text-warning-700",
+    critical: "border-danger-200 bg-danger-50 text-danger-700",
+  };
+  const Icon = verdict === "critical" ? IconAlertTriangle : verdict === "watch" ? IconAlertCircle : IconTrend;
+
+  return (
+    <div className={`flex flex-wrap items-center justify-between gap-3 rounded-lg border px-4 py-2.5 text-sm ${toneClass[verdict]}`}>
+      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+        <Icon width={16} height={16} className="shrink-0" />
+        <span className="font-semibold">{t(`dashboard.verdict.${verdict}`)}</span>
+        {topAttention ? (
+          <Link to={topAttention.href} className="flex flex-wrap items-center gap-x-2 hover:underline">
+            <span className="text-stone-400" aria-hidden="true">
+              —
+            </span>
+            <span>{topAttention.text}</span>
+            {topAttention.metric && <span className="font-bold">{topAttention.metric}</span>}
+          </Link>
+        ) : (
+          <>
+            <span className="text-stone-400" aria-hidden="true">
+              —
+            </span>
+            <span>{t("dashboard.needsAttention.empty")}</span>
+          </>
+        )}
+      </div>
+      <span className="flex shrink-0 items-center gap-1.5 text-xs text-stone-400">
+        <IconClock width={13} height={13} />
+        {t("dashboard.identity.lastUpdated")} {formatDateTime(lastActivityAt, locale)}
+      </span>
     </div>
   );
 }
