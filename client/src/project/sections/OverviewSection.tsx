@@ -285,7 +285,7 @@ export function OverviewSection() {
     // internal scroll (max-h + overflow-y-auto) instead: every item is
     // still fully present and one scroll away, never removed, shrunk
     // illegibly, or hidden behind a tooltip.
-    <div className="flex flex-col gap-2 xl:gap-2.5">
+    <div className="flex flex-col gap-2 xl:gap-2">
       <VerdictBlock
         project={project}
         contract={mainContract}
@@ -322,7 +322,7 @@ export function OverviewSection() {
           every sibling to match it — Commercial and Pulse, the two cards
           whose real content can genuinely exceed that height, scroll
           internally instead (nothing dropped, one scroll away). */}
-      <div className="grid grid-cols-1 gap-2 xl:grid-cols-12 xl:gap-2 xl:[&>*]:h-[185px]">
+      <div className="grid grid-cols-1 gap-2 xl:grid-cols-12 xl:gap-2 xl:[&>*]:h-[195px]">
         <div className="xl:col-span-4">
           <CostVsProgress
             budget={data.budget}
@@ -555,9 +555,10 @@ function VerdictBlock({
             facts (start date, end date, days remaining, contract value)
             visible — none dropped to save space — in roughly half the
             vertical room a single column would take. */}
-        <div className="flex shrink-0 items-center gap-4 rounded-xl bg-primary p-3 xl:w-80">
-          <Gauge value={progress} locale={locale} color="#2dd4bf" trackColor="rgba(255,255,255,0.14)" labelColor="text-white" size={56} stroke={6} />
-          <div className="grid min-w-0 flex-1 grid-cols-2 gap-x-3 gap-y-1 text-xs">
+        <div className="relative flex shrink-0 items-center gap-4 overflow-hidden rounded-xl bg-primary p-3 xl:w-80">
+          <ConstructionMotif />
+          <Gauge value={progress} locale={locale} color="#2dd4bf" trackColor="rgba(255,255,255,0.18)" labelColor="text-white" size={56} stroke={6} />
+          <div className="relative grid min-w-0 flex-1 grid-cols-2 gap-x-3 gap-y-1 text-xs">
             {startDate && <InfoRow dark icon={IconCalendar} label={t("dashboard.identity.startDate")} value={formatDate(startDate, locale)} />}
             {endDate && <InfoRow dark icon={IconCalendar} label={t("dashboard.identity.expectedCompletion")} value={formatDate(endDate, locale)} />}
             {daysRemaining !== null && daysRemaining >= 0 && (
@@ -608,6 +609,38 @@ function HeroStat({
         </div>
       )}
     </div>
+  );
+}
+
+// A decorative skyline-and-crane illustration for the hero's dark identity
+// panel — deliberately a drawn SVG motif, never a stock photo: this
+// codebase has no real photograph of the project, and passing off a stock
+// image as if it depicted this specific building would be exactly the
+// kind of fabrication the rest of this page refuses to do. An illustrated
+// pattern makes no such claim; it's the same honest move as a skeleton
+// loader or a placeholder avatar.
+function ConstructionMotif() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-0 h-full w-full"
+      viewBox="0 0 320 96"
+      preserveAspectRatio="xMidYMax slice"
+      fill="none"
+    >
+      <g opacity="0.16" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="18" y="40" width="22" height="56" fill="white" fillOpacity="0.5" stroke="none" />
+        <rect x="46" y="26" width="18" height="70" fill="white" fillOpacity="0.35" stroke="none" />
+        <rect x="70" y="50" width="16" height="46" fill="white" fillOpacity="0.5" stroke="none" />
+        <rect x="230" y="34" width="20" height="62" fill="white" fillOpacity="0.4" stroke="none" />
+        <rect x="256" y="52" width="16" height="44" fill="white" fillOpacity="0.5" stroke="none" />
+        <rect x="278" y="20" width="18" height="76" fill="white" fillOpacity="0.3" stroke="none" />
+        <path d="M92 96V16" />
+        <path d="M92 16h58" />
+        <path d="M92 30l-14 8" />
+        <path d="M150 16v10" />
+      </g>
+    </svg>
   );
 }
 
@@ -865,6 +898,7 @@ function FinancialControl({
   const { t, locale } = useTranslation();
   const m = forecast.methods.commitment_aware;
   const overBudget = m.variance < 0;
+  const mirrorChevron = locale === "ar";
 
   // Every value read verbatim off forecast.methods.commitment_aware / the
   // contract, never recomputed. Each stage is a self-sized chip (icon +
@@ -905,7 +939,7 @@ function FinancialControl({
       <div className="mt-3 flex flex-nowrap items-start gap-x-1 overflow-x-auto pb-1">
         {stages.map((s, i) => (
           <div key={s.label} className="flex shrink-0 items-start gap-1 sm:gap-2">
-            {i > 0 && <span className="mt-4 hidden h-8 w-px shrink-0 bg-stone-200 sm:block" aria-hidden="true" />}
+            {i > 0 && <IconChevron mirror={mirrorChevron} className="mt-4 hidden shrink-0 text-stone-300 sm:block" aria-hidden="true" />}
             <Link to={`/projects/${projectId}/${s.href}`} className="flex flex-col items-center gap-1.5 px-1 text-center transition hover:opacity-70">
               <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${s.iconTone}`}>
                 <s.icon />
@@ -915,7 +949,7 @@ function FinancialControl({
             </Link>
           </div>
         ))}
-        <span className="mt-4 hidden h-8 w-px shrink-0 bg-stone-200 sm:block" aria-hidden="true" />
+        <IconChevron mirror={mirrorChevron} className="mt-4 hidden shrink-0 text-stone-300 sm:block" aria-hidden="true" />
         <div className={`flex shrink-0 flex-col items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-center ${overBudget ? "bg-danger-50" : "bg-success-50"}`}>
           <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${overBudget ? "bg-danger-100 text-danger-700" : "bg-success-100 text-success-700"}`}>
             {overBudget ? <IconAlertTriangle /> : <IconTrendUp />}
@@ -1045,7 +1079,7 @@ function ExceptionsPanel({ items }: { items: AttentionItem[] }) {
   const { t, locale } = useTranslation();
   const mirrorChevron = locale === "ar";
   return (
-    <div className="flex h-full flex-col rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
+    <div className="relative flex h-full flex-col rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
       <h2 className="shrink-0 text-sm font-bold uppercase tracking-wide text-stone-900">{t("dashboard.needsAttention.title")}</h2>
       {items.length === 0 ? (
         <p className="mt-3 text-sm text-stone-400">{t("dashboard.needsAttention.empty")}</p>
@@ -1078,6 +1112,7 @@ function ExceptionsPanel({ items }: { items: AttentionItem[] }) {
           })}
         </ul>
       )}
+      {items.length > 0 && <ScrollFade />}
     </div>
   );
 }
@@ -1179,7 +1214,14 @@ function PlainRow({
   // labels ("Total com…", "Awaiting ap…") at that width.
   return (
     <div>
-      <p className="text-[11px] text-stone-500">{label}</p>
+      {/* truncate, not a bare span: an untruncated label was free to wrap
+          to a second line for longer English text ("Pending approval
+          (1)"), and in this row's now-fixed-height, internally-scrolling
+          card, that extra line pushed the row below it out of view —
+          visually slicing a money VALUE in half instead of just hiding a
+          label word, which is worse than what the truncate convention
+          elsewhere on this page already guards against (confirmed live). */}
+      <p className="truncate text-[11px] text-stone-500">{label}</p>
       <p className={`whitespace-nowrap text-xs font-semibold tabular-nums sm:text-sm ${color}`}>{value}</p>
       {hint && <p className="truncate text-[11px] text-stone-400">{hint}</p>}
     </div>
@@ -1200,6 +1242,15 @@ function BadgeRow({ label, count, tone }: { label: string; count: number; tone: 
       <CountBadge count={count} tone={count > 0 ? tone : "success"} />
     </div>
   );
+}
+
+// A quiet bottom fade over an internally-scrolling card's last visible row
+// — signals "more below, scroll for it" instead of a hard, unexplained
+// cut. A card whose content happens to fit exactly needs no such cue, but
+// rendering the fade unconditionally is harmless there (the gradient sits
+// over an already-empty few pixels of white).
+function ScrollFade() {
+  return <div className="pointer-events-none absolute inset-x-0 bottom-0 h-6 rounded-b-xl bg-gradient-to-t from-white to-transparent" aria-hidden="true" />;
 }
 
 // ── Delivery / Cash / Commercial — three quiet columns, divided by a thin
@@ -1330,7 +1381,7 @@ function CommercialColumn({
     // content on the page (three real sub-sections) — capping it at the
     // row's shared height and letting the body scroll internally keeps
     // every figure present without stretching its four siblings to match.
-    <div className="flex h-full flex-col rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
+    <div className="relative flex h-full flex-col rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
       <h3 className="shrink-0 text-sm font-bold text-stone-900">{t("dashboard.commercial.title")}</h3>
       <div className="mt-2 min-h-0 flex-1 space-y-3 overflow-y-auto pe-1">
         <div>
@@ -1381,6 +1432,7 @@ function CommercialColumn({
           </p>
         </div>
       </div>
+      <ScrollFade />
     </div>
   );
 }
@@ -1421,7 +1473,7 @@ function ActivityPulse({ events }: { events: ActivityEvent[] }) {
     // Same capped-height + internal-scroll treatment as Commercial: up to
     // 8 real events can be present, and every one of them stays reachable
     // by scrolling this one card instead of pushing the whole row taller.
-    <div className="flex h-full flex-col rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
+    <div className="relative flex h-full flex-col rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
       <h3 className="shrink-0 text-sm font-bold text-stone-900">{t("dashboard.activity.title")}</h3>
       {events.length === 0 ? (
         <p className="mt-2 text-xs text-stone-400">{t("dashboard.activity.empty")}</p>
@@ -1441,6 +1493,7 @@ function ActivityPulse({ events }: { events: ActivityEvent[] }) {
           })}
         </ul>
       )}
+      {events.length > 0 && <ScrollFade />}
     </div>
   );
 }
