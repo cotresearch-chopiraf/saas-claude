@@ -2425,6 +2425,7 @@ const fr = {
     needsAttention: {
       title: "Nécessite une attention",
       empty: "Aucun élément ne nécessite votre attention pour le moment.",
+      openAction: "Voir les détails",
       critical: "Critique",
       attention: "Attention",
       info: "Info",

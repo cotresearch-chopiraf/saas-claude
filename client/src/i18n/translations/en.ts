@@ -2425,6 +2425,7 @@ const en = {
     needsAttention: {
       title: "Needs attention",
       empty: "Nothing currently needs your attention.",
+      openAction: "View details",
       critical: "Critical",
       attention: "Attention",
       info: "Info",

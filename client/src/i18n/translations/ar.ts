@@ -2424,6 +2424,7 @@ const ar = {
     needsAttention: {
       title: "يحتاج إلى انتباه",
       empty: "لا توجد حالياً بنود تحتاج إلى انتباه.",
+      openAction: "عرض التفاصيل",
       critical: "حرج",
       attention: "تنبيه",
       info: "معلومات",

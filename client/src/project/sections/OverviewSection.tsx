@@ -987,16 +987,28 @@ function ExceptionsPanel({ items }: { items: AttentionItem[] }) {
             const [borderClass, colorClass] = attentionAccent[item.severity].split(" ");
             return (
               <li key={i}>
+                {/* The text gets its own full-width row and the action
+                    button its own row below (never sharing one line) — a
+                    shared row squeezed the text into an ugly word-by-word
+                    wrap in the narrower English column once a button was
+                    added beside it (confirmed live at 1440px). */}
                 <Link
                   to={item.href}
-                  className={`flex items-center gap-3 rounded-lg border-s-4 py-2.5 ps-3 pe-2.5 transition ${borderClass} ${attentionBg[item.severity]}`}
+                  className={`group block rounded-lg border-s-4 py-2.5 ps-3 pe-2.5 transition ${borderClass} ${attentionBg[item.severity]}`}
                 >
-                  <Icon className={`shrink-0 ${colorClass}`} />
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-sm font-medium text-stone-700">{item.text}</span>
-                    {item.metric && <span className="mt-0.5 block text-xs font-semibold text-stone-500">{item.metric}</span>}
-                  </span>
-                  <IconChevron mirror={mirrorChevron} className="shrink-0 text-stone-300" />
+                  <div className="flex items-start gap-3">
+                    <Icon className={`mt-0.5 shrink-0 ${colorClass}`} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-medium text-stone-700">{item.text}</span>
+                      {item.metric && <span className="mt-0.5 block text-xs font-semibold text-stone-500">{item.metric}</span>}
+                    </span>
+                  </div>
+                  <div className="mt-2 flex justify-end">
+                    <span className="inline-flex shrink-0 items-center gap-1 rounded-md border border-stone-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-stone-600 transition group-hover:border-stone-300 group-hover:bg-stone-50">
+                      {t("dashboard.needsAttention.openAction")}
+                      <IconChevron mirror={mirrorChevron} className="shrink-0 text-stone-400" />
+                    </span>
+                  </div>
                 </Link>
               </li>
             );
