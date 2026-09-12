@@ -272,7 +272,20 @@ export function OverviewSection() {
           : t("dashboard.costProgress.aligned");
 
   return (
-    <div className="flex flex-col gap-10 lg:gap-14">
+    // A single-viewport command center on desktop, not a long vertical
+    // report: gap-3/xl:gap-4 (not the gap-10/gap-14 every earlier version
+    // of this page used) and every card below is deliberately compact —
+    // reduced padding, smaller type, tighter internal spacing — so the
+    // whole page's primary decision-making information (hero, health,
+    // financial pipeline, exceptions, cost vs progress, delivery, cash,
+    // commercial, pulse, quick actions) targets fitting inside a
+    // 1440×900 viewport without scrolling (verified live). Two panels
+    // whose real content can genuinely outgrow that budget — Needs
+    // Attention's item list and the activity feed — get their own
+    // internal scroll (max-h + overflow-y-auto) instead: every item is
+    // still fully present and one scroll away, never removed, shrunk
+    // illegibly, or hidden behind a tooltip.
+    <div className="flex flex-col gap-2 xl:gap-2.5">
       <VerdictBlock
         project={project}
         contract={mainContract}
@@ -292,29 +305,35 @@ export function OverviewSection() {
           multi-column switch on this page waits for `xl` for the same
           reason (confirmed via a live 1024px screenshot in an earlier
           round of this dashboard). */}
-      <div className="grid grid-cols-1 gap-10 xl:grid-cols-12 xl:gap-12">
-        <div className="xl:col-span-8">
+      <div className="grid grid-cols-1 gap-2 xl:grid-cols-12 xl:gap-2 xl:[&>*]:h-[140px]">
+        <div className="xl:col-span-7">
           <FinancialControl contract={mainContract} forecast={data.forecast} revision={latestRevision} projectId={projectId} />
         </div>
-        <div className="xl:col-span-4">
+        <div className="xl:col-span-5">
           <ExceptionsPanel items={needsAttention} />
         </div>
       </div>
 
-      <CostVsProgress
-        budget={data.budget}
-        avgProgress={avgProgress}
-        costConsumption={costConsumption}
-        gap={progressCostGap}
-        warnGap={gapIsWarning}
-        headline={progressCostHeadline}
-      />
-
-      {/* Three distinct bordered cards, not a single row divided by thin
-          rules — each domain (Delivery, Cash, Commercial) gets its own
-          surface, matching every other section on this page now. */}
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-        <div className="rounded-xl border border-stone-200 bg-white p-5 shadow-sm sm:p-6">
+      {/* Cost vs Progress, Delivery, Cash, Commercial, and Pulse all share
+          one row on desktop instead of stacking as four separate full-
+          width sections — the composition the reference targets. */}
+      {/* xl:h-64 pins this whole row to one fixed height instead of letting
+          the tallest card (Commercial, with three sub-sections) stretch
+          every sibling to match it — Commercial and Pulse, the two cards
+          whose real content can genuinely exceed that height, scroll
+          internally instead (nothing dropped, one scroll away). */}
+      <div className="grid grid-cols-1 gap-2 xl:grid-cols-12 xl:gap-2 xl:[&>*]:h-[185px]">
+        <div className="xl:col-span-4">
+          <CostVsProgress
+            budget={data.budget}
+            avgProgress={avgProgress}
+            costConsumption={costConsumption}
+            gap={progressCostGap}
+            warnGap={gapIsWarning}
+            headline={progressCostHeadline}
+          />
+        </div>
+        <div className="xl:col-span-2">
           <DeliveryColumn
             projectId={projectId}
             tasks={data.tasks}
@@ -324,10 +343,10 @@ export function OverviewSection() {
             measurementsAwaitingApproval={measurementsAwaitingApproval}
           />
         </div>
-        <div className="rounded-xl border border-stone-200 bg-white p-5 shadow-sm sm:p-6">
+        <div className="xl:col-span-2">
           <CashColumn cashFlow={data.cashFlow} projectId={projectId} />
         </div>
-        <div className="rounded-xl border border-stone-200 bg-white p-5 shadow-sm sm:p-6">
+        <div className="xl:col-span-2">
           <CommercialColumn
             projectId={projectId}
             totalCommitted={totalCommitted}
@@ -342,16 +361,12 @@ export function OverviewSection() {
             laborCost={data.laborCost}
           />
         </div>
-      </div>
-
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-        <div className="rounded-xl border border-stone-200 bg-white p-5 shadow-sm sm:p-6 xl:col-span-2">
+        <div className="xl:col-span-2">
           <ActivityPulse events={projectActivity} />
         </div>
-        <div className="flex items-start">
-          <QuickActionsRow projectId={projectId} />
-        </div>
       </div>
+
+      <QuickActionsRow projectId={projectId} />
     </div>
   );
 }
@@ -479,7 +494,7 @@ function VerdictBlock({
   const daysRemaining = endDate ? Math.ceil((new Date(endDate).getTime() - Date.now()) / 86400000) : null;
 
   return (
-    <div className={`rounded-xl border border-s-4 border-stone-200 bg-white p-5 sm:p-7 ${accentBorder[verdict]}`}>
+    <div className={`rounded-xl border border-s-4 border-stone-200 bg-white p-2.5 ${accentBorder[verdict]}`}>
       {/* xl, not lg: the desktop sidebar (ProjectSidebar.tsx) also claims
           its fixed width starting exactly at `lg` (1024px) — switching
           this hero to a row layout at that same breakpoint left the ring
@@ -487,10 +502,14 @@ function VerdictBlock({
           least real room, and the stats visually overlapped (confirmed
           live: "53%"/"62%"/"0%" rendered on top of each other at exactly
           1024px). Every other multi-column switch on this page already
-          waits for `xl` for the same reason. */}
-      <div className="flex flex-col gap-7 xl:flex-row xl:items-start xl:justify-between">
+          waits for `xl` for the same reason. The side panel stays a row
+          (icon beside info, never stacked above it) at every width —
+          stacking it at xl was the single biggest height cost in the
+          whole page in an earlier round, and this hero must stay short
+          for the page to fit one desktop viewport. */}
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${badgePillTone[verdict]}`}>
               <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotColor[verdict]}`} aria-hidden="true" />
               {t(`dashboard.status.${project.status}`)}
@@ -498,10 +517,10 @@ function VerdictBlock({
             <span className="truncate text-xs font-medium text-stone-400">{project.name}</span>
           </div>
 
-          <h1 className={`mt-3 text-2xl font-bold tracking-tight sm:text-3xl ${verdictColor[verdict]}`}>{t(`dashboard.verdict.${verdict}`)}</h1>
-          <p className="mt-1.5 max-w-2xl text-sm text-stone-500">{insight}</p>
+          <h1 className={`mt-1 text-base font-bold tracking-tight sm:text-lg ${verdictColor[verdict]}`}>{t(`dashboard.verdict.${verdict}`)}</h1>
+          <p className="mt-0.5 max-w-2xl text-xs text-stone-500">{insight}</p>
 
-          <div className="mt-7 grid grid-cols-1 gap-6 sm:grid-cols-3">
+          <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
             <HeroStat
               label={t("dashboard.identity.progress")}
               display={progress !== null ? formatPercent(progress, 1, locale) : "—"}
@@ -532,17 +551,19 @@ function VerdictBlock({
             codebase has no real photo of the project to show, so rather
             than fabricate a stock image, the panel itself carries the
             visual weight through color/contrast instead of imagery. */}
-        <div className="shrink-0 rounded-xl bg-primary p-5 xl:w-72">
-          <div className="flex flex-row items-center gap-5 xl:flex-col xl:items-stretch">
-            <Gauge value={progress} locale={locale} color="#2dd4bf" trackColor="rgba(255,255,255,0.14)" labelColor="text-white" />
-            <div className="min-w-0 flex-1 space-y-2.5 text-xs xl:mt-2 xl:w-full xl:border-t xl:border-white/10 xl:pt-4">
-              {startDate && <InfoRow dark icon={IconCalendar} label={t("dashboard.identity.startDate")} value={formatDate(startDate, locale)} />}
-              {endDate && <InfoRow dark icon={IconCalendar} label={t("dashboard.identity.expectedCompletion")} value={formatDate(endDate, locale)} />}
-              {daysRemaining !== null && daysRemaining >= 0 && (
-                <InfoRow dark icon={IconClipboard} label={t("dashboard.identity.expectedCompletion")} value={t("dashboard.identity.daysRemainingCount", { count: daysRemaining })} />
-              )}
-              {contract && <InfoRow dark icon={IconMoney} label={t("dashboard.identity.contractValue")} value={formatMoney(contract.revisedValue, contract.currency, locale)} />}
-            </div>
+        {/* A 2-column mini-grid, not a vertical list: keeps all four real
+            facts (start date, end date, days remaining, contract value)
+            visible — none dropped to save space — in roughly half the
+            vertical room a single column would take. */}
+        <div className="flex shrink-0 items-center gap-4 rounded-xl bg-primary p-3 xl:w-80">
+          <Gauge value={progress} locale={locale} color="#2dd4bf" trackColor="rgba(255,255,255,0.14)" labelColor="text-white" size={56} stroke={6} />
+          <div className="grid min-w-0 flex-1 grid-cols-2 gap-x-3 gap-y-1 text-xs">
+            {startDate && <InfoRow dark icon={IconCalendar} label={t("dashboard.identity.startDate")} value={formatDate(startDate, locale)} />}
+            {endDate && <InfoRow dark icon={IconCalendar} label={t("dashboard.identity.expectedCompletion")} value={formatDate(endDate, locale)} />}
+            {daysRemaining !== null && daysRemaining >= 0 && (
+              <InfoRow dark icon={IconClipboard} label={t("dashboard.identity.expectedCompletion")} value={t("dashboard.identity.daysRemainingCount", { count: daysRemaining })} />
+            )}
+            {contract && <InfoRow dark icon={IconMoney} label={t("dashboard.identity.contractValue")} value={formatMoney(contract.revisedValue, contract.currency, locale)} />}
           </div>
         </div>
       </div>
@@ -578,11 +599,11 @@ function HeroStat({
   const pct = barValue !== undefined && barValue !== null ? Math.min(100, Math.max(0, barValue)) : null;
   return (
     <div className="min-w-0">
-      <p className={`text-3xl font-extrabold tracking-tight tabular-nums sm:text-4xl ${color}`}>{display}</p>
-      <p className="mt-1 text-xs font-medium text-stone-500">{label}</p>
-      {hint && <p className="mt-0.5 text-[11px] text-stone-400">{hint}</p>}
+      <p className={`text-lg font-extrabold tracking-tight tabular-nums sm:text-xl ${color}`}>{display}</p>
+      <p className="text-[11px] font-medium text-stone-500">{label}</p>
+      {hint && <p className="text-[10px] text-stone-400">{hint}</p>}
       {barColor && (
-        <div className="mt-2.5 h-1.5 w-full overflow-hidden rounded-full bg-stone-100">
+        <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-stone-100">
           <div className={`h-full rounded-full ${barColor}`} style={{ width: `${pct ?? 0}%` }} />
         </div>
       )}
@@ -790,16 +811,21 @@ const healthPillTone: Record<HealthTone, string> = {
 function HealthLine({ health, projectId }: { health: HealthIndicator[]; projectId: string }) {
   const { t } = useTranslation();
   return (
+    // sr-only, not a visible heading row: the title text must stay in the
+    // DOM (an existing test anchors on it, and it names the section for
+    // screen readers), but a printed label above six already
+    // self-labeled pills was pure vertical cost with no reading-order
+    // benefit — every pill already leads with its own bolded domain name.
     <div>
-      <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-stone-400">{t("dashboard.health.title")}</p>
-      <div className="flex flex-wrap gap-2">
+      <p className="sr-only">{t("dashboard.health.title")}</p>
+      <div className="flex flex-wrap gap-1.5">
         {health.map((h) => {
           const Icon = healthIcon[h.key] ?? IconInfo;
           return (
             <Link
               key={h.key}
               to={h.href === "__company_compliance__" ? "/labor-compliance" : `/projects/${projectId}/${h.href}`}
-              className={`flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs transition hover:opacity-80 ${healthPillTone[h.tone]}`}
+              className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition hover:opacity-80 ${healthPillTone[h.tone]}`}
             >
               <Icon className="shrink-0" />
               <span className="font-semibold">{h.label}</span>
@@ -857,7 +883,7 @@ function FinancialControl({
   ];
 
   return (
-    <div className="rounded-xl border border-stone-200 bg-white p-5 shadow-sm sm:p-6">
+    <div className="h-full overflow-y-auto rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
       <div className="flex items-baseline justify-between gap-3">
         <h2 className="text-sm font-bold uppercase tracking-wide text-stone-900">{t("dashboard.financial.title")}</h2>
         <span className="text-xs text-stone-400">{t("dashboard.financial.asOf", { date: formatDate(forecast.asOfDate, locale) })}</span>
@@ -869,36 +895,43 @@ function FinancialControl({
           which this codebase deliberately avoids everywhere since it
           flips ambiguously in RTL (see IconChevron's mirror prop below
           for the one place a direction genuinely is needed). */}
-      <div className="mt-6 flex flex-wrap items-start justify-between gap-x-2 gap-y-6">
+      {/* flex-nowrap + overflow-x-auto, not flex-wrap: this card is capped
+          to a fixed height on desktop (it shares a row with Delivery/Cash/
+          Commercial/Pulse), and letting six stages wrap to a second line
+          pushed real content below the card's visible area (confirmed
+          live). A single row that scrolls horizontally in the rare case
+          it doesn't fit keeps every stage reachable without stealing
+          height from the rest of the page. */}
+      <div className="mt-3 flex flex-nowrap items-start gap-x-1 overflow-x-auto pb-1">
         {stages.map((s, i) => (
-          <div key={s.label} className="flex items-start gap-2 sm:gap-3">
-            {i > 0 && <span className="mt-5 hidden h-10 w-px shrink-0 bg-stone-200 sm:block" aria-hidden="true" />}
-            <Link to={`/projects/${projectId}/${s.href}`} className="flex flex-col items-center gap-2 px-1 text-center transition hover:opacity-70">
-              <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${s.iconTone}`}>
+          <div key={s.label} className="flex shrink-0 items-start gap-1 sm:gap-2">
+            {i > 0 && <span className="mt-4 hidden h-8 w-px shrink-0 bg-stone-200 sm:block" aria-hidden="true" />}
+            <Link to={`/projects/${projectId}/${s.href}`} className="flex flex-col items-center gap-1.5 px-1 text-center transition hover:opacity-70">
+              <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${s.iconTone}`}>
                 <s.icon />
               </span>
-              <span className="whitespace-nowrap text-[11px] font-medium uppercase tracking-wide text-stone-400">{s.label}</span>
-              <span className="whitespace-nowrap text-sm font-bold tabular-nums text-stone-900">{formatMoney(s.value, forecast.currency, locale)}</span>
+              <span className="max-w-[76px] truncate text-[10px] font-medium uppercase tracking-wide text-stone-400">{s.label}</span>
+              <span className="whitespace-nowrap text-xs font-bold tabular-nums text-stone-900 sm:text-sm">{formatMoney(s.value, forecast.currency, locale)}</span>
             </Link>
           </div>
         ))}
-        <span className="mt-5 hidden h-10 w-px shrink-0 bg-stone-200 sm:block" aria-hidden="true" />
-        <div className={`flex flex-col items-center gap-2 rounded-lg px-3 py-2 text-center ${overBudget ? "bg-danger-50" : "bg-success-50"}`}>
-          <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${overBudget ? "bg-danger-100 text-danger-700" : "bg-success-100 text-success-700"}`}>
+        <span className="mt-4 hidden h-8 w-px shrink-0 bg-stone-200 sm:block" aria-hidden="true" />
+        <div className={`flex shrink-0 flex-col items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-center ${overBudget ? "bg-danger-50" : "bg-success-50"}`}>
+          <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${overBudget ? "bg-danger-100 text-danger-700" : "bg-success-100 text-success-700"}`}>
             {overBudget ? <IconAlertTriangle /> : <IconTrendUp />}
           </span>
-          <span className={`whitespace-nowrap text-[11px] font-medium uppercase tracking-wide ${overBudget ? "text-danger-600" : "text-success-600"}`}>
+          <span className={`whitespace-nowrap text-[10px] font-medium uppercase tracking-wide ${overBudget ? "text-danger-600" : "text-success-600"}`}>
             {t("dashboard.financial.expectedVariance")}
             {overBudget ? t("dashboard.financial.overBudgetSuffix") : ""}
           </span>
-          <span className={`whitespace-nowrap text-sm font-extrabold tabular-nums ${overBudget ? "text-danger-700" : "text-success-700"}`}>
+          <span className={`whitespace-nowrap text-xs font-extrabold tabular-nums sm:text-sm ${overBudget ? "text-danger-700" : "text-success-700"}`}>
             {formatMoney(m.variance, forecast.currency, locale)} ({formatPercent(m.variancePercent, 1, locale)})
           </span>
         </div>
       </div>
 
       {revision && (
-        <p className="mt-6 border-t border-stone-100 pt-4 text-xs text-stone-400">
+        <p className="mt-3 border-t border-stone-100 pt-2 text-xs text-stone-400">
           {t("dashboard.financial.boqRevision", { number: revision.revisionNumber })}{" "}
           <Badge tone={boqRevisionStatusTone[revision.status]}>{t(`dashboard.financial.boqRevisionStatus.${revision.status}`)}</Badge>{" "}
           <Link to={`/projects/${projectId}/boq`} className="text-primary hover:underline">
@@ -1012,39 +1045,33 @@ function ExceptionsPanel({ items }: { items: AttentionItem[] }) {
   const { t, locale } = useTranslation();
   const mirrorChevron = locale === "ar";
   return (
-    <div className="h-full rounded-xl border border-stone-200 bg-white p-5 shadow-sm sm:p-6">
-      <h2 className="text-sm font-bold uppercase tracking-wide text-stone-900">{t("dashboard.needsAttention.title")}</h2>
+    <div className="flex h-full flex-col rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
+      <h2 className="shrink-0 text-sm font-bold uppercase tracking-wide text-stone-900">{t("dashboard.needsAttention.title")}</h2>
       {items.length === 0 ? (
-        <p className="mt-4 text-sm text-stone-400">{t("dashboard.needsAttention.empty")}</p>
+        <p className="mt-3 text-sm text-stone-400">{t("dashboard.needsAttention.empty")}</p>
       ) : (
-        <ul className="mt-4 space-y-2">
+        // A capped, internally scrolling list, not an ever-taller card:
+        // every item is still fully present, one scroll away, never
+        // dropped — this keeps the whole row's height predictable so the
+        // page can target fitting one desktop viewport (a card that grows
+        // with data would defeat that on any project with many open
+        // exceptions).
+        <ul className="mt-2 min-h-0 flex-1 space-y-1.5 overflow-y-auto pe-1">
           {items.map((item, i) => {
             const Icon = attentionIcon[item.severity];
             const [borderClass, colorClass] = attentionAccent[item.severity].split(" ");
             return (
               <li key={i}>
-                {/* The text gets its own full-width row and the action
-                    button its own row below (never sharing one line) — a
-                    shared row squeezed the text into an ugly word-by-word
-                    wrap in the narrower English column once a button was
-                    added beside it (confirmed live at 1440px). */}
                 <Link
                   to={item.href}
-                  className={`group block rounded-lg border-s-4 py-2.5 ps-3 pe-2.5 transition ${borderClass} ${attentionBg[item.severity]}`}
+                  className={`group flex items-center gap-2 rounded-lg border-s-4 py-1.5 ps-2.5 pe-2 transition ${borderClass} ${attentionBg[item.severity]}`}
                 >
-                  <div className="flex items-start gap-3">
-                    <Icon className={`mt-0.5 shrink-0 ${colorClass}`} />
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-sm font-medium text-stone-700">{item.text}</span>
-                      {item.metric && <span className="mt-0.5 block text-xs font-semibold text-stone-500">{item.metric}</span>}
-                    </span>
-                  </div>
-                  <div className="mt-2 flex justify-end">
-                    <span className="inline-flex shrink-0 items-center gap-1 rounded-md border border-stone-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-stone-600 transition group-hover:border-stone-300 group-hover:bg-stone-50">
-                      {t("dashboard.needsAttention.openAction")}
-                      <IconChevron mirror={mirrorChevron} className="shrink-0 text-stone-400" />
-                    </span>
-                  </div>
+                  <Icon className={`shrink-0 ${colorClass}`} />
+                  <span className="min-w-0 flex-1 truncate text-xs font-medium text-stone-700 sm:text-sm">
+                    {item.text}
+                    {item.metric && <span className="font-normal text-stone-500"> — {item.metric}</span>}
+                  </span>
+                  <IconChevron mirror={mirrorChevron} className="shrink-0 text-stone-400" />
                 </Link>
               </li>
             );
@@ -1076,40 +1103,28 @@ function CostVsProgress({
   const costColor = warnGap ? "#dc2626" : "#059669";
 
   return (
-    <div className="rounded-xl border border-stone-200 bg-white p-5 shadow-sm sm:p-6">
+    <div className="h-full overflow-y-auto rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
       <h2 className="text-sm font-bold uppercase tracking-wide text-stone-900">{t("dashboard.costProgress.title")}</h2>
-      <p className={`mt-2 text-sm font-semibold ${warnGap ? "text-warning-700" : gap !== null ? "text-success-700" : "text-stone-400"}`}>{headline}</p>
+      <p className={`mt-1 text-xs font-semibold sm:text-sm ${warnGap ? "text-warning-700" : gap !== null ? "text-success-700" : "text-stone-400"}`}>{headline}</p>
 
       {/* A paired gauge, not two decorative bars: both real, already-
           computed snapshot percentages (avgProgress / costConsumption —
           the same two values the hero and the headline above already use),
           never a fabricated month-by-month trend line — this codebase has
           no real historical time series for either figure, so it never
-          pretends to. xl, not lg, for the same sidebar-collision reason
-          documented on every other multi-column switch on this page. */}
-      <div className="mt-6 flex flex-col gap-8 xl:flex-row xl:items-center">
-        <div className="flex shrink-0 items-center gap-8 sm:gap-10">
-          <div className="flex flex-col items-center gap-2">
-            <Gauge value={avgProgress} locale={locale} color="#0f766e" size={96} stroke={9} />
-            <span className="text-xs font-medium text-stone-500">{t("dashboard.costProgress.actualProgress")}</span>
-          </div>
-          <div className="flex flex-col items-center gap-2">
-            <Gauge value={costConsumption} locale={locale} color={costColor} size={96} stroke={9} />
-            <span className="text-xs font-medium text-stone-500">{t("dashboard.costProgress.costConsumption")}</span>
-          </div>
+          pretends to. This card is only 4-of-12 columns wide (it shares a
+          row with Delivery/Cash/Commercial/Pulse), so the gauge's own
+          center label IS the number — no separate big-number callout
+          duplicating the identical two values beside it, which is what
+          made this card overflow its own narrow width in an earlier pass. */}
+      <div className="mt-3 flex items-center justify-center gap-6">
+        <div className="flex flex-col items-center gap-1">
+          <Gauge value={avgProgress} locale={locale} color="#0f766e" size={72} stroke={7} />
+          <span className="text-[11px] font-medium text-stone-500">{t("dashboard.costProgress.actualProgress")}</span>
         </div>
-
-        <div className="grid flex-1 grid-cols-2 gap-4 border-t border-stone-100 pt-6 xl:border-t-0 xl:border-s xl:ps-8 xl:pt-0">
-          <div>
-            <p className="text-3xl font-extrabold tabular-nums text-stone-900 sm:text-4xl">{avgProgress !== null ? formatPercent(avgProgress, 1, locale) : "—"}</p>
-            <p className="mt-1 text-xs font-medium text-stone-500">{t("dashboard.costProgress.actualProgress")}</p>
-          </div>
-          <div>
-            <p className={`text-3xl font-extrabold tabular-nums sm:text-4xl ${warnGap ? "text-danger-700" : "text-success-700"}`}>
-              {costConsumption !== null ? formatPercent(costConsumption, 1, locale) : "—"}
-            </p>
-            <p className="mt-1 text-xs font-medium text-stone-500">{t("dashboard.costProgress.costConsumption")}</p>
-          </div>
+        <div className="flex flex-col items-center gap-1">
+          <Gauge value={costConsumption} locale={locale} color={costColor} size={72} stroke={7} />
+          <span className="text-[11px] font-medium text-stone-500">{t("dashboard.costProgress.costConsumption")}</span>
         </div>
       </div>
 
@@ -1119,7 +1134,7 @@ function CostVsProgress({
           leading digits (confirmed live: "152,000.00" rendered as
           "…2,000.00"). One column per row at narrow widths always gives a
           money value its full container width instead. */}
-      <div className="mt-6 grid grid-cols-1 gap-4 border-t border-stone-200 pt-5 sm:grid-cols-3 sm:gap-6">
+      <div className="mt-3 grid grid-cols-1 gap-3 border-t border-stone-200 pt-3 sm:grid-cols-3">
         <PlainStat label={t("dashboard.costProgress.totalPlanned")} value={formatMoney(budget.totals.planned, "SAR", locale)} />
         <PlainStat label={t("dashboard.costProgress.totalSpent")} value={formatMoney(budget.totals.spent, "SAR", locale)} />
         <PlainStat
@@ -1136,8 +1151,8 @@ function PlainStat({ label, value, tone = "default" }: { label: string; value: s
   const color = tone === "danger" ? "text-danger-700" : "text-stone-900";
   return (
     <div className="min-w-0">
-      <p className="truncate text-xs text-stone-500">{label}</p>
-      <p className={`mt-1 whitespace-nowrap text-base font-bold tabular-nums ${color}`}>{value}</p>
+      <p className="truncate text-[11px] text-stone-500">{label}</p>
+      <p className={`mt-0.5 whitespace-nowrap text-sm font-bold tabular-nums ${color}`}>{value}</p>
     </div>
   );
 }
@@ -1164,9 +1179,9 @@ function PlainRow({
   // labels ("Total com…", "Awaiting ap…") at that width.
   return (
     <div>
-      <p className="text-xs text-stone-500">{label}</p>
-      <p className={`mt-0.5 whitespace-nowrap text-sm font-semibold tabular-nums ${color}`}>{value}</p>
-      {hint && <p className="mt-0.5 truncate text-xs text-stone-400">{hint}</p>}
+      <p className="text-[11px] text-stone-500">{label}</p>
+      <p className={`whitespace-nowrap text-xs font-semibold tabular-nums sm:text-sm ${color}`}>{value}</p>
+      {hint && <p className="truncate text-[11px] text-stone-400">{hint}</p>}
     </div>
   );
 }
@@ -1207,35 +1222,33 @@ function DeliveryColumn({
   const { t, locale } = useTranslation();
   const isOnTrack = overdueTasks.length === 0;
   return (
-    <div>
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-sm font-bold text-stone-900">{t("dashboard.progressSchedule.title")}</h3>
-        {tasks.length > 0 && (
-          <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${isOnTrack ? "bg-success-100 text-success-700" : "bg-warning-100 text-warning-700"}`}>
-            {isOnTrack ? t("dashboard.progressSchedule.onTrack") : t("dashboard.progressSchedule.tasksOverdueCount", { count: overdueTasks.length })}
-          </span>
-        )}
-      </div>
+    <div className="h-full overflow-y-auto rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
+      <h3 className="text-sm font-bold text-stone-900">{t("dashboard.progressSchedule.title")}</h3>
+      {tasks.length > 0 && (
+        <span className={`mt-1.5 inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold ${isOnTrack ? "bg-success-100 text-success-700" : "bg-warning-100 text-warning-700"}`}>
+          {isOnTrack ? t("dashboard.progressSchedule.onTrack") : t("dashboard.progressSchedule.tasksOverdueCount", { count: overdueTasks.length })}
+        </span>
+      )}
       {tasks.length === 0 ? (
-        <p className="mt-3 text-sm text-stone-400">{t("dashboard.progressSchedule.noData")}</p>
+        <p className="mt-2 text-xs text-stone-400">{t("dashboard.progressSchedule.noData")}</p>
       ) : (
-        <div className="mt-4 space-y-3">
+        <div className="mt-2.5 space-y-2">
           <PlainRow label={t("dashboard.progressSchedule.overallProgress")} value={avgProgress !== null ? formatPercent(avgProgress, 1, locale) : "—"} />
           <PlainRow label={t("dashboard.progressSchedule.nextMilestone")} value={nextMilestone ? formatDate(nextMilestone.endDate, locale) : "—"} hint={nextMilestone?.name} />
         </div>
       )}
-      <p className="mt-4 text-end text-xs">
-        <Link to={`/projects/${projectId}/schedule`} className="font-medium text-primary hover:underline">
-          {t("dashboard.progressSchedule.openSchedule")}
-        </Link>
-      </p>
       {measurementsAwaitingApproval.length > 0 && (
-        <p className="mt-3 text-xs text-stone-500">
+        <p className="mt-2 text-[11px] text-stone-500">
           <Link to={`/projects/${projectId}/progress`} className="text-primary hover:underline">
             {t("dashboard.progressSchedule.measurementsAwaitingCount", { count: measurementsAwaitingApproval.length })}
           </Link>
         </p>
       )}
+      <p className="mt-2.5 text-end text-[11px]">
+        <Link to={`/projects/${projectId}/schedule`} className="font-medium text-primary hover:underline">
+          {t("dashboard.progressSchedule.openSchedule")}
+        </Link>
+      </p>
     </div>
   );
 }
@@ -1244,7 +1257,7 @@ function CashColumn({ cashFlow, projectId }: { cashFlow: CashFlowResult; project
   const { t, locale } = useTranslation();
   const netPositive = cashFlow.projected.net >= 0;
   return (
-    <div>
+    <div className="h-full overflow-y-auto rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
       <h3 className="text-sm font-bold text-stone-900">{t("dashboard.cashFlow.title")}</h3>
 
       {/* The one real headline figure this card has — cashFlow.projected.net,
@@ -1261,17 +1274,17 @@ function CashColumn({ cashFlow, projectId }: { cashFlow: CashFlowResult; project
           alone on its own line (both confirmed live). Swapping the nbsp
           for a normal space means it wraps at most once, cleanly, between
           the currency code and the number — never mid-number. */}
-      <p className={`mt-3 text-xl font-extrabold tabular-nums sm:text-2xl ${netPositive ? "text-success-700" : "text-danger-700"}`}>
+      <p className={`mt-2 text-lg font-extrabold tabular-nums sm:text-xl ${netPositive ? "text-success-700" : "text-danger-700"}`}>
         {formatMoney(cashFlow.projected.net, cashFlow.currency, locale).replace(/ /g, " ")}
       </p>
-      <p className="mt-1 text-xs font-medium text-stone-500">{t("dashboard.cashFlow.projectedNet")}</p>
+      <p className="text-[11px] font-medium text-stone-500">{t("dashboard.cashFlow.projectedNet")}</p>
 
-      <div className="mt-5 space-y-3 border-t border-stone-100 pt-4">
+      <div className="mt-2.5 space-y-2 border-t border-stone-100 pt-2.5">
         <PlainRow label={t("dashboard.cashFlow.collected")} value={formatMoney(cashFlow.historical.cashReceived, cashFlow.currency, locale)} />
         <PlainRow label={t("dashboard.cashFlow.incurredCost")} value={formatMoney(cashFlow.historical.incurredCost, cashFlow.currency, locale)} />
         <PlainRow label={t("dashboard.cashFlow.expectedReceivables")} value={formatMoney(cashFlow.projected.receivables, cashFlow.currency, locale)} />
       </div>
-      <p className="mt-4 text-end text-xs">
+      <p className="mt-2.5 text-end text-[11px]">
         <Link to={`/projects/${projectId}/cash-flow`} className="font-medium text-primary hover:underline">
           {t("dashboard.cashFlow.fullDetails")}
         </Link>
@@ -1313,51 +1326,61 @@ function CommercialColumn({
 }) {
   const { t, locale } = useTranslation();
   return (
-    <div>
-      <h3 className="text-sm font-bold text-stone-900">{t("dashboard.commercial.title")}</h3>
-      <p className="text-xs text-stone-400">{t("dashboard.commercial.subtitle")}</p>
-
-      <div className="mt-4 flex items-baseline justify-between gap-2">
-        <p className="text-[11px] font-semibold uppercase tracking-wide text-stone-400">{t("dashboard.procurement.title")}</p>
-        <Link to={`/projects/${projectId}/procurement`} className="text-xs font-medium text-primary hover:underline">
-          {t("dashboard.procurement.open")}
-        </Link>
-      </div>
-      <div className="mt-2 space-y-3">
-        <PlainRow label={t("dashboard.procurement.totalCommitted")} value={formatMoney(totalCommitted, currency, locale)} />
-        <PlainRow label={t("dashboard.procurement.activeExecuted")} value={formatMoney(approvedCommitted, currency, locale)} tone="success" />
-        <PlainRow label={t("dashboard.procurement.pendingApprovalCount", { count: pendingCount })} value={formatMoney(pendingCommitted, currency, locale)} tone="warning" />
-      </div>
-
-      <div className="mt-4 flex items-baseline justify-between gap-2 border-t border-stone-200 pt-4">
-        <p className="text-[11px] font-semibold uppercase tracking-wide text-stone-400">{t("dashboard.commercial.ipcTitle")}</p>
-        <Link to={`/projects/${projectId}/ipc`} className="text-xs font-medium text-primary hover:underline">
-          {t("dashboard.commercial.openCertificates")}
-        </Link>
-      </div>
-      <div className="mt-2 space-y-3">
-        <PlainRow label={t("dashboard.commercial.certifiedValueCount", { count: certifiedCount })} value={formatMoney(certifiedTotal, currency, locale)} tone="success" />
-        <BadgeRow label={t("dashboard.commercial.awaitingCertification")} count={awaitingCertification} tone="warning" />
-        <BadgeRow label={t("dashboard.commercial.awaitingApproval")} count={awaitingApproval} tone="purple" />
-      </div>
-
-      <div className="mt-4 flex items-baseline justify-between gap-2 border-t border-stone-200 pt-4">
-        <p className="text-[11px] font-semibold uppercase tracking-wide text-stone-400">{t("dashboard.commercial.laborTitle")}</p>
-        {laborCost.allocationCount > 0 && laborCost.posted && <Badge tone="success">{t("dashboard.commercial.fullyPosted")}</Badge>}
-      </div>
-      {laborCost.allocationCount === 0 ? (
-        <p className="mt-2 text-sm text-stone-400">{t("dashboard.commercial.noLaborCost")}</p>
-      ) : (
-        <div className="mt-2 space-y-3">
-          <PlainRow label={t("dashboard.commercial.totalAllocated")} value={formatMoney(laborCost.allocatedTotal, "SAR", locale)} />
-          <PlainRow label={t("dashboard.commercial.allocationCount")} value={String(laborCost.allocationCount)} />
+    // flex-col + a scrollable body: this card genuinely has the most
+    // content on the page (three real sub-sections) — capping it at the
+    // row's shared height and letting the body scroll internally keeps
+    // every figure present without stretching its four siblings to match.
+    <div className="flex h-full flex-col rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
+      <h3 className="shrink-0 text-sm font-bold text-stone-900">{t("dashboard.commercial.title")}</h3>
+      <div className="mt-2 min-h-0 flex-1 space-y-3 overflow-y-auto pe-1">
+        <div>
+          <div className="flex items-baseline justify-between gap-2">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-stone-400">{t("dashboard.procurement.title")}</p>
+            <Link to={`/projects/${projectId}/procurement`} className="text-[11px] font-medium text-primary hover:underline">
+              {t("dashboard.procurement.open")}
+            </Link>
+          </div>
+          <div className="mt-1.5 space-y-1.5">
+            <PlainRow label={t("dashboard.procurement.totalCommitted")} value={formatMoney(totalCommitted, currency, locale)} />
+            <PlainRow label={t("dashboard.procurement.activeExecuted")} value={formatMoney(approvedCommitted, currency, locale)} tone="success" />
+            <PlainRow label={t("dashboard.procurement.pendingApprovalCount", { count: pendingCount })} value={formatMoney(pendingCommitted, currency, locale)} tone="warning" />
+          </div>
         </div>
-      )}
-      <p className="mt-3 text-end text-xs">
-        <Link to="/payroll" className="font-medium text-primary hover:underline">
-          {t("dashboard.commercial.viewPayrollDetails")}
-        </Link>
-      </p>
+
+        <div className="border-t border-stone-100 pt-3">
+          <div className="flex items-baseline justify-between gap-2">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-stone-400">{t("dashboard.commercial.ipcTitle")}</p>
+            <Link to={`/projects/${projectId}/ipc`} className="text-[11px] font-medium text-primary hover:underline">
+              {t("dashboard.commercial.openCertificates")}
+            </Link>
+          </div>
+          <div className="mt-1.5 space-y-1.5">
+            <PlainRow label={t("dashboard.commercial.certifiedValueCount", { count: certifiedCount })} value={formatMoney(certifiedTotal, currency, locale)} tone="success" />
+            <BadgeRow label={t("dashboard.commercial.awaitingCertification")} count={awaitingCertification} tone="warning" />
+            <BadgeRow label={t("dashboard.commercial.awaitingApproval")} count={awaitingApproval} tone="purple" />
+          </div>
+        </div>
+
+        <div className="border-t border-stone-100 pt-3">
+          <div className="flex items-baseline justify-between gap-2">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-stone-400">{t("dashboard.commercial.laborTitle")}</p>
+            {laborCost.allocationCount > 0 && laborCost.posted && <Badge tone="success">{t("dashboard.commercial.fullyPosted")}</Badge>}
+          </div>
+          {laborCost.allocationCount === 0 ? (
+            <p className="mt-1.5 text-xs text-stone-400">{t("dashboard.commercial.noLaborCost")}</p>
+          ) : (
+            <div className="mt-1.5 space-y-1.5">
+              <PlainRow label={t("dashboard.commercial.totalAllocated")} value={formatMoney(laborCost.allocatedTotal, "SAR", locale)} />
+              <PlainRow label={t("dashboard.commercial.allocationCount")} value={String(laborCost.allocationCount)} />
+            </div>
+          )}
+          <p className="mt-1.5 text-end text-[11px]">
+            <Link to="/payroll" className="font-medium text-primary hover:underline">
+              {t("dashboard.commercial.viewPayrollDetails")}
+            </Link>
+          </p>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1395,21 +1418,24 @@ const activityDomainIcon: Record<string, (p: IconProps) => JSX.Element> = {
 function ActivityPulse({ events }: { events: ActivityEvent[] }) {
   const { t, locale } = useTranslation();
   return (
-    <div>
-      <h3 className="text-sm font-bold text-stone-900">{t("dashboard.activity.title")}</h3>
+    // Same capped-height + internal-scroll treatment as Commercial: up to
+    // 8 real events can be present, and every one of them stays reachable
+    // by scrolling this one card instead of pushing the whole row taller.
+    <div className="flex h-full flex-col rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
+      <h3 className="shrink-0 text-sm font-bold text-stone-900">{t("dashboard.activity.title")}</h3>
       {events.length === 0 ? (
-        <p className="mt-3 text-sm text-stone-400">{t("dashboard.activity.empty")}</p>
+        <p className="mt-2 text-xs text-stone-400">{t("dashboard.activity.empty")}</p>
       ) : (
-        <ul className="mt-4 space-y-3">
+        <ul className="mt-2 min-h-0 flex-1 space-y-2 overflow-y-auto pe-1">
           {events.map((e) => {
             const Icon = activityDomainIcon[e.action.split(".")[0]] ?? IconInfo;
             return (
-              <li key={e.id} className="flex items-center gap-3 text-sm">
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-stone-100 text-stone-500">
-                  <Icon />
+              <li key={e.id} className="flex items-center gap-2 text-xs">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-stone-100 text-stone-500">
+                  <Icon width={12} height={12} />
                 </span>
                 <span className="min-w-0 flex-1 truncate text-stone-700">{activityVerbLabel(t, e.action)}</span>
-                <span className="shrink-0 text-xs text-stone-400">{formatDateTime(e.createdAt, locale)}</span>
+                <span className="shrink-0 text-[10px] text-stone-400">{formatDateTime(e.createdAt, locale)}</span>
               </li>
             );
           })}
@@ -1435,9 +1461,9 @@ function QuickActionsRow({ projectId }: { projectId: string }) {
     { labelKey: "ipc", href: "ipc", permission: "ipc.manage" },
   ];
   return (
-    <div>
-      <h3 className="text-xs font-semibold uppercase tracking-wide text-stone-400">{t("dashboard.quickActions.title")}</h3>
-      <div className="mt-2 flex flex-wrap gap-2">
+    <div className="flex flex-wrap items-center gap-3">
+      <h3 className="shrink-0 text-xs font-semibold uppercase tracking-wide text-stone-400">{t("dashboard.quickActions.title")}</h3>
+      <div className="flex flex-wrap gap-2">
         {gatedActions.map((a, i) => (
           <Can key={a.href} permission={a.permission}>
             <Link to={`/projects/${projectId}/${a.href}`}>
