@@ -55,6 +55,7 @@ import { platformFeatureFlagsRouter } from "./routes/platformFeatureFlags.js";
 import { platformPlansRouter } from "./routes/platformPlans.js";
 import { platformSecurityRouter } from "./routes/platformSecurity.js";
 import { platformOwnershipTransferRouter } from "./routes/platformOwnershipTransfer.js";
+import { platformTenantExportRouter, platformTenantImportRouter } from "./routes/platformTenantData.js";
 import { clientPortalUsersRouter } from "./routes/clientPortalUsers.js";
 import { clientPortalAuthRouter } from "./routes/clientPortalAuth.js";
 import { clientPortalProjectsRouter } from "./routes/clientPortalProjects.js";
@@ -233,6 +234,13 @@ export function buildApp() {
   // the "ownershipTransfer.manage" capability (platform_owner only). See
   // routes/platformOwnershipTransfer.ts.
   app.use("/api/platform/ownership-transfer", platformAuth, platformOwnershipTransferRouter);
+  // MIDAD Final Pre-Launch audit, Phase 10-11 — Tenant Export/Import. The
+  // export router shares /api/platform/organizations with
+  // platformOrganizationsRouter (it only adds /:id/export, no collision)
+  // rather than inventing a separate base path for one route. See
+  // routes/platformTenantData.ts and lib/tenantExport.ts/tenantImport.ts.
+  app.use("/api/platform/organizations", platformAuth, platformTenantExportRouter);
+  app.use("/api/platform/tenant-import", platformAuth, platformTenantImportRouter);
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   app.use((err: Error, req: express.Request, res: express.Response, _next: express.NextFunction) => {

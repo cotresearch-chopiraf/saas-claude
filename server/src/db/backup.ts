@@ -85,7 +85,10 @@ export async function getKeyTableRowCounts(pool: Pool): Promise<Record<KeyTable,
   return counts;
 }
 
-function readMigrationState(serverRoot: string): { migrationCount: number; latestMigrationTag: string } {
+// Exported for lib/tenantExport.ts's Tenant Export manifest (Phase 10-11)
+// — same "which schema version was this snapshot taken at" need, reused
+// rather than re-implemented.
+export function readMigrationState(serverRoot: string): { migrationCount: number; latestMigrationTag: string } {
   const journalPath = path.join(serverRoot, "drizzle", "meta", "_journal.json");
   const journal = JSON.parse(fs.readFileSync(journalPath, "utf8")) as { entries: Array<{ tag: string }> };
   return {

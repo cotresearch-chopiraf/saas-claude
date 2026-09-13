@@ -19,7 +19,13 @@ export type PlatformCapability =
   | "supportSessions.manage"
   | "zatca.read"
   | "security.read"
-  | "ownershipTransfer.manage";
+  | "ownershipTransfer.manage"
+  // MIDAD Final Pre-Launch audit, Phase 10-11 — Tenant Export/Import. A
+  // bulk, whole-tenant data operation, not a passive read (an export
+  // bundle is a full copy of a tenant's business data) and not scoped to
+  // any single support ticket — owner/admin only, like plans/feature
+  // flags, never support/compliance/auditor.
+  | "tenantData.manage";
 
 const ALL_CAPABILITIES: PlatformCapability[] = [
   "organizations.read",
@@ -34,6 +40,7 @@ const ALL_CAPABILITIES: PlatformCapability[] = [
   "zatca.read",
   "security.read",
   "ownershipTransfer.manage",
+  "tenantData.manage",
 ];
 
 // Every value db/schema.ts's platformOperatorRoleEnum can hold, including
