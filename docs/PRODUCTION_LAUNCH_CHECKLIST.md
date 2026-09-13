@@ -24,8 +24,8 @@ Nothing below is marked done because it "should" work or because a similar syste
 - [x] Quote transaction atomicity — same pattern, `server/src/routes/quotes.ts POST /`. Same dual proof (test + live HTTP).
 - [x] Graceful shutdown — `server/src/lib/shutdown.ts` stops accepting new HTTP connections then closes the Postgres pool, bounded by a 10s timeout, on both `SIGTERM` and `SIGINT`. Covered by `tests/gracefulShutdown.test.ts`.
 - [x] Database pool bounds — `server/src/db/client.ts`'s `Pool` sets explicit `max` (10), `idleTimeoutMillis` (30s), `connectionTimeoutMillis` (5s), and `statement_timeout` (30s) — node-postgres's own unbounded defaults (in particular an infinite `connectionTimeoutMillis`) are never relied on. Covered by `tests/dbPoolResilience.test.ts`.
-- [x] Server tests — 1126/1126 passing (76 files, Slice AC).
-- [x] Client tests — 262/262 passing (30 files, Slice AC).
+- [x] Server tests — 1914/1914 passing (116 files, MIDAD Final Pre-Launch audit Phase 22 — count is stale past this point; re-run `npm test --workspace server` for the current number).
+- [x] Client tests — 435/435 passing (57 files, MIDAD Final Pre-Launch audit Phase 22 — same caveat, `npm test --workspace client`).
 - [x] Typecheck — server and client both clean (`tsc --noEmit`).
 - [x] Build — server and client production builds both clean.
 
