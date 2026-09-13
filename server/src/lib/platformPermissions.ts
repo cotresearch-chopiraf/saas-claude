@@ -35,7 +35,14 @@ export type PlatformCapability =
   // its scope stays "support sessions only", same precedent as every
   // other capability in this file.
   | "incidents.read"
-  | "incidents.manage";
+  | "incidents.manage"
+  // MIDAD Final Pre-Launch audit, Phase 17 — Sale/Handover Center.
+  // Read-only aggregate snapshot for a prospective buyer's or new
+  // operator's technical due diligence — never a mutation, so there is no
+  // "handover.manage" counterpart. Same read-only-oversight role set as
+  // security.read (owner/admin/auditor), for the same reason: this is
+  // exactly the kind of platform-health overview an auditor role covers.
+  | "handover.read";
 
 const ALL_CAPABILITIES: PlatformCapability[] = [
   "organizations.read",
@@ -53,6 +60,7 @@ const ALL_CAPABILITIES: PlatformCapability[] = [
   "tenantData.manage",
   "incidents.read",
   "incidents.manage",
+  "handover.read",
 ];
 
 // Every value db/schema.ts's platformOperatorRoleEnum can hold, including
@@ -95,6 +103,7 @@ const ROLE_CAPABILITIES: Record<PlatformOperatorRole, ReadonlySet<PlatformCapabi
     "zatca.read",
     "security.read",
     "incidents.read",
+    "handover.read",
   ]),
 };
 

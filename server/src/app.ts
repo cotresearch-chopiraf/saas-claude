@@ -58,6 +58,7 @@ import { platformOwnershipTransferRouter } from "./routes/platformOwnershipTrans
 import { platformTenantExportRouter, platformTenantImportRouter } from "./routes/platformTenantData.js";
 import { platformBackupCenterRouter } from "./routes/platformBackupCenter.js";
 import { platformIncidentsRouter } from "./routes/platformIncidents.js";
+import { platformHandoverRouter } from "./routes/platformHandover.js";
 import { clientPortalUsersRouter } from "./routes/clientPortalUsers.js";
 import { clientPortalAuthRouter } from "./routes/clientPortalAuth.js";
 import { clientPortalProjectsRouter } from "./routes/clientPortalProjects.js";
@@ -250,6 +251,9 @@ export function buildApp() {
   // Center. Manual creation/tracking only, gated by "incidents.read"/
   // "incidents.manage". See routes/platformIncidents.ts.
   app.use("/api/platform/incidents", platformAuth, platformIncidentsRouter);
+  // MIDAD Final Pre-Launch audit, Phase 17 — Sale/Handover Center. See
+  // routes/platformHandover.ts.
+  app.use("/api/platform/handover", platformAuth, platformHandoverRouter);
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   app.use((err: Error, req: express.Request, res: express.Response, _next: express.NextFunction) => {
