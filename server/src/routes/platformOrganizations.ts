@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { and, eq, ilike, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, ilike, inArray, isNull, ne, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { companies, plans, projects, userSessions, users, zatcaEgsUnits } from "../db/schema.js";
 import { recordAuditEvent } from "../lib/audit.js";
@@ -243,4 +243,157 @@ platformOrganizationsRouter.post("/:id/revoke-sessions", async (req, res) => {
   });
 
   res.json({ id: req.params.id, revokedSessionCount });
+});
+
+// ---------------------------------------------------------------------
+// Phase 5 — Platform User Management. Visibility and support-driven
+// control over the users *within* one organization — a deliberately
+// different surface from the org-detail view above: that view is a
+// PII-free aggregate (Phase 4's own allowlist discipline); this one is
+// the explicit, per-user, per-organization surface that view's own
+// comment named as where a specific user should be inspected instead.
+// Never touches platform_operators — this router only ever reads/writes
+// users and userSessions for a named target organization + named target
+// user, structurally distinct from platformAuth's own operator identity.
+// ---------------------------------------------------------------------
+
+platformOrganizationsRouter.get("/:id/users", async (req, res) => {
+  const company = await db.query.companies.findFirst({ where: eq(companies.id, req.params.id), columns: { id: true } });
+  if (!company) return res.status(404).json({ error: "الشركة غير موجودة" });
+
+  const rows = await db.query.users.findMany({
+    where: eq(users.companyId, req.params.id),
+    columns: { id: true, name: true, email: true, role: true, status: true, createdAt: true },
+    orderBy: (u, { asc }) => [asc(u.createdAt)],
+  });
+
+  res.json({ users: rows });
+});
+
+platformOrganizationsRouter.get("/:id/users/:userId", async (req, res) => {
+  const user = await db.query.users.findFirst({
+    where: and(eq(users.id, req.params.userId), eq(users.companyId, req.params.id)),
+    columns: { id: true, name: true, email: true, role: true, status: true, createdAt: true },
+  });
+  if (!user) return res.status(404).json({ error: "المستخدم غير موجود" });
+
+  const [activeRow] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(userSessions)
+    .where(and(eq(userSessions.userId, user.id), isNull(userSessions.revokedAt)));
+
+  res.json({ ...user, activeSessionCount: activeRow?.count ?? 0 });
+});
+
+// "active"/"deactivated" — the exact same userStatusEnum values and
+// semantics routes/company.ts's tenant-owner-driven PATCH /members/:id
+// already uses (not a new "suspended" concept for users; only companies
+// got that in Phase 4). Reusing the existing enum rather than inventing
+// platform-specific status values is what keeps middleware/auth.ts's
+// existing per-request requireAuth check the single enforcement point —
+// no new status value for it to learn about.
+const userStatusSchema = z
+  .object({
+    status: z.enum(["active", "deactivated"]),
+    reason: z.string().trim().min(3, "السبب مطلوب").optional(),
+  })
+  .refine((data) => data.status === "active" || !!data.reason, {
+    message: "سبب التعطيل مطلوب",
+    path: ["reason"],
+  });
+
+platformOrganizationsRouter.patch("/:id/users/:userId/status", async (req, res) => {
+  const parsed = userStatusSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
+
+  const existing = await db.query.users.findFirst({
+    where: and(eq(users.id, req.params.userId), eq(users.companyId, req.params.id)),
+  });
+  if (!existing) return res.status(404).json({ error: "المستخدم غير موجود" });
+  if (existing.status === parsed.data.status) return res.status(409).json({ error: "لا تغيير — الحالة كما هي بالفعل" });
+
+  // Same invariant routes/company.ts's PATCH /members/:id already enforces
+  // for the tenant-owner path: a company can never be left with zero
+  // active owners through ANY administrative surface, platform-admin
+  // included ("Platform Admin must never bypass business/security rules
+  // merely because the endpoint is administrative"). Deliberately
+  // duplicated here rather than extracted into a shared helper — this
+  // route and the tenant route are independently tested, independently
+  // authorized call sites, and refactoring an already-shipped, tested
+  // tenant route carries more regression risk than a ~10-line duplicate
+  // check does.
+  if (existing.role === "owner" && existing.status === "active") {
+    const otherActiveOwners = await db.query.users.findMany({
+      where: and(
+        eq(users.companyId, req.params.id),
+        eq(users.role, "owner"),
+        eq(users.status, "active"),
+        ne(users.id, existing.id),
+      ),
+      columns: { id: true },
+    });
+    if (otherActiveOwners.length === 0) {
+      return res.status(409).json({ error: "لا يمكن أن تبقى الشركة بدون مالك واحد نشط على الأقل" });
+    }
+  }
+
+  const updated = await db.transaction(async (tx) => {
+    const [row] = await tx.update(users).set({ status: parsed.data.status }).where(eq(users.id, existing.id)).returning();
+
+    await recordAuditEvent(tx, {
+      companyId: req.params.id,
+      actorUserId: null,
+      action: "user.statusChanged",
+      entityType: "user",
+      entityId: existing.id,
+      beforeValue: { status: existing.status },
+      afterValue: { status: row.status },
+      reason: parsed.data.reason ?? null,
+      source: "platform_admin",
+      metadata: { platformOperatorId: req.platformOperatorId },
+    });
+
+    return row;
+  });
+
+  res.json({ id: updated.id, status: updated.status });
+});
+
+// Deliberately a separate action from the status change above (same
+// split as /organizations/:id/revoke-sessions vs /suspend) — forces
+// re-login for one specific user without touching their active/
+// deactivated status, for a suspected-compromised-account case where the
+// account itself should keep working.
+platformOrganizationsRouter.post("/:id/users/:userId/revoke-sessions", async (req, res) => {
+  const parsed = revokeSessionsSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
+
+  const existing = await db.query.users.findFirst({
+    where: and(eq(users.id, req.params.userId), eq(users.companyId, req.params.id)),
+    columns: { id: true },
+  });
+  if (!existing) return res.status(404).json({ error: "المستخدم غير موجود" });
+
+  const revokedSessionCount = await db.transaction(async (tx) => {
+    const revoked = await tx
+      .update(userSessions)
+      .set({ revokedAt: new Date() })
+      .where(and(eq(userSessions.userId, existing.id), isNull(userSessions.revokedAt)))
+      .returning({ id: userSessions.id });
+
+    await recordAuditEvent(tx, {
+      companyId: req.params.id,
+      actorUserId: null,
+      action: "user.sessionsRevoked",
+      entityType: "user",
+      entityId: existing.id,
+      reason: parsed.data.reason,
+      source: "platform_admin",
+      metadata: { platformOperatorId: req.platformOperatorId },
+    });
+
+    return revoked.length;
+  });
+
+  res.json({ id: existing.id, revokedSessionCount });
 });
