@@ -69,6 +69,7 @@ describe("platform organizations admin: detail view allowlist", () => {
       name: "Riyadh Construction Co",
       status: "active",
       plan: null,
+      entitlements: { maxUsers: null, maxProjects: null, maxStorageMb: null, maxInvoicesPerMonth: null },
       usage: { userCount: 1, projectCount: 0 },
       zatca: { egsUnitCount: 0, byStatus: {} },
     });
@@ -80,6 +81,23 @@ describe("platform organizations admin: detail view allowlist", () => {
       .get(`/api/platform/organizations/00000000-0000-0000-0000-000000000000`)
       .set("Authorization", `Bearer ${operatorToken}`);
     expect(res.status).toBe(404);
+  });
+
+  it("entitlements reflect an actually-assigned plan, via the same evaluation lib/entitlements.ts uses everywhere else", async () => {
+    const { companyId } = await registerCompany("Co A");
+    await request(app)
+      .post("/api/platform/plans")
+      .set("Authorization", `Bearer ${operatorToken}`)
+      .send({ key: "starter", name: "Starter", limits: { maxUsers: 5 } });
+    await request(app)
+      .put(`/api/platform/plans/assignments/${companyId}`)
+      .set("Authorization", `Bearer ${operatorToken}`)
+      .send({ planKey: "starter" });
+
+    const res = await request(app).get(`/api/platform/organizations/${companyId}`).set("Authorization", `Bearer ${operatorToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.plan).toEqual({ key: "starter", name: "Starter" });
+    expect(res.body.entitlements.maxUsers).toBe(5);
   });
 });
 

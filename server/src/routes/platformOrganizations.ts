@@ -4,6 +4,7 @@ import { and, eq, ilike, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { companies, plans, projects, userSessions, users, zatcaEgsUnits } from "../db/schema.js";
 import { recordAuditEvent } from "../lib/audit.js";
+import { getCompanyLimits } from "../lib/entitlements.js";
 
 // MIDAD Phase D1 — the first PLATFORM_SCOPE route. Mounted behind
 // middleware/platformAuth.ts's platformAuth (never requireAuth), so it
@@ -76,7 +77,7 @@ platformOrganizationsRouter.get("/:id", async (req, res) => {
   });
   if (!company) return res.status(404).json({ error: "الشركة غير موجودة" });
 
-  const [plan, [userRow], [projectRow], zatcaRows] = await Promise.all([
+  const [plan, [userRow], [projectRow], zatcaRows, entitlements] = await Promise.all([
     company.planId
       ? db.query.plans.findFirst({ where: eq(plans.id, company.planId), columns: { key: true, name: true } })
       : Promise.resolve(null),
@@ -87,6 +88,10 @@ platformOrganizationsRouter.get("/:id", async (req, res) => {
       .from(zatcaEgsUnits)
       .where(eq(zatcaEgsUnits.companyId, company.id))
       .groupBy(zatcaEgsUnits.status),
+    // Same centralized evaluation every enforcement point uses (lib/
+    // entitlements.ts) — this view never recomputes limits itself, so it
+    // can never drift from what's actually enforced.
+    getCompanyLimits(company.id),
   ]);
 
   const zatcaByStatus: Record<string, number> = {};
@@ -102,6 +107,7 @@ platformOrganizationsRouter.get("/:id", async (req, res) => {
     createdAt: company.createdAt,
     status: company.status,
     plan: plan ? { key: plan.key, name: plan.name } : null,
+    entitlements,
     usage: { userCount: userRow?.count ?? 0, projectCount: projectRow?.count ?? 0 },
     zatca: { egsUnitCount: zatcaTotal, byStatus: zatcaByStatus },
   });
