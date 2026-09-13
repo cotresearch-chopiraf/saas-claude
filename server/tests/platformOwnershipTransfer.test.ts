@@ -47,6 +47,39 @@ describe("platform ownership transfer: auth boundary", () => {
   });
 });
 
+// MIDAD Final Pre-Launch audit, Phase 22 (UX) — GET /operators, added so the
+// transfer UI has a real candidate list instead of asking for a raw UUID.
+describe("platform ownership transfer: GET /operators", () => {
+  it("unauthenticated and non-owner access are rejected", async () => {
+    expect((await request(app).get("/api/platform/ownership-transfer/operators")).status).toBe(401);
+    const admin = await createOperator("platform_admin");
+    const res = await request(app).get("/api/platform/ownership-transfer/operators").set("Authorization", `Bearer ${admin.token}`);
+    expect(res.status).toBe(403);
+  });
+
+  it("lists active operators without exposing passwordHash", async () => {
+    const owner = await createOperator("platform_owner");
+    const other = await createOperator("platform_admin", "-other");
+    const res = await request(app).get("/api/platform/ownership-transfer/operators").set("Authorization", `Bearer ${owner.token}`);
+    expect(res.status).toBe(200);
+    const ids = res.body.operators.map((o: { id: string }) => o.id);
+    expect(ids).toContain(owner.id);
+    expect(ids).toContain(other.id);
+    expect(res.body.operators[0]).not.toHaveProperty("passwordHash");
+  });
+
+  it("excludes deactivated operators", async () => {
+    const owner = await createOperator("platform_owner");
+    const inactive = await createOperator("platform_admin", "-inactive");
+    await db.update(platformOperators).set({ status: "deactivated" }).where(eq(platformOperators.id, inactive.id));
+
+    const res = await request(app).get("/api/platform/ownership-transfer/operators").set("Authorization", `Bearer ${owner.token}`);
+    expect(res.status).toBe(200);
+    const ids = res.body.operators.map((o: { id: string }) => o.id);
+    expect(ids).not.toContain(inactive.id);
+  });
+});
+
 describe("platform ownership transfer: validation", () => {
   it("rejects transferring to yourself (self-confusing transfer)", async () => {
     const owner = await createOperator("platform_owner");

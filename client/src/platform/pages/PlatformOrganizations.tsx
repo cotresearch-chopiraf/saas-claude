@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { PlatformLayout } from "../components/PlatformLayout";
 import { PageHeader, Card, Button, ErrorState, FinancialTable, type FinancialColumn } from "../../ui";
 import { ApiError } from "../../api/client";
@@ -50,7 +50,15 @@ export function PlatformOrganizations() {
   }
 
   const columns: FinancialColumn<Organization>[] = [
-    { key: "name", header: t("platformOrganizationsPage.columns.name"), render: (o) => o.name },
+    {
+      key: "name",
+      header: t("platformOrganizationsPage.columns.name"),
+      render: (o) => (
+        <Link to={`/platform/organizations/${o.id}`} className="text-primary hover:underline">
+          {o.name}
+        </Link>
+      ),
+    },
     { key: "createdAt", header: t("platformOrganizationsPage.columns.createdAt"), render: (o) => formatDateTime(o.createdAt, locale) },
   ];
 

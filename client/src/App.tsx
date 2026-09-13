@@ -35,6 +35,15 @@ import { PlatformOrganizations } from "./platform/pages/PlatformOrganizations";
 import { PlatformZatca } from "./platform/pages/PlatformZatca";
 import { PlatformSupportSession } from "./platform/pages/PlatformSupportSession";
 import { PlatformSupportSessions } from "./platform/pages/PlatformSupportSessions";
+import { PlatformOrganizationDetail } from "./platform/pages/PlatformOrganizationDetail";
+import { PlatformPlans } from "./platform/pages/PlatformPlans";
+import { PlatformFeatureFlags } from "./platform/pages/PlatformFeatureFlags";
+import { PlatformSecurity } from "./platform/pages/PlatformSecurity";
+import { PlatformOwnershipTransfer } from "./platform/pages/PlatformOwnershipTransfer";
+import { PlatformTenantImport } from "./platform/pages/PlatformTenantImport";
+import { PlatformBackupCenter } from "./platform/pages/PlatformBackupCenter";
+import { PlatformIncidents } from "./platform/pages/PlatformIncidents";
+import { PlatformHandover } from "./platform/pages/PlatformHandover";
 import { ProjectWorkspace } from "./project/ProjectWorkspace";
 import { OverviewSection } from "./project/sections/OverviewSection";
 import { ScheduleSection } from "./project/sections/ScheduleSection";
@@ -316,6 +325,78 @@ export default function App() {
         element={
           <PlatformProtectedRoute>
             <PlatformSupportSession />
+          </PlatformProtectedRoute>
+        }
+      />
+      <Route
+        path="/platform/organizations/:id"
+        element={
+          <PlatformProtectedRoute>
+            <PlatformOrganizationDetail />
+          </PlatformProtectedRoute>
+        }
+      />
+      <Route
+        path="/platform/plans"
+        element={
+          <PlatformProtectedRoute>
+            <PlatformPlans />
+          </PlatformProtectedRoute>
+        }
+      />
+      <Route
+        path="/platform/feature-flags"
+        element={
+          <PlatformProtectedRoute>
+            <PlatformFeatureFlags />
+          </PlatformProtectedRoute>
+        }
+      />
+      <Route
+        path="/platform/security"
+        element={
+          <PlatformProtectedRoute>
+            <PlatformSecurity />
+          </PlatformProtectedRoute>
+        }
+      />
+      <Route
+        path="/platform/ownership-transfer"
+        element={
+          <PlatformProtectedRoute>
+            <PlatformOwnershipTransfer />
+          </PlatformProtectedRoute>
+        }
+      />
+      <Route
+        path="/platform/tenant-import"
+        element={
+          <PlatformProtectedRoute>
+            <PlatformTenantImport />
+          </PlatformProtectedRoute>
+        }
+      />
+      <Route
+        path="/platform/backup-center"
+        element={
+          <PlatformProtectedRoute>
+            <PlatformBackupCenter />
+          </PlatformProtectedRoute>
+        }
+      />
+      <Route
+        path="/platform/incidents"
+        element={
+          <PlatformProtectedRoute>
+            <PlatformIncidents />
+          </PlatformProtectedRoute>
+        }
+      />
+      <Route
+        path="/platform/handover"
+        element={
+          <PlatformProtectedRoute>
+            <PlatformHandover />
           </PlatformProtectedRoute>
         }
       />

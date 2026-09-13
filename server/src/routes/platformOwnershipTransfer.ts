@@ -26,6 +26,21 @@ import { logger } from "../lib/logger.js";
 // the one authoritative source for what happened.
 export const platformOwnershipTransferRouter = Router();
 
+// MIDAD Final Pre-Launch audit, Phase 22 (UX) — the transfer UI needs a
+// real list of candidate operators to pick a new owner from (typing a raw
+// UUID is exactly the kind of error-prone flow this Phase's own
+// confirmationEmail field already guards against). Same capability as the
+// transfer itself: only platform_owner can even see who could become the
+// next one. Never returns passwordHash.
+platformOwnershipTransferRouter.get("/operators", requirePlatformCapability("ownershipTransfer.manage"), async (_req, res) => {
+  const operators = await db.query.platformOperators.findMany({
+    where: eq(platformOperators.status, "active"),
+    columns: { id: true, name: true, email: true, role: true },
+    orderBy: (o, { asc }) => [asc(o.name)],
+  });
+  res.json({ operators });
+});
+
 const transferSchema = z.object({
   newOwnerOperatorId: z.string().uuid("رقم العامل غير صالح"),
   // "Security Confirmation" / "Review Scope" — the caller must type the

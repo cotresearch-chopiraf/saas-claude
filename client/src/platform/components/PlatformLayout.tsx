@@ -33,6 +33,30 @@ export function PlatformLayout({ children }: { children: ReactNode }) {
                 <Link to="/platform/zatca" className="hover:text-white">
                   ZATCA
                 </Link>
+                <Link to="/platform/plans" className="hover:text-white">
+                  {t("platformLayout.plans")}
+                </Link>
+                <Link to="/platform/feature-flags" className="hover:text-white">
+                  {t("platformLayout.featureFlags")}
+                </Link>
+                <Link to="/platform/security" className="hover:text-white">
+                  {t("platformLayout.security")}
+                </Link>
+                <Link to="/platform/incidents" className="hover:text-white">
+                  {t("platformLayout.incidents")}
+                </Link>
+                <Link to="/platform/backup-center" className="hover:text-white">
+                  {t("platformLayout.backupCenter")}
+                </Link>
+                <Link to="/platform/tenant-import" className="hover:text-white">
+                  {t("platformLayout.tenantImport")}
+                </Link>
+                <Link to="/platform/ownership-transfer" className="hover:text-white">
+                  {t("platformLayout.ownershipTransfer")}
+                </Link>
+                <Link to="/platform/handover" className="hover:text-white">
+                  {t("platformLayout.handover")}
+                </Link>
               </>
             )}
             <LanguageSwitcher />
