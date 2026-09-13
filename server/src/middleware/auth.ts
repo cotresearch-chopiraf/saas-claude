@@ -2,7 +2,7 @@ import type { NextFunction, Request, Response } from "express";
 import { eq } from "drizzle-orm";
 import { verifyToken } from "../lib/jwt.js";
 import { db } from "../db/client.js";
-import { users, userSessions } from "../db/schema.js";
+import { users, userSessions, companies } from "../db/schema.js";
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -50,6 +50,21 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
   }
   if (user.status !== "active") {
     return res.status(401).json({ error: "تم إلغاء تفعيل هذا الحساب، يرجى التواصل مع مالك الشركة" });
+  }
+
+  // P0 hardening (MIDAD Final Pre-Launch audit, Phase 4) — same
+  // re-read-on-every-request discipline, applied to the tenant
+  // organization as a whole: a platform operator can suspend a company
+  // (routes/platformOrganizations.ts), and every user in it must be
+  // blocked on their very next request, not just future logins. "active"
+  // is the default for every company, so this changes nothing until a
+  // platform operator explicitly suspends one.
+  const company = await db.query.companies.findFirst({
+    where: eq(companies.id, payload.companyId),
+    columns: { status: true },
+  });
+  if (!company || company.status !== "active") {
+    return res.status(401).json({ error: "تم تعليق حساب هذه الشركة، يرجى التواصل مع الدعم" });
   }
 
   // Same re-read-on-every-request discipline as the status check above,

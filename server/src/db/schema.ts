@@ -140,6 +140,16 @@ export const plans = pgTable(
   }),
 );
 
+// P0 hardening (MIDAD Final Pre-Launch audit, §4/§19, Phase 4) — a
+// platform operator's ability to suspend a tenant organization (e.g. an
+// unpaid/abusive account) did not exist at all before this. "active" is
+// the default for every existing row and every new registration, so this
+// column changes nothing about current behavior until a platform operator
+// explicitly suspends a company. Enforced in middleware/auth.ts's
+// requireAuth, the same single-enforcement-point discipline already used
+// for users.status.
+export const companyStatusEnum = pgEnum("company_status", ["active", "suspended"]);
+
 // A company is the tenant boundary — every other table hangs off it,
 // and every query in the app is scoped by companyId to keep tenants isolated.
 export const companies = pgTable("companies", {
@@ -169,6 +179,7 @@ export const companies = pgTable("companies", {
   // rule that has not been decided — a platform operator assigns a plan
   // explicitly via routes/platformPlans.ts when that decision is made.
   planId: uuid("plan_id").references(() => plans.id, { onDelete: "set null" }),
+  status: companyStatusEnum("status").notNull().default("active"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
