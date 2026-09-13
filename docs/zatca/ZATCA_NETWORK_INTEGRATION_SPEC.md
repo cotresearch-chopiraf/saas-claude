@@ -6,6 +6,24 @@ network-integration continuation: whether MIDAD can safely implement the
 real Compliance CSID / Production CSID / Reporting / Clearance API calls,
 and if not, exactly what is missing.
 
+## SUPERSEDED — read `LIVE_SANDBOX_VERIFICATION.md` for current status
+
+MIDAD Final Pre-Launch audit, Phase 14. This document is a point-in-time
+record and is now stale in one specific way: it predates Slice A/L, which
+obtained `compliance_csid.pdf`/`compliance_invoice.pdf` and wired
+Compliance CSID and Compliance Invoice against their verified Swagger
+contracts (see `lib/zatca/provider/fatooraClient.ts`'s own header comment
+and `lib/zatca/domain/complianceCsid.ts`) — the "Required action:
+`SWAGGER_CONTRACT_REQUIRED`" rows below for those two are no longer
+accurate. Every real-network-call claim in this document remains true
+today (`zatca.gov.sa` is still unreached by this codebase; nothing below
+was executed against a live Sandbox) — only the per-endpoint verification
+column has moved on since. For the authoritative, current, most-recently
+re-checked status of every ZATCA operation (including this one), see
+`docs/zatca/LIVE_SANDBOX_VERIFICATION.md` instead. This file is kept for
+its historical citation of the original Reporting/Clearance Swagger
+verification, not as a live status source.
+
 ## Provenance notice — read this first (updated)
 
 The original version of this document recorded that `zatca.gov.sa` was
