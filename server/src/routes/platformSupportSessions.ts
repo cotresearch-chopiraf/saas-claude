@@ -58,7 +58,7 @@ platformSupportSessionsRouter.post("/", requirePlatformCapability("supportSessio
       afterValue: { expiresAt: created.expiresAt },
       reason,
       source: "platform_admin",
-      metadata: { platformOperatorId: req.platformOperatorId },
+      metadata: { platformOperatorId: req.platformOperatorId, requestId: req.requestId },
     });
 
     return created;
@@ -165,7 +165,7 @@ platformSupportSessionsRouter.post("/:supportSessionId/revoke", requirePlatformC
     beforeValue: { revokedAt: null },
     afterValue: { revokedAt: revoked.revokedAt },
     source: "platform_admin",
-    metadata: { platformOperatorId: req.platformOperatorId },
+    metadata: { platformOperatorId: req.platformOperatorId, requestId: req.requestId },
   });
 
   res.json({ id: revoked.id, revokedAt: revoked.revokedAt });

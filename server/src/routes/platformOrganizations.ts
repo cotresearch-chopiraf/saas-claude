@@ -169,7 +169,7 @@ platformOrganizationsRouter.post("/:id/suspend", requirePlatformCapability("orga
       afterValue: { status: "suspended" },
       reason: parsed.data.reason,
       source: "platform_admin",
-      metadata: { platformOperatorId: req.platformOperatorId, revokedSessionCount: revoked },
+      metadata: { platformOperatorId: req.platformOperatorId, revokedSessionCount: revoked, requestId: req.requestId },
     });
 
     return revoked;
@@ -204,7 +204,7 @@ platformOrganizationsRouter.post("/:id/reactivate", requirePlatformCapability("o
       afterValue: { status: "active" },
       reason: parsed.data.reason ?? null,
       source: "platform_admin",
-      metadata: { platformOperatorId: req.platformOperatorId },
+      metadata: { platformOperatorId: req.platformOperatorId, requestId: req.requestId },
     });
   });
 
@@ -237,7 +237,7 @@ platformOrganizationsRouter.post("/:id/revoke-sessions", requirePlatformCapabili
       entityId: req.params.id,
       reason: parsed.data.reason,
       source: "platform_admin",
-      metadata: { platformOperatorId: req.platformOperatorId, revokedSessionCount: revoked },
+      metadata: { platformOperatorId: req.platformOperatorId, revokedSessionCount: revoked, requestId: req.requestId },
     });
 
     return revoked;
@@ -351,7 +351,7 @@ platformOrganizationsRouter.patch("/:id/users/:userId/status", requirePlatformCa
       afterValue: { status: row.status },
       reason: parsed.data.reason ?? null,
       source: "platform_admin",
-      metadata: { platformOperatorId: req.platformOperatorId },
+      metadata: { platformOperatorId: req.platformOperatorId, requestId: req.requestId },
     });
 
     return row;
@@ -390,7 +390,7 @@ platformOrganizationsRouter.post("/:id/users/:userId/revoke-sessions", requirePl
       entityId: existing.id,
       reason: parsed.data.reason,
       source: "platform_admin",
-      metadata: { platformOperatorId: req.platformOperatorId },
+      metadata: { platformOperatorId: req.platformOperatorId, requestId: req.requestId },
     });
 
     return revoked.length;

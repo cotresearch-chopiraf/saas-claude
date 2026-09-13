@@ -65,6 +65,7 @@ platformFeatureFlagsRouter.post("/", requirePlatformCapability("featureFlags.man
     flagKey: created.key,
     globalEnabled: created.globalEnabled,
     defaultEnabledForOrgs: created.defaultEnabledForOrgs,
+    requestId: req.requestId,
   });
 
   res.status(201).json(created);
@@ -103,6 +104,7 @@ platformFeatureFlagsRouter.patch("/:key", requirePlatformCapability("featureFlag
       defaultEnabledForOrgs: updated.defaultEnabledForOrgs,
       enabledEnvironments: updated.enabledEnvironments,
     },
+    requestId: req.requestId,
   });
 
   res.json(updated);
@@ -164,7 +166,7 @@ platformFeatureFlagsRouter.put("/:key/overrides/:companyId", requirePlatformCapa
       beforeValue: existing ? { enabled: existing.enabled } : null,
       afterValue: { enabled: row.enabled },
       source: "platform_admin",
-      metadata: { flagKey: req.params.key, platformOperatorId: req.platformOperatorId },
+      metadata: { flagKey: req.params.key, platformOperatorId: req.platformOperatorId, requestId: req.requestId },
     });
 
     return row;
@@ -194,7 +196,7 @@ platformFeatureFlagsRouter.delete("/:key/overrides/:companyId", requirePlatformC
       beforeValue: { enabled: existing.enabled },
       afterValue: null,
       source: "platform_admin",
-      metadata: { flagKey: req.params.key, platformOperatorId: req.platformOperatorId },
+      metadata: { flagKey: req.params.key, platformOperatorId: req.platformOperatorId, requestId: req.requestId },
     });
   });
 

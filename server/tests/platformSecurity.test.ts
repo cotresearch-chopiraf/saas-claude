@@ -133,4 +133,19 @@ describe("platform security: sensitive-actions (global, cross-company)", () => {
     });
     expect(suspendEvent.platformOperatorName).toBeTruthy();
   });
+
+  it("carries the request's correlation id in metadata (Phase 8 — correlation-request-id where available)", async () => {
+    const { companyId } = await registerCompany("Co A");
+    const requestId = "phase8-correlation-test-id";
+
+    await request(app)
+      .post(`/api/platform/organizations/${companyId}/suspend`)
+      .set("Authorization", `Bearer ${operatorToken}`)
+      .set("X-Request-Id", requestId)
+      .send({ reason: "Unpaid invoice" });
+
+    const res = await request(app).get("/api/platform/security/sensitive-actions").set("Authorization", `Bearer ${operatorToken}`);
+    const suspendEvent = res.body.events.find((e: { action: string }) => e.action === "organization.suspended");
+    expect(suspendEvent.metadata.requestId).toBe(requestId);
+  });
 });

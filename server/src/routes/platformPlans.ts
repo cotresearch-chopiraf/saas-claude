@@ -59,7 +59,7 @@ platformPlansRouter.post("/", requirePlatformCapability("plans.manage"), async (
     })
     .returning();
 
-  logger.info("plan_created", { platformOperatorId: req.platformOperatorId, planKey: created.key, limits: created.limits });
+  logger.info("plan_created", { platformOperatorId: req.platformOperatorId, planKey: created.key, limits: created.limits, requestId: req.requestId });
   res.status(201).json(created);
 });
 
@@ -93,6 +93,7 @@ platformPlansRouter.patch("/:key", requirePlatformCapability("plans.manage"), as
     planKey: updated.key,
     before: { isActive: existing.isActive, limits: existing.limits },
     after: { isActive: updated.isActive, limits: updated.limits },
+    requestId: req.requestId,
   });
 
   res.json(updated);
@@ -128,7 +129,7 @@ platformPlansRouter.put("/assignments/:companyId", requirePlatformCapability("pl
       beforeValue: { planId: company.planId },
       afterValue: { planId },
       source: "platform_admin",
-      metadata: { platformOperatorId: req.platformOperatorId, planKey: parsed.data.planKey },
+      metadata: { platformOperatorId: req.platformOperatorId, planKey: parsed.data.planKey, requestId: req.requestId },
     });
 
     return row;
