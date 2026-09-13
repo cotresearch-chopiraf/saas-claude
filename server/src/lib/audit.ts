@@ -171,3 +171,30 @@ export async function listPlatformOperatorActivity(
     offset,
   });
 }
+
+// MIDAD Final Pre-Launch audit, Phase 7 — Security Center. A fourth reader
+// over the same audit_events table (still no second store): where
+// listPlatformOperatorActivity above answers "what have I done" (scoped to
+// one operator), this answers "what sensitive administrative actions have
+// happened across the whole platform" — every source: "platform_admin" row,
+// regardless of which operator or which company. Safe for the same reason
+// listPlatformOperatorActivity is: platform_admin rows are exclusively
+// platform-operator-authored (never a tenant's own activity), so this can
+// never surface a company's internal business data, only the platform
+// layer's own administrative actions — suspend/reactivate/revoke-sessions,
+// role/plan/feature-flag changes, support-session grants.
+export interface ListPlatformAdminActivityPage {
+  limit: number;
+  offset: number;
+}
+
+export async function listPlatformAdminActivity(
+  { limit, offset }: ListPlatformAdminActivityPage,
+) {
+  return db.query.auditEvents.findMany({
+    where: eq(auditEvents.source, "platform_admin"),
+    orderBy: (e, { desc }) => [desc(e.createdAt), desc(e.id)],
+    limit,
+    offset,
+  });
+}

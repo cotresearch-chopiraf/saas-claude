@@ -78,7 +78,9 @@ const listQuerySchema = z.object({
   offset: z.coerce.number().int().min(0).default(0),
 });
 
-function deriveStatus(session: { revokedAt: Date | null; expiresAt: Date }): "active" | "expired" | "revoked" {
+// Exported for routes/platformSecurity.ts's global (cross-operator) admin-
+// sessions view — same status derivation, not a second implementation.
+export function deriveStatus(session: { revokedAt: Date | null; expiresAt: Date }): "active" | "expired" | "revoked" {
   if (session.revokedAt) return "revoked";
   return session.expiresAt.getTime() > Date.now() ? "active" : "expired";
 }

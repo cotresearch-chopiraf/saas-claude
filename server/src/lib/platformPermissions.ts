@@ -18,6 +18,7 @@ export type PlatformCapability =
   | "featureFlags.manage"
   | "supportSessions.manage"
   | "zatca.read"
+  | "security.read"
   | "ownershipTransfer.manage";
 
 const ALL_CAPABILITIES: PlatformCapability[] = [
@@ -31,6 +32,7 @@ const ALL_CAPABILITIES: PlatformCapability[] = [
   "featureFlags.manage",
   "supportSessions.manage",
   "zatca.read",
+  "security.read",
   "ownershipTransfer.manage",
 ];
 
@@ -60,7 +62,16 @@ const ROLE_CAPABILITIES: Record<PlatformOperatorRole, ReadonlySet<PlatformCapabi
   // Read-only, cannot modify data — every *.read capability, no *.manage
   // or supportSessions.manage (a support session grants real tenant-data
   // access, which is a support/operational grant, not a passive read).
-  auditor: new Set<PlatformCapability>(["organizations.read", "users.read", "plans.read", "featureFlags.read", "zatca.read"]),
+  // Includes security.read: oversight of platform-wide administrative
+  // activity is exactly an auditor's role.
+  auditor: new Set<PlatformCapability>([
+    "organizations.read",
+    "users.read",
+    "plans.read",
+    "featureFlags.read",
+    "zatca.read",
+    "security.read",
+  ]),
 };
 
 export function hasPlatformCapability(role: string, capability: PlatformCapability): boolean {
