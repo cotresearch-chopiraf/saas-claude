@@ -5,6 +5,7 @@ import { db } from "../db/client.js";
 import { companies, plans, projects, userSessions, users, zatcaEgsUnits } from "../db/schema.js";
 import { recordAuditEvent } from "../lib/audit.js";
 import { getCompanyLimits } from "../lib/entitlements.js";
+import { requirePlatformCapability } from "../lib/platformPermissions.js";
 
 // MIDAD Phase D1 — the first PLATFORM_SCOPE route. Mounted behind
 // middleware/platformAuth.ts's platformAuth (never requireAuth), so it
@@ -33,7 +34,7 @@ const querySchema = z.object({
     }),
 });
 
-platformOrganizationsRouter.get("/", async (req, res) => {
+platformOrganizationsRouter.get("/", requirePlatformCapability("organizations.read"), async (req, res) => {
   const parsed = querySchema.safeParse(req.query);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
   const { limit, offset, search } = parsed.data;
@@ -70,7 +71,7 @@ platformOrganizationsRouter.get("/", async (req, res) => {
 // (not-yet-built) Phase 5 user-management surface or the existing
 // requireSupportSession-gated support-session flow (routes/
 // platformSupportSessions.ts) — never through this route.
-platformOrganizationsRouter.get("/:id", async (req, res) => {
+platformOrganizationsRouter.get("/:id", requirePlatformCapability("organizations.read"), async (req, res) => {
   const company = await db.query.companies.findFirst({
     where: eq(companies.id, req.params.id),
     columns: { id: true, name: true, createdAt: true, status: true, planId: true },
@@ -143,7 +144,7 @@ const suspendSchema = z.object({ reason: z.string().trim().min(3, "سبب الت
 // call) and forces immediate re-authentication everywhere by revoking all
 // currently-active sessions in the same transaction, rather than leaving
 // already-issued tokens to work until they separately hit the status check.
-platformOrganizationsRouter.post("/:id/suspend", async (req, res) => {
+platformOrganizationsRouter.post("/:id/suspend", requirePlatformCapability("organizations.manage"), async (req, res) => {
   const parsed = suspendSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
 
@@ -179,7 +180,7 @@ platformOrganizationsRouter.post("/:id/suspend", async (req, res) => {
 
 const reactivateSchema = z.object({ reason: z.string().trim().min(3).optional() });
 
-platformOrganizationsRouter.post("/:id/reactivate", async (req, res) => {
+platformOrganizationsRouter.post("/:id/reactivate", requirePlatformCapability("organizations.manage"), async (req, res) => {
   const parsed = reactivateSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
 
@@ -218,7 +219,7 @@ const revokeSessionsSchema = z.object({ reason: z.string().trim().min(3, "الس
 // not be trusted anymore. Deliberately a separate route from /suspend
 // rather than a side effect only suspend has, since this is a legitimate
 // standalone action.
-platformOrganizationsRouter.post("/:id/revoke-sessions", async (req, res) => {
+platformOrganizationsRouter.post("/:id/revoke-sessions", requirePlatformCapability("organizations.manage"), async (req, res) => {
   const parsed = revokeSessionsSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
 
@@ -257,7 +258,7 @@ platformOrganizationsRouter.post("/:id/revoke-sessions", async (req, res) => {
 // user, structurally distinct from platformAuth's own operator identity.
 // ---------------------------------------------------------------------
 
-platformOrganizationsRouter.get("/:id/users", async (req, res) => {
+platformOrganizationsRouter.get("/:id/users", requirePlatformCapability("users.read"), async (req, res) => {
   const company = await db.query.companies.findFirst({ where: eq(companies.id, req.params.id), columns: { id: true } });
   if (!company) return res.status(404).json({ error: "الشركة غير موجودة" });
 
@@ -270,7 +271,7 @@ platformOrganizationsRouter.get("/:id/users", async (req, res) => {
   res.json({ users: rows });
 });
 
-platformOrganizationsRouter.get("/:id/users/:userId", async (req, res) => {
+platformOrganizationsRouter.get("/:id/users/:userId", requirePlatformCapability("users.read"), async (req, res) => {
   const user = await db.query.users.findFirst({
     where: and(eq(users.id, req.params.userId), eq(users.companyId, req.params.id)),
     columns: { id: true, name: true, email: true, role: true, status: true, createdAt: true },
@@ -302,7 +303,7 @@ const userStatusSchema = z
     path: ["reason"],
   });
 
-platformOrganizationsRouter.patch("/:id/users/:userId/status", async (req, res) => {
+platformOrganizationsRouter.patch("/:id/users/:userId/status", requirePlatformCapability("users.manage"), async (req, res) => {
   const parsed = userStatusSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
 
@@ -364,7 +365,7 @@ platformOrganizationsRouter.patch("/:id/users/:userId/status", async (req, res) 
 // re-login for one specific user without touching their active/
 // deactivated status, for a suspected-compromised-account case where the
 // account itself should keep working.
-platformOrganizationsRouter.post("/:id/users/:userId/revoke-sessions", async (req, res) => {
+platformOrganizationsRouter.post("/:id/users/:userId/revoke-sessions", requirePlatformCapability("users.manage"), async (req, res) => {
   const parsed = revokeSessionsSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
 

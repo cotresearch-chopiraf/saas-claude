@@ -5,6 +5,7 @@ import { db } from "../db/client.js";
 import { plans, companies, defaultPlanLimits } from "../db/schema.js";
 import { recordAuditEvent } from "../lib/audit.js";
 import { logger } from "../lib/logger.js";
+import { requirePlatformCapability } from "../lib/platformPermissions.js";
 
 // P0 hardening (MIDAD Final Pre-Launch, SaaS & Sale-Readiness Audit) —
 // platform-admin CRUD over the plan registry and per-company plan
@@ -14,7 +15,7 @@ import { logger } from "../lib/logger.js";
 // here by design.
 export const platformPlansRouter = Router();
 
-platformPlansRouter.get("/", async (_req, res) => {
+platformPlansRouter.get("/", requirePlatformCapability("plans.read"), async (_req, res) => {
   const rows = await db.query.plans.findMany({ orderBy: (p, { asc }) => [asc(p.name)] });
   res.json({ plans: rows });
 });
@@ -40,7 +41,7 @@ const createPlanSchema = z.object({
   limits: limitsSchema.optional(),
 });
 
-platformPlansRouter.post("/", async (req, res) => {
+platformPlansRouter.post("/", requirePlatformCapability("plans.manage"), async (req, res) => {
   const parsed = createPlanSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
 
@@ -69,7 +70,7 @@ const updatePlanSchema = z.object({
   limits: limitsSchema.optional(),
 });
 
-platformPlansRouter.patch("/:key", async (req, res) => {
+platformPlansRouter.patch("/:key", requirePlatformCapability("plans.manage"), async (req, res) => {
   const parsed = updatePlanSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
 
@@ -101,7 +102,7 @@ const assignPlanSchema = z.object({ planKey: z.string().nullable() });
 
 // Assigning null clears the company's plan (reverts to unlimited — see
 // db/schema.ts's companies.planId comment).
-platformPlansRouter.put("/assignments/:companyId", async (req, res) => {
+platformPlansRouter.put("/assignments/:companyId", requirePlatformCapability("plans.manage"), async (req, res) => {
   const parsed = assignPlanSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
 

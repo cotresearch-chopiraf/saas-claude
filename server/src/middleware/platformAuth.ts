@@ -14,6 +14,13 @@ declare global {
       // read req.userId/req.companyId, and vice versa — see the Phase D
       // report's core architectural rule.
       platformOperatorId?: string;
+      // MIDAD Phase 6 — Platform Role Separation. Set alongside
+      // platformOperatorId from the same re-read-on-every-request DB
+      // query below (never trusted from the JWT), so a role change takes
+      // effect on the operator's very next request. lib/
+      // platformPermissions.ts's requirePlatformCapability reads this
+      // directly rather than re-querying platform_operators itself.
+      platformOperatorRole?: string;
     }
   }
 }
@@ -40,7 +47,7 @@ export async function platformAuth(req: Request, res: Response, next: NextFuncti
 
   const operator = await db.query.platformOperators.findFirst({
     where: eq(platformOperators.id, payload.platformOperatorId),
-    columns: { status: true },
+    columns: { status: true, role: true },
   });
   if (!operator) {
     return res.status(401).json({ error: "جلسة غير صالحة، الرجاء تسجيل الدخول مجدداً" });
@@ -50,5 +57,6 @@ export async function platformAuth(req: Request, res: Response, next: NextFuncti
   }
 
   req.platformOperatorId = payload.platformOperatorId;
+  req.platformOperatorRole = operator.role;
   next();
 }

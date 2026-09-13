@@ -330,6 +330,20 @@
       "when": 1789311492132,
       "tag": "0046_warm_edwin_jarvis",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1789316124635,
+      "tag": "0047_tranquil_morgan_stark",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1789316196077,
+      "tag": "0048_lush_naginata",
+      "breakpoints": true
     }
   ]
 }

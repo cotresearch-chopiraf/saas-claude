@@ -5,6 +5,7 @@ import { db } from "../db/client.js";
 import { featureFlags, companyFeatureFlagOverrides, companies } from "../db/schema.js";
 import { recordAuditEvent } from "../lib/audit.js";
 import { logger } from "../lib/logger.js";
+import { requirePlatformCapability } from "../lib/platformPermissions.js";
 
 // P0 hardening (MIDAD Final Pre-Launch, SaaS & Sale-Readiness Audit) —
 // platform-admin CRUD over the feature-flag registry and per-company
@@ -24,7 +25,7 @@ import { logger } from "../lib/logger.js";
 // supportSession.granted event.
 export const platformFeatureFlagsRouter = Router();
 
-platformFeatureFlagsRouter.get("/", async (_req, res) => {
+platformFeatureFlagsRouter.get("/", requirePlatformCapability("featureFlags.read"), async (_req, res) => {
   const flags = await db.query.featureFlags.findMany({ orderBy: (f, { asc }) => [asc(f.key)] });
   res.json({ flags });
 });
@@ -41,7 +42,7 @@ const createFlagSchema = z.object({
   enabledEnvironments: z.array(z.string()).nullable().optional(),
 });
 
-platformFeatureFlagsRouter.post("/", async (req, res) => {
+platformFeatureFlagsRouter.post("/", requirePlatformCapability("featureFlags.manage"), async (req, res) => {
   const parsed = createFlagSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
 
@@ -76,7 +77,7 @@ const updateFlagSchema = z.object({
   enabledEnvironments: z.array(z.string()).nullable().optional(),
 });
 
-platformFeatureFlagsRouter.patch("/:key", async (req, res) => {
+platformFeatureFlagsRouter.patch("/:key", requirePlatformCapability("featureFlags.manage"), async (req, res) => {
   const parsed = updateFlagSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
 
@@ -107,7 +108,7 @@ platformFeatureFlagsRouter.patch("/:key", async (req, res) => {
   res.json(updated);
 });
 
-platformFeatureFlagsRouter.get("/:key/overrides", async (req, res) => {
+platformFeatureFlagsRouter.get("/:key/overrides", requirePlatformCapability("featureFlags.read"), async (req, res) => {
   const flag = await db.query.featureFlags.findFirst({ where: eq(featureFlags.key, req.params.key) });
   if (!flag) return res.status(404).json({ error: "الميزة غير موجودة" });
 
@@ -120,7 +121,7 @@ platformFeatureFlagsRouter.get("/:key/overrides", async (req, res) => {
 
 const setOverrideSchema = z.object({ enabled: z.boolean() });
 
-platformFeatureFlagsRouter.put("/:key/overrides/:companyId", async (req, res) => {
+platformFeatureFlagsRouter.put("/:key/overrides/:companyId", requirePlatformCapability("featureFlags.manage"), async (req, res) => {
   const parsed = setOverrideSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
 
@@ -172,7 +173,7 @@ platformFeatureFlagsRouter.put("/:key/overrides/:companyId", async (req, res) =>
   res.json(override);
 });
 
-platformFeatureFlagsRouter.delete("/:key/overrides/:companyId", async (req, res) => {
+platformFeatureFlagsRouter.delete("/:key/overrides/:companyId", requirePlatformCapability("featureFlags.manage"), async (req, res) => {
   const existing = await db.query.companyFeatureFlagOverrides.findFirst({
     where: and(
       eq(companyFeatureFlagOverrides.companyId, req.params.companyId),

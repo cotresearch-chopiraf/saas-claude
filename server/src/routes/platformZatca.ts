@@ -3,6 +3,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { auditEvents, companies } from "../db/schema.js";
 import { computeOnboardingStatus, getZatcaTenantIdentity, type ZatcaOnboardingStatus } from "../lib/zatca/domain/index.js";
+import { requirePlatformCapability } from "../lib/platformPermissions.js";
 
 // MIDAD Admin Dashboard — ZATCA operations (Slice 3). Mounted behind
 // platformAuth (never requireAuth), the same structurally-separate
@@ -18,7 +19,7 @@ export const platformZatcaRouter = Router();
 const CERT_EXPIRY_WINDOW_DAYS = 30;
 const RECENT_LIMIT = 20;
 
-platformZatcaRouter.get("/", async (_req, res) => {
+platformZatcaRouter.get("/", requirePlatformCapability("zatca.read"), async (_req, res) => {
   const units = await db.query.zatcaEgsUnits.findMany({
     columns: {
       id: true,

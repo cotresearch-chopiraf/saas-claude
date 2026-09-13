@@ -5,6 +5,7 @@ import { db } from "../db/client.js";
 import { companies, supportSessions } from "../db/schema.js";
 import { recordAuditEvent, listCompanyActivity } from "../lib/audit.js";
 import { requireSupportSession } from "../middleware/requireSupportSession.js";
+import { requirePlatformCapability } from "../lib/platformPermissions.js";
 
 // MIDAD Phase D2 — Platform Admin / Support Access. Everything here is
 // mounted behind middleware/platformAuth.ts's platformAuth (never
@@ -23,7 +24,7 @@ const createSchema = z.object({
   reason: z.string().trim().min(3, "يجب توضيح سبب طلب الوصول"),
 });
 
-platformSupportSessionsRouter.post("/", async (req, res) => {
+platformSupportSessionsRouter.post("/", requirePlatformCapability("supportSessions.manage"), async (req, res) => {
   const parsed = createSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
   const { targetCompanyId, reason } = parsed.data;
@@ -93,7 +94,7 @@ function deriveStatus(session: { revokedAt: Date | null; expiresAt: Date }): "ac
 // introducing a status-grouped ordering would be the first of its kind in
 // the codebase, and isn't needed: sessions are short-lived (30 minutes), so
 // newest-first already surfaces active ones at the top in practice.
-platformSupportSessionsRouter.get("/", async (req, res) => {
+platformSupportSessionsRouter.get("/", requirePlatformCapability("supportSessions.manage"), async (req, res) => {
   const parsed = listQuerySchema.safeParse(req.query);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
   const { limit, offset } = parsed.data;
@@ -134,7 +135,7 @@ platformSupportSessionsRouter.get("/", async (req, res) => {
   });
 });
 
-platformSupportSessionsRouter.post("/:supportSessionId/revoke", async (req, res) => {
+platformSupportSessionsRouter.post("/:supportSessionId/revoke", requirePlatformCapability("supportSessions.manage"), async (req, res) => {
   const existing = await db.query.supportSessions.findFirst({
     where: and(eq(supportSessions.id, req.params.supportSessionId), eq(supportSessions.platformOperatorId, req.platformOperatorId!)),
   });
@@ -181,7 +182,11 @@ const activityQuerySchema = z.object({
 // session row); nothing in the request body/query can change which
 // company this reads, including a client-supplied companyId, which this
 // route never even looks at.
-platformSupportSessionsRouter.get("/:supportSessionId/activity", requireSupportSession, async (req, res) => {
+platformSupportSessionsRouter.get(
+  "/:supportSessionId/activity",
+  requirePlatformCapability("supportSessions.manage"),
+  requireSupportSession,
+  async (req, res) => {
   const parsed = activityQuerySchema.safeParse(req.query);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
   const { limit, offset, entityType } = parsed.data;

@@ -2248,18 +2248,39 @@ export const forecastSnapshotsRelations = relations(forecastSnapshots, ({ one })
 // never touching req.userId/req.companyId or the "users"/"companies"
 // tables' rows.
 export const platformOperatorStatusEnum = pgEnum("platform_operator_status", ["active", "deactivated"]);
-// Exactly one role for now, per Phase D1's explicit scope — deliberately
-// not "platform_owner"/"support"/"operations": those remain unresolved
-// Product Owner decisions (see the Phase D report), not something to
-// pre-invent here just because an enum makes it easy to add values later.
-export const platformOperatorRoleEnum = pgEnum("platform_operator_role", ["platform_operator"]);
+// MIDAD Final Pre-Launch audit, Phase 6 — Platform Role Separation. Phase
+// D1 deliberately shipped with exactly one role and left "platform_owner/
+// support/operations" as an explicitly unresolved Product Owner decision
+// (see the Phase D report and this enum's own prior comment). That
+// decision has now been made explicitly, with defined per-role
+// boundaries (see lib/platformPermissions.ts for the enforced capability
+// matrix): platform_owner (highest — ownership transfer, platform
+// administration, critical configuration), platform_admin (operational
+// management without ownership transfer), support (support sessions /
+// customer assistance only), compliance (ZATCA/compliance-related
+// administrative access), auditor (read-only, cannot modify data).
+// "platform_operator" stays in the enum — Postgres cannot drop an enum
+// value cleanly, and every existing row is migrated off it (see migration
+// 0047) — but no code path assigns it to a new row going forward; the
+// permission matrix treats it as owner-equivalent only as a fail-safe for
+// a row that somehow still carries it, matching the single-role system's
+// actual behavior before this phase (any operator = full access), never
+// a new privilege grant.
+export const platformOperatorRoleEnum = pgEnum("platform_operator_role", [
+  "platform_operator",
+  "platform_owner",
+  "platform_admin",
+  "support",
+  "compliance",
+  "auditor",
+]);
 
 export const platformOperators = pgTable("platform_operators", {
   id: uuid("id").primaryKey().defaultRandom(),
   email: text("email").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
   name: text("name").notNull(),
-  role: platformOperatorRoleEnum("role").notNull().default("platform_operator"),
+  role: platformOperatorRoleEnum("role").notNull().default("platform_owner"),
   status: platformOperatorStatusEnum("status").notNull().default("active"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
