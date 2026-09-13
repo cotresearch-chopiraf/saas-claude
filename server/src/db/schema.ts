@@ -3984,3 +3984,62 @@ export const budgetAlertsRelations = relations(budgetAlerts, ({ one }) => ({
   acknowledgedByUser: one(users, { fields: [budgetAlerts.acknowledgedByUserId], references: [users.id], relationName: "budgetAlertAcknowledger" }),
   resolvedByUser: one(users, { fields: [budgetAlerts.resolvedByUserId], references: [users.id], relationName: "budgetAlertResolver" }),
 }));
+
+// ============================================================================
+// MIDAD Final Pre-Launch audit, Phase 13 — Observability / Incident Center
+// ============================================================================
+// The audit found no persistent incident/error store — every failure only
+// ever lived in process logs (lib/logger.ts), gone once the process
+// recycles. This is that store: a genuinely new table (there is no
+// existing "incidents" concept anywhere in this schema to extend), scoped
+// deliberately narrowly per the audit's own instruction not to convert
+// every frontend/application error into an incident.
+//
+// companyId is NULLABLE — unlike audit_events (always exactly one
+// tenant's own activity), an incident can be tenant-scoped (a specific
+// company's ZATCA submission kept failing) or platform-wide (the database
+// connection pool is exhausted, affecting everyone). A platform-wide
+// incident genuinely has no single company to attach to.
+//
+// Creation is manual (a platform operator logs it) — see routes/
+// platformIncidents.ts's own header comment for why this phase does not
+// wire an automatic error->incident pipeline from every failure source
+// named in the audit (ZATCA, database, jobs, API): doing that safely
+// (with real deduplication/rate-limiting so a single recurring failure
+// doesn't spam dozens of "incidents") is a materially larger, separate
+// piece of work this phase documents as a boundary rather than fabricates.
+export const incidentSeverityEnum = pgEnum("incident_severity", ["low", "medium", "high", "critical"]);
+export const incidentStatusEnum = pgEnum("incident_status", ["open", "investigating", "resolved"]);
+
+export const incidents = pgTable(
+  "incidents",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id").references(() => companies.id, { onDelete: "set null" }),
+    title: text("title").notNull(),
+    description: text("description").notNull(),
+    severity: incidentSeverityEnum("severity").notNull(),
+    status: incidentStatusEnum("status").notNull().default("open"),
+    // Free text, not an enum — deliberately: the set of services/subsystems
+    // that can fail (zatca, database, storage, email, a specific job name,
+    // ...) grows over time and naming one here should never require a
+    // migration, unlike severity/status, which are a fixed, small lifecycle.
+    affectedService: text("affected_service").notNull(),
+    // Ties an incident back to middleware/requestId.ts's per-request
+    // correlation id (and therefore to request logs/audit_events.metadata
+    // entries that already carry the same id) — nullable, since a manually
+    // logged incident may not originate from any single HTTP request.
+    correlationId: text("correlation_id"),
+    source: text("source").notNull().default("manual"),
+    resolutionNotes: text("resolution_notes"),
+    createdByPlatformOperatorId: uuid("created_by_platform_operator_id").references(() => platformOperators.id),
+    resolvedByPlatformOperatorId: uuid("resolved_by_platform_operator_id").references(() => platformOperators.id),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    resolvedAt: timestamp("resolved_at"),
+  },
+  (table) => ({
+    companyIdx: index("incidents_company_idx").on(table.companyId),
+    statusIdx: index("incidents_status_idx").on(table.status),
+  }),
+);

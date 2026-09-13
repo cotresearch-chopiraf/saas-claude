@@ -351,6 +351,13 @@
       "when": 1789318223630,
       "tag": "0049_mushy_strong_guy",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1789325209391,
+      "tag": "0050_woozy_red_ghost",
+      "breakpoints": true
     }
   ]
 }

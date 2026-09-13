@@ -25,7 +25,17 @@ export type PlatformCapability =
   // bundle is a full copy of a tenant's business data) and not scoped to
   // any single support ticket — owner/admin only, like plans/feature
   // flags, never support/compliance/auditor.
-  | "tenantData.manage";
+  | "tenantData.manage"
+  // MIDAD Final Pre-Launch audit, Phase 13 — Observability/Incident
+  // Center. Deliberately its own capability pair rather than reusing
+  // security.read: incidents are a distinct, mutable record (create,
+  // investigate, resolve), not the read-only administrative-activity feed
+  // security.read covers. compliance gets both, since ZATCA failures are
+  // explicitly incident-worthy and within its domain; support does not —
+  // its scope stays "support sessions only", same precedent as every
+  // other capability in this file.
+  | "incidents.read"
+  | "incidents.manage";
 
 const ALL_CAPABILITIES: PlatformCapability[] = [
   "organizations.read",
@@ -41,6 +51,8 @@ const ALL_CAPABILITIES: PlatformCapability[] = [
   "security.read",
   "ownershipTransfer.manage",
   "tenantData.manage",
+  "incidents.read",
+  "incidents.manage",
 ];
 
 // Every value db/schema.ts's platformOperatorRoleEnum can hold, including
@@ -64,13 +76,17 @@ const ROLE_CAPABILITIES: Record<PlatformOperatorRole, ReadonlySet<PlatformCapabi
   // mechanism itself. No plan/feature-flag/ZATCA administration, no
   // organization or user mutation, no ownership transfer.
   support: new Set<PlatformCapability>(["organizations.read", "users.read", "supportSessions.manage"]),
-  // ZATCA/compliance-related administrative access.
-  compliance: new Set<PlatformCapability>(["organizations.read", "zatca.read"]),
+  // ZATCA/compliance-related administrative access. Includes incident
+  // read+manage: compliance can create/manage incidents within its own
+  // domain (e.g. a ZATCA integration failure), same reasoning as its
+  // existing zatca.read grant.
+  compliance: new Set<PlatformCapability>(["organizations.read", "zatca.read", "incidents.read", "incidents.manage"]),
   // Read-only, cannot modify data — every *.read capability, no *.manage
   // or supportSessions.manage (a support session grants real tenant-data
   // access, which is a support/operational grant, not a passive read).
   // Includes security.read: oversight of platform-wide administrative
-  // activity is exactly an auditor's role.
+  // activity is exactly an auditor's role. Includes incidents.read for
+  // the same reason.
   auditor: new Set<PlatformCapability>([
     "organizations.read",
     "users.read",
@@ -78,6 +94,7 @@ const ROLE_CAPABILITIES: Record<PlatformOperatorRole, ReadonlySet<PlatformCapabi
     "featureFlags.read",
     "zatca.read",
     "security.read",
+    "incidents.read",
   ]),
 };
 
