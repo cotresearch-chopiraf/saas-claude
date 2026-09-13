@@ -56,6 +56,7 @@ import { platformPlansRouter } from "./routes/platformPlans.js";
 import { platformSecurityRouter } from "./routes/platformSecurity.js";
 import { platformOwnershipTransferRouter } from "./routes/platformOwnershipTransfer.js";
 import { platformTenantExportRouter, platformTenantImportRouter } from "./routes/platformTenantData.js";
+import { platformBackupCenterRouter } from "./routes/platformBackupCenter.js";
 import { clientPortalUsersRouter } from "./routes/clientPortalUsers.js";
 import { clientPortalAuthRouter } from "./routes/clientPortalAuth.js";
 import { clientPortalProjectsRouter } from "./routes/clientPortalProjects.js";
@@ -241,6 +242,9 @@ export function buildApp() {
   // routes/platformTenantData.ts and lib/tenantExport.ts/tenantImport.ts.
   app.use("/api/platform/organizations", platformAuth, platformTenantExportRouter);
   app.use("/api/platform/tenant-import", platformAuth, platformTenantImportRouter);
+  // MIDAD Final Pre-Launch audit, Phase 12 — Platform Backup Center. See
+  // routes/platformBackupCenter.ts and lib/backupStatus.ts.
+  app.use("/api/platform/backup-center", platformAuth, platformBackupCenterRouter);
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   app.use((err: Error, req: express.Request, res: express.Response, _next: express.NextFunction) => {
