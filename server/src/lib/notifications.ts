@@ -5,9 +5,15 @@ import { notifications } from "../db/schema.js";
 // Slice AA Scope F — minimal notification domain module. Every function
 // takes companyId AND recipientUserId explicitly and filters by both — the
 // ownership boundary is enforced here, once, rather than trusted to each
-// caller to remember. No producer calls createNotification yet (see the
-// schema's own comment); this module exists so a future producer and this
-// slice's read/mark-read API share exactly one implementation.
+// caller to remember. P0-3 pre-launch hardening wired the first real
+// producer (routes/ipcs.ts's reject() — the one event with an
+// unambiguous, already-tracked recipient: ipcs.submittedBy). Other
+// launch-critical events (budget-alert threshold breach, change-order
+// decision) were deliberately NOT wired: neither has a defined recipient
+// anywhere in the schema (no subscriber/owner-list concept for alerts, no
+// creator/requester column on change_orders at all) — inventing one was
+// out of scope for a producer-wiring task. See that sprint's report for
+// the exact missing business rule in each case.
 
 export interface CreateNotificationInput {
   companyId: string;

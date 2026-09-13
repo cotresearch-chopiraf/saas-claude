@@ -929,7 +929,9 @@ export const boqRevisions = pgTable(
   }),
 );
 
-export const boqItems = pgTable("boq_items", {
+export const boqItems = pgTable(
+  "boq_items",
+  {
   id: uuid("id").primaryKey().defaultRandom(),
   boqRevisionId: uuid("boq_revision_id")
     .notNull()
@@ -949,7 +951,19 @@ export const boqItems = pgTable("boq_items", {
   costCodeId: uuid("cost_code_id").references(() => costCodes.id),
   sortOrder: integer("sort_order").notNull().default(0),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+  },
+  (table) => ({
+    // P0-1 pre-launch hardening — routes/boq.ts's list route
+    // (`GET /revisions/:revisionId/items`) filters by boqRevisionId alone,
+    // and the same column drives every parent/child lookup used by
+    // create/update/delete. This table had no index at all beyond its PK;
+    // several of these queries run inside a transaction already holding a
+    // `SELECT ... FOR UPDATE` lock on the parent contract/revision (see
+    // boq.ts's publish/supersede routes), so an unindexed scan here
+    // directly extends lock hold time under concurrent BOQ activity.
+    revisionIdx: index("boq_items_revision_idx").on(table.boqRevisionId),
+  }),
+);
 
 // --- Budget Revisions ---
 // An ADDITIVE versioning/approval layer on top of the existing budget_items
@@ -1142,11 +1156,11 @@ export const idempotencyKeys = pgTable(
 );
 
 // --- Notifications ---
-// Slice AA Scope F — minimal tenant-scoped notification foundation. No
-// producer is wired up yet by this slice (F5: build the model + a minimal
-// API now; integrate specific event sources — tasks, approvals, invitations,
-// ZATCA operational events — only when that work is itself in scope).
-// recipientUserId is the sole ownership boundary: every route in
+// Slice AA Scope F — minimal tenant-scoped notification foundation. Slice
+// F5 built the model + a minimal API with no producer wired up yet; P0-3
+// pre-launch hardening wired the first one (IPC rejection — see
+// lib/notifications.ts's own comment for exactly what was and was not
+// wired, and why). recipientUserId is the sole ownership boundary: every route in
 // routes/notifications.ts filters by (companyId, recipientUserId) so a user
 // can never read or mark-read another user's notification, even within the
 // same company. "type" is deliberately free text, not an enum — the same
@@ -1375,7 +1389,9 @@ export const commitments = pgTable(
 // requirement that every new table have it, even where every existing
 // analogous child table in this schema (boqItems, invoiceItems,
 // quoteItems) does not.
-export const commitmentLines = pgTable("commitment_lines", {
+export const commitmentLines = pgTable(
+  "commitment_lines",
+  {
   id: uuid("id").primaryKey().defaultRandom(),
   companyId: uuid("company_id")
     .notNull()
@@ -1394,7 +1410,17 @@ export const commitmentLines = pgTable("commitment_lines", {
   amount: numeric("amount", { precision: 14, scale: 2 }).notNull(),
   sortOrder: integer("sort_order").notNull().default(0),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+  },
+  (table) => ({
+    // P0-1 pre-launch hardening — routes/commitments.ts reads "every line
+    // for this commitment" repeatedly by commitmentId alone (list route,
+    // and both the amend()/cancel() recompute-from-transaction reads that
+    // run while the parent commitment row is already locked FOR UPDATE —
+    // see commitments.ts:411,628). No index existed beyond the PK, so
+    // that scan ran unindexed for the full duration of the lock.
+    commitmentIdx: index("commitment_lines_commitment_idx").on(table.commitmentId),
+  }),
+);
 
 export const suppliersRelations = relations(suppliers, ({ one, many }) => ({
   company: one(companies, { fields: [suppliers.companyId], references: [companies.id] }),
@@ -1663,7 +1689,9 @@ export const measurements = pgTable(
   }),
 );
 
-export const measurementLines = pgTable("measurement_lines", {
+export const measurementLines = pgTable(
+  "measurement_lines",
+  {
   id: uuid("id").primaryKey().defaultRandom(),
   companyId: uuid("company_id")
     .notNull()
@@ -1687,7 +1715,21 @@ export const measurementLines = pgTable("measurement_lines", {
   value: numeric("value", { precision: 14, scale: 2 }),
   notes: text("notes"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+  },
+  (table) => ({
+    // P0-1 pre-launch hardening — two distinct hot-path filters, not one:
+    // (1) "every line for this measurement" (list route, and every
+    // submit/approve/reject recompute — measurements.ts:119,268,348), and
+    // (2) sumApprovedQuantity()'s cross-measurement rollup filtering by
+    // boqItemId alone across every APPROVED measurement for that BOQ item
+    // (measurements.ts:322-323) — the single shared source of truth IPC
+    // certification also calls while holding locks on the referenced BOQ
+    // items (see ipcLines below). Both are real, independent filter
+    // patterns, so both get their own index rather than one composite.
+    measurementIdx: index("measurement_lines_measurement_idx").on(table.measurementId),
+    boqItemIdx: index("measurement_lines_boq_item_idx").on(table.boqItemId),
+  }),
+);
 
 export const measurementsRelations = relations(measurements, ({ one, many }) => ({
   company: one(companies, { fields: [measurements.companyId], references: [companies.id] }),
@@ -1792,7 +1834,9 @@ export const ipcs = pgTable(
   }),
 );
 
-export const ipcLines = pgTable("ipc_lines", {
+export const ipcLines = pgTable(
+  "ipc_lines",
+  {
   id: uuid("id").primaryKey().defaultRandom(),
   companyId: uuid("company_id")
     .notNull()
@@ -1834,7 +1878,22 @@ export const ipcLines = pgTable("ipc_lines", {
   cumulativeQuantity: numeric("cumulative_quantity", { precision: 14, scale: 3 }),
   sortOrder: integer("sort_order").notNull().default(0),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+  },
+  (table) => ({
+    // P0-1 pre-launch hardening — same two-filter shape as
+    // measurementLines above: (1) "every line for this IPC"
+    // (list route, and the submit/approve/certify recomputes at
+    // ipcs.ts:130,311,464, the last two running while the IPC row and a
+    // sorted set of referenced BOQ item rows are already locked FOR
+    // UPDATE), and (2) the certified-quantity rollup filtering by
+    // boqItemId alone across every CERTIFIED ipc line for that BOQ item
+    // (ipcs.ts:159-160,484-485) — the exact locked-scan pattern the P0
+    // audit flagged, since it runs once per referenced BOQ item inside
+    // certify()'s own lock. Both get their own index.
+    ipcIdx: index("ipc_lines_ipc_idx").on(table.ipcId),
+    boqItemIdx: index("ipc_lines_boq_item_idx").on(table.boqItemId),
+  }),
+);
 
 export const ipcsRelations = relations(ipcs, ({ one, many }) => ({
   company: one(companies, { fields: [ipcs.companyId], references: [companies.id] }),
@@ -2045,7 +2104,9 @@ export interface ForecastSnapshotAssumptions {
   excludedForeignCurrencyCommitmentIds: string[];
 }
 
-export const forecastSnapshots = pgTable("forecast_snapshots", {
+export const forecastSnapshots = pgTable(
+  "forecast_snapshots",
+  {
   id: uuid("id").primaryKey().defaultRandom(),
   companyId: uuid("company_id")
     .notNull()
@@ -2075,7 +2136,17 @@ export const forecastSnapshots = pgTable("forecast_snapshots", {
     .notNull()
     .references(() => users.id),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+  },
+  (table) => ({
+    // P0-1 pre-launch hardening — matches the same "list route filters by
+    // projectId alone" convention already used by boqRevisions/
+    // budgetRevisions/commitments/measurements/ipcs (routes/forecast.ts's
+    // GET /snapshots also ANDs companyId and orders by createdAt, but
+    // projectId is the selective column narrowing from company-wide to
+    // one project's typically small, deliberately-created snapshot set).
+    projectIdx: index("forecast_snapshots_project_idx").on(table.projectId),
+  }),
+);
 
 export const forecastSnapshotsRelations = relations(forecastSnapshots, ({ one }) => ({
   company: one(companies, { fields: [forecastSnapshots.companyId], references: [companies.id] }),

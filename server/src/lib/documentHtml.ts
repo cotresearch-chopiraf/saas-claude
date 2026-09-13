@@ -27,6 +27,16 @@ export interface DocumentData {
   };
   items: DocumentLineItem[];
   taxRatePercent: number;
+  // P0-5 pre-launch hardening (ZATCA QR wiring) — a rendered PNG data URI,
+  // already Base64-encoded, or null when there is nothing safe to render
+  // (no ZATCA VAT number configured for this company, or this document is
+  // a quote, which is never a ZATCA-relevant tax document). The caller
+  // (routes/invoices.ts's buildInvoicePdf) is solely responsible for
+  // deciding WHETHER to build one and for what authoritative data goes
+  // into it — this template never invents, fetches, or re-derives QR
+  // content itself; it only renders whatever image it is handed, exactly
+  // like the existing company.logoDataUri field above.
+  qrCodeDataUri?: string | null;
 }
 
 interface Labels {
@@ -41,6 +51,7 @@ interface Labels {
   tax: string;
   total: string;
   footer: string;
+  qrCaption: string;
 }
 
 // One template, three fully independent label sets and directions — a
@@ -58,6 +69,7 @@ const LABELS: Record<DocumentLanguage, Labels> = {
     tax: "الضريبة",
     total: "الإجمالي",
     footer: "تم إنشاؤه تلقائياً عبر نظام تشغيل المقاولين",
+    qrCaption: "رمز الاستجابة السريعة لهيئة الزكاة والضريبة والجمارك",
   },
   fr: {
     dir: "ltr",
@@ -71,6 +83,7 @@ const LABELS: Record<DocumentLanguage, Labels> = {
     tax: "Taxe",
     total: "Total",
     footer: "Généré automatiquement via le système de gestion des entrepreneurs",
+    qrCaption: "Code QR ZATCA (facture électronique)",
   },
   en: {
     dir: "ltr",
@@ -84,6 +97,7 @@ const LABELS: Record<DocumentLanguage, Labels> = {
     tax: "Tax",
     total: "Total",
     footer: "Automatically generated via the contractor operations system",
+    qrCaption: "ZATCA e-invoice QR code",
   },
 };
 
@@ -159,6 +173,9 @@ export function buildDocumentHtml(data: DocumentData): string {
   .totals-row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 13px; }
   .totals-row.total { border-top: 2px solid #20423f; margin-top: 6px; padding-top: 12px; font-weight: 700; font-size: 16px; color: #20423f; }
   .totals-row .val { direction: ltr; font-variant-numeric: tabular-nums; }
+  .qr-block { display: flex; align-items: center; gap: 12px; margin-top: 20px; }
+  .qr-block img { width: 110px; height: 110px; }
+  .qr-block .caption { font-size: 10.5px; color: #6b675c; max-width: 220px; line-height: 1.5; }
   footer { margin-top: 48px; font-size: 11px; color: #a6a095; text-align: center; }
 </style>
 </head>
@@ -199,6 +216,18 @@ export function buildDocumentHtml(data: DocumentData): string {
     <div class="totals-row"><span>${t.tax} (${data.taxRatePercent}%)</span><span class="val">${money(taxAmount)}</span></div>
     <div class="totals-row total"><span>${t.total}</span><span class="val">${money(total)}</span></div>
   </div>
+
+  ${
+    // Defense in depth: a ZATCA QR is an invoice concept, never a quote's —
+    // even though only routes/invoices.ts ever populates qrCodeDataUri
+    // today, this template never renders one for kind === "quote" either.
+    data.kind === "invoice" && data.qrCodeDataUri
+      ? `<div class="qr-block">
+    <img src="${escapeHtml(data.qrCodeDataUri)}" alt="${escapeHtml(t.qrCaption)}" />
+    <span class="caption">${escapeHtml(t.qrCaption)}</span>
+  </div>`
+      : ""
+  }
 
   <footer>${t.footer}</footer>
 </body>

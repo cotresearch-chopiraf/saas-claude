@@ -24,6 +24,8 @@ import { logger } from "../lib/logger.js";
 import { calculateTax } from "../lib/compliance/engine.js";
 import { withIdempotency, IdempotencyConflictError } from "../lib/idempotency.js";
 import { publicDocumentRateLimit } from "../middleware/rateLimit.js";
+import { getZatcaTenantIdentity } from "../lib/zatca/domain/config.js";
+import { buildInvoiceQrCodeDataUri } from "../lib/zatca/invoiceQr.js";
 
 export const invoicesRouter = Router();
 export const publicInvoicesRouter = Router();
@@ -416,10 +418,19 @@ async function buildInvoicePdf(invoiceId: string, companyId: string) {
   });
   if (!invoice) return null;
 
-  const [items, company] = await Promise.all([
+  const [items, company, zatcaIdentity] = await Promise.all([
     db.query.invoiceItems.findMany({ where: eq(invoiceItems.invoiceId, invoice.id) }),
     db.query.companies.findFirst({ where: eq(companies.id, companyId) }),
+    getZatcaTenantIdentity(companyId),
   ]);
+
+  const qrCodeDataUri = await buildInvoiceQrCodeDataUri({
+    sellerName: zatcaIdentity.legalName ?? company!.name,
+    vatNumber: zatcaIdentity.vatNumber,
+    issueDate: invoice.issueDate,
+    itemAmounts: items.map((i) => Number(i.amount)),
+    taxRatePercent: Number(invoice.taxRatePercent),
+  });
 
   const html = buildDocumentHtml({
     kind: "invoice",
@@ -436,6 +447,7 @@ async function buildInvoicePdf(invoiceId: string, companyId: string) {
     client: { name: invoice.clientName, address: invoice.clientAddress, taxId: invoice.clientTaxId },
     items: items.map((i) => ({ description: i.description, amount: Number(i.amount) })),
     taxRatePercent: Number(invoice.taxRatePercent),
+    qrCodeDataUri,
   });
 
   return renderHtmlToPdf(html);

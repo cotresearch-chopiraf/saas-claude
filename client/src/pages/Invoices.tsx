@@ -190,6 +190,14 @@ function NewInvoiceForm({ onCreated }: { onCreated: () => void }) {
   const [items, setItems] = useState<DraftItem[]>([{ description: "", amount: "" }]);
   const [error, setError] = useState<string | null>(null);
 
+  // P0-2 pre-launch hardening — same fix, same reasoning as
+  // project/sections/InvoicesSection.tsx's InvoiceCreateForm: generated
+  // once per form mount, reused across retries of this same open form,
+  // never regenerated per submit/network-retry. onCreated() below closes
+  // this form on success, so the next "new invoice" open is a fresh
+  // mount with a fresh key.
+  const [idempotencyKey] = useState(() => crypto.randomUUID());
+
   function updateItem(index: number, patch: Partial<DraftItem>) {
     setItems((prev) => prev.map((item, i) => (i === index ? { ...item, ...patch } : item)));
   }
@@ -208,6 +216,7 @@ function NewInvoiceForm({ onCreated }: { onCreated: () => void }) {
             .filter((item) => item.description && item.amount)
             .map((item) => ({ description: item.description, amount: item.amount })),
         }),
+        headers: { "Idempotency-Key": idempotencyKey },
       });
       onCreated();
     } catch (err) {

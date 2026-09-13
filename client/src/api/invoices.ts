@@ -40,10 +40,19 @@ export interface CreateInvoiceInput {
 // Existing company-wide creation endpoint — already independently
 // validates projectId/contractId against the caller's company (see
 // resolveInvoiceProjectContract on the backend). No new creation route.
-export function createInvoice(input: CreateInvoiceInput): Promise<Invoice> {
+//
+// P0-2 pre-launch hardening — idempotencyKey is optional (matching the
+// server's own opt-in design in lib/idempotency.ts) so a caller that
+// generates one gets duplicate-request protection on a lost-response/
+// automatic-retry scenario; a caller that omits it keeps the previous,
+// unchanged behavior. The caller (InvoiceCreateForm) owns the key's
+// lifetime — this function only forwards whatever it is given as the
+// Idempotency-Key header, exactly as the server already expects.
+export function createInvoice(input: CreateInvoiceInput, idempotencyKey?: string): Promise<Invoice> {
   return apiFetch<Invoice>("/invoices", {
     method: "POST",
     body: JSON.stringify(input),
+    headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined,
   });
 }
 

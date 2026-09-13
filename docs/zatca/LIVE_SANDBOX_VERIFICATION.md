@@ -79,3 +79,32 @@ Nothing above was simulated or fabricated. See
 `docs/zatca/CUSTOMER_ONBOARDING_CENTER.md` for the operator checklist to
 run once real Sandbox access exists — it remains accurate and unchanged by
 this phase (no code changed).
+
+## Independent re-verification — P0-4 pre-launch hardening sprint
+
+Re-run fresh, on-commit `2ae644d363c14230c4a26b8247138ae316fc30d1`, as part of the P0
+hardening sprint's own attempted real Sandbox check (not reused from the
+evidence above — repeated independently so this status is not trusted on
+an old snapshot alone):
+
+| Check | Result |
+|---|---|
+| `env \| grep -i "^ZATCA_"` | Zero matches — no ZATCA env vars in this session |
+| `server/.env` | `DATABASE_URL`, `JWT_SECRET`, `PORT`, `PLAYWRIGHT_CHROMIUM_PATH` only — no ZATCA credentials |
+| DNS for `gw-fatoora.zatca.gov.sa` | Resolves (`82.197.55.5`, via Cloudflare) |
+| `curl -m 10 https://gw-fatoora.zatca.gov.sa/` | `CONNECT tunnel failed, response 403` |
+| Control test: `curl -m 10 https://example.com/` | Identically `CONNECT tunnel failed, response 403` — same failure shape, proving a general egress-allowlist policy, not a ZATCA-specific block |
+| Proxy status (`$HTTPS_PROXY/__agentproxy/status`) | `recentRelayFailures` shows the same `connect_rejected` reason for both `gw-fatoora.zatca.gov.sa` and unrelated hosts (`www.google.com`, `example.com`) in the same time window |
+
+**Conclusion: unchanged. Still BLOCKED by environment egress policy, not by
+this codebase.** No credentials exist to attempt a Sandbox round-trip even
+if egress were opened. This status must be re-checked in an environment
+that (a) has real ZATCA Sandbox EGS/CSID credentials provisioned and (b)
+permits outbound HTTPS to `gw-fatoora.zatca.gov.sa` — neither condition is
+under this repository's control. **What remains to be verified externally,
+precisely:** the XAdES `SignedProperties`/`SignedInfo` structure, the C14N
+algorithm variant, the exact request/response field names for Compliance
+CSID / Compliance Invoice / Production CSID onboarding &amp; renewal /
+Clearance / Reporting, and the `currentCCSID`/`Authorization`-header
+ambiguities already listed above — none of these can be confirmed without
+a real Sandbox response.

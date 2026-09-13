@@ -295,6 +295,13 @@
       "when": 1789072393933,
       "tag": "0041_tearful_eternity",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1789286564583,
+      "tag": "0042_rare_stark_industries",
+      "breakpoints": true
     }
   ]
 }

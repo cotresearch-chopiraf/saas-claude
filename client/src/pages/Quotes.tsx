@@ -91,7 +91,13 @@ export function Quotes() {
     navigator.clipboard.writeText(url);
   }
 
-  async function convertToInvoice(quote: Quote) {
+  // Idempotency hardening — found during P0-2 re-verification, not the
+  // original two forms: this conversion creates a real invoice
+  // (POST /invoices) exactly like NewInvoiceForm does, so it carries the
+  // identical duplicate-document risk on a lost response/retry. The
+  // caller (QuoteRowActions) owns a per-quote-row-mounted idempotencyKey
+  // and passes it in; this function only forwards it.
+  async function convertToInvoice(quote: Quote, idempotencyKey: string) {
     const full = await apiFetch<Quote & { items: { description: string; amount: string }[] }>(`/quotes/${quote.id}`);
     await apiFetch("/invoices", {
       method: "POST",
@@ -101,6 +107,7 @@ export function Quotes() {
         language: quote.language,
         items: full.items.map((i) => ({ description: i.description, amount: i.amount })),
       }),
+      headers: { "Idempotency-Key": idempotencyKey },
     });
     navigate("/invoices");
   }
@@ -161,7 +168,7 @@ export function Quotes() {
             onSend={() => sendQuote(quote)}
             onCopyLink={() => copyLink(quote)}
             onDownload={() => downloadQuotePdf(quote.id, quote.quoteNumber)}
-            onConvert={() => convertToInvoice(quote)}
+            onConvert={(idempotencyKey) => convertToInvoice(quote, idempotencyKey)}
           />
         )}
       />
@@ -192,11 +199,19 @@ function QuoteRowActions({
   onSend: () => Promise<void>;
   onCopyLink: () => void;
   onDownload: () => Promise<void>;
-  onConvert: () => Promise<void>;
+  onConvert: (idempotencyKey: string) => Promise<void>;
 }) {
   const { t } = useTranslation();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // Stable for as long as this row stays mounted (rowKey={(q) => q.id} in
+  // the parent's FinancialTable keeps one QuoteRowActions instance per
+  // quote across list reloads) — a retry after a failed conversion
+  // attempt on this same row reuses the identical key; navigating away on
+  // success unmounts this component, so a later, genuinely new attempt
+  // (a fresh page load) always gets a fresh one.
+  const [convertIdempotencyKey] = useState(() => crypto.randomUUID());
 
   async function run(action: () => Promise<void>, fallbackMessage: string) {
     setBusy(true);
@@ -230,7 +245,11 @@ function QuoteRowActions({
           </>
         )}
         {quote.status === "accepted" && (
-          <Button size="sm" disabled={busy} onClick={() => run(onConvert, t("quotesPage.actions.convertError"))}>
+          <Button
+            size="sm"
+            disabled={busy}
+            onClick={() => run(() => onConvert(convertIdempotencyKey), t("quotesPage.actions.convertError"))}
+          >
             {t("quotesPage.actions.convertToInvoice")}
           </Button>
         )}
@@ -246,6 +265,17 @@ function NewQuoteForm({ onCreated }: { onCreated: () => void }) {
   const [language, setLanguage] = useState<DocumentLanguage>("ar");
   const [items, setItems] = useState<DraftItem[]>([{ description: "", amount: "" }]);
   const [error, setError] = useState<string | null>(null);
+
+  // Quote idempotency hardening — the server has supported an opt-in
+  // Idempotency-Key header for quote creation since Slice AA Scope E
+  // (routes/quotes.ts POST "/", the same withIdempotency() mechanism used
+  // for invoices), but this client form never sent it. Same fix, same
+  // reasoning as pages/Invoices.tsx's NewInvoiceForm: generated once per
+  // form mount, reused across retries of this same open form, never
+  // regenerated per submit/network-retry. onCreated() below closes this
+  // form on success, so the next "new quote" open is a fresh mount with a
+  // fresh key.
+  const [idempotencyKey] = useState(() => crypto.randomUUID());
 
   function updateItem(index: number, patch: Partial<DraftItem>) {
     setItems((prev) => prev.map((item, i) => (i === index ? { ...item, ...patch } : item)));
@@ -265,6 +295,7 @@ function NewQuoteForm({ onCreated }: { onCreated: () => void }) {
             .filter((item) => item.description && item.amount)
             .map((item) => ({ description: item.description, amount: item.amount })),
         }),
+        headers: { "Idempotency-Key": idempotencyKey },
       });
       onCreated();
     } catch (err) {

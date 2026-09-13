@@ -199,6 +199,21 @@ function InvoiceCreateForm({
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  // P0-2 pre-launch hardening — generated exactly once when this form
+  // mounts (i.e. once per "create invoice" open), then reused unchanged
+  // across every submit attempt for AS LONG AS this same form instance
+  // stays open. A retry after a failed/lost-response submit (the user
+  // clicking "create" again on the same open form) reuses this identical
+  // key, so the server's idempotency guard (lib/idempotency.ts) can
+  // recognize it as the same logical submission rather than creating a
+  // second invoice. A genuinely new submission always gets a fresh key,
+  // because onCreated() below closes this form on success (unmounting
+  // it), and the "cancel" toggle in the parent also unmounts it — either
+  // way, the NEXT open of this form is a fresh component instance with a
+  // fresh useState initializer. Deliberately not regenerated inside
+  // onSubmit or per network retry — that would defeat the whole point.
+  const [idempotencyKey] = useState(() => crypto.randomUUID());
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
@@ -209,13 +224,16 @@ function InvoiceCreateForm({
       // contract is chosen, its own project (validated server-side) is
       // what actually gets stored; no conflicting projectId is ever sent
       // alongside a contractId.
-      await createInvoice({
-        projectId: contractId ? undefined : projectId,
-        contractId: contractId || undefined,
-        clientName,
-        dueDate: dueDate || undefined,
-        items: [{ description: itemDescription, amount: Number(itemAmount) }],
-      });
+      await createInvoice(
+        {
+          projectId: contractId ? undefined : projectId,
+          contractId: contractId || undefined,
+          clientName,
+          dueDate: dueDate || undefined,
+          items: [{ description: itemDescription, amount: Number(itemAmount) }],
+        },
+        idempotencyKey,
+      );
       onCreated();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("invoicesPage.createForm.genericError"));

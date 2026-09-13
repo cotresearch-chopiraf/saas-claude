@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
 import { AuthProvider } from "../../auth/AuthContext";
 import { I18nProvider } from "../../i18n/I18nProvider";
@@ -275,5 +275,126 @@ describe("<InvoicesSection/>", () => {
 
     resolveSend({ ...fixtureInvoiceDraft, status: "sent" });
     await waitFor(() => expect(screen.getByText("مرسلة")).toBeInTheDocument());
+  });
+});
+
+// P0-2 pre-launch hardening — proves the client actually sends the
+// Idempotency-Key header the server has supported all along
+// (lib/idempotency.ts), and that the key's lifetime matches the mission's
+// exact requirement: identical across a retry of the same logical
+// submission, different for a genuinely new one, never regenerated per
+// network call on its own.
+describe("<InvoicesSection/> — create-invoice Idempotency-Key wiring", () => {
+  beforeEach(() => {
+    vi.mocked(apiFetch).mockClear();
+  });
+
+  function openCreateForm() {
+    fireEvent.click(screen.getByRole("button", { name: "+ فاتورة جديدة" }));
+  }
+
+  function fillCreateForm() {
+    fireEvent.change(screen.getByPlaceholderText("اسم العميل"), { target: { value: "عميل جديد" } });
+    fireEvent.change(screen.getByPlaceholderText("وصف البند"), { target: { value: "عمل" } });
+    fireEvent.change(screen.getByPlaceholderText("المبلغ"), { target: { value: "500" } });
+  }
+
+  function postInvoiceCalls() {
+    return vi.mocked(apiFetch).mock.calls.filter((c) => c[0] === "/invoices" && (c[1] as RequestInit | undefined)?.method === "POST");
+  }
+
+  it("sends a real Idempotency-Key header on a normal invoice creation", async () => {
+    mockApi("owner", []);
+    vi.mocked(apiFetch).mockImplementation((path: unknown, reqOpts?: RequestInit) => {
+      const p = String(path);
+      const method = reqOpts?.method ?? "GET";
+      if (p === "/auth/me") return Promise.resolve({ user: { id: "u1", name: "Test", email: "t@test.com", role: "owner" }, company: { id: "co1", name: "Test Co" } });
+      if (p === "/projects/p1/invoices" && method === "GET") return Promise.resolve([]);
+      if (p === "/projects/p1/contracts" && method === "GET") return Promise.resolve([fixtureContract]);
+      if (p === "/invoices" && method === "POST") return Promise.resolve(fixtureInvoiceDraft);
+      return Promise.reject(new Error(`unexpected apiFetch call in test: ${p} ${method}`));
+    });
+    renderSection();
+    await waitFor(() => expect(screen.getByRole("button", { name: "+ فاتورة جديدة" })).toBeInTheDocument());
+
+    openCreateForm();
+    fillCreateForm();
+    fireEvent.click(screen.getByRole("button", { name: "إنشاء الفاتورة" }));
+    await waitFor(() => expect(postInvoiceCalls()).toHaveLength(1));
+
+    const [, reqOpts] = postInvoiceCalls()[0];
+    const headers = (reqOpts as RequestInit).headers as Record<string, string>;
+    expect(headers["Idempotency-Key"]).toBeTruthy();
+    expect(headers["Idempotency-Key"]).toMatch(/^[0-9a-f-]{36}$/i);
+  });
+
+  it("a retry after a failed submission on the SAME open form reuses the identical key", async () => {
+    mockApi("owner", []);
+    let firstAttempt = true;
+    vi.mocked(apiFetch).mockImplementation((path: unknown, reqOpts?: RequestInit) => {
+      const p = String(path);
+      const method = reqOpts?.method ?? "GET";
+      if (p === "/auth/me") return Promise.resolve({ user: { id: "u1", name: "Test", email: "t@test.com", role: "owner" }, company: { id: "co1", name: "Test Co" } });
+      if (p === "/projects/p1/invoices" && method === "GET") return Promise.resolve([]);
+      if (p === "/projects/p1/contracts" && method === "GET") return Promise.resolve([fixtureContract]);
+      if (p === "/invoices" && method === "POST") {
+        if (firstAttempt) {
+          firstAttempt = false;
+          return Promise.reject(new Error("انقطع الاتصال"));
+        }
+        return Promise.resolve(fixtureInvoiceDraft);
+      }
+      return Promise.reject(new Error(`unexpected apiFetch call in test: ${p} ${method}`));
+    });
+    renderSection();
+    await waitFor(() => expect(screen.getByRole("button", { name: "+ فاتورة جديدة" })).toBeInTheDocument());
+
+    openCreateForm();
+    fillCreateForm();
+
+    // First attempt fails (simulating a lost response / network error) —
+    // the form stays open (onCreated is never called on failure).
+    fireEvent.click(screen.getByRole("button", { name: "إنشاء الفاتورة" }));
+    await waitFor(() => expect(postInvoiceCalls()).toHaveLength(1));
+
+    // Retry on the SAME still-open form.
+    fireEvent.click(screen.getByRole("button", { name: "إنشاء الفاتورة" }));
+    await waitFor(() => expect(postInvoiceCalls()).toHaveLength(2));
+
+    const keyAttempt1 = ((postInvoiceCalls()[0][1] as RequestInit).headers as Record<string, string>)["Idempotency-Key"];
+    const keyAttempt2 = ((postInvoiceCalls()[1][1] as RequestInit).headers as Record<string, string>)["Idempotency-Key"];
+    expect(keyAttempt1).toBe(keyAttempt2);
+  });
+
+  it("a genuinely new invoice (form closed and reopened) gets a different key from the previous submission", async () => {
+    mockApi("owner", []);
+    vi.mocked(apiFetch).mockImplementation((path: unknown, reqOpts?: RequestInit) => {
+      const p = String(path);
+      const method = reqOpts?.method ?? "GET";
+      if (p === "/auth/me") return Promise.resolve({ user: { id: "u1", name: "Test", email: "t@test.com", role: "owner" }, company: { id: "co1", name: "Test Co" } });
+      if (p === "/projects/p1/invoices" && method === "GET") return Promise.resolve([]);
+      if (p === "/projects/p1/contracts" && method === "GET") return Promise.resolve([fixtureContract]);
+      if (p === "/invoices" && method === "POST") return Promise.resolve(fixtureInvoiceDraft);
+      return Promise.reject(new Error(`unexpected apiFetch call in test: ${p} ${method}`));
+    });
+    renderSection();
+    await waitFor(() => expect(screen.getByRole("button", { name: "+ فاتورة جديدة" })).toBeInTheDocument());
+
+    // First invoice: open, fill, submit successfully — onCreated() closes the form.
+    openCreateForm();
+    fillCreateForm();
+    fireEvent.click(screen.getByRole("button", { name: "إنشاء الفاتورة" }));
+    await waitFor(() => expect(postInvoiceCalls()).toHaveLength(1));
+    await waitFor(() => expect(screen.queryByPlaceholderText("اسم العميل")).not.toBeInTheDocument());
+
+    // Second, genuinely separate invoice: reopen the (now unmounted) form.
+    openCreateForm();
+    fillCreateForm();
+    fireEvent.click(screen.getByRole("button", { name: "إنشاء الفاتورة" }));
+    await waitFor(() => expect(postInvoiceCalls()).toHaveLength(2));
+
+    const keyFirstInvoice = ((postInvoiceCalls()[0][1] as RequestInit).headers as Record<string, string>)["Idempotency-Key"];
+    const keySecondInvoice = ((postInvoiceCalls()[1][1] as RequestInit).headers as Record<string, string>)["Idempotency-Key"];
+    expect(keyFirstInvoice).not.toBe(keySecondInvoice);
   });
 });

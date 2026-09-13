@@ -8,6 +8,7 @@ import { recordAuditEvent } from "../lib/audit.js";
 import { roundMoney, roundQuantity, sumMoney } from "../lib/money.js";
 import { sumApprovedQuantity } from "./measurements.js";
 import { CONTRACT_EXECUTION_BLOCKED_STATUSES } from "./contracts.js";
+import { createNotification } from "../lib/notifications.js";
 
 type ProjectParams = { projectId: string };
 type IpcParams = ProjectParams & { ipcId: string };
@@ -420,6 +421,28 @@ ipcsRouter.post(
         afterValue: { status: "rejected" },
         reason: parsed.data.reason,
       });
+
+      // P0-3 pre-launch hardening — the one clearly-defined recipient for
+      // this event: submittedBy is set atomically by the submit() route
+      // above and is exactly "the person whose work this decision is
+      // about," not an invented rule. Inserted in the SAME transaction as
+      // the status change and audit event, so a notification only ever
+      // exists for a rejection that actually committed — never before, and
+      // never orphaned by a later rollback. submittedBy is always set
+      // whenever status is "submitted" (the only status this UPDATE
+      // matches), but the null check is kept anyway rather than assuming
+      // it, per this task's own "never invent a recipient" rule.
+      if (updated.submittedBy) {
+        await createNotification(tx, {
+          companyId: req.companyId!,
+          recipientUserId: updated.submittedBy,
+          type: "ipc.rejected",
+          title: "تم رفض شهادة الدفع",
+          message: `تم رفض شهادة الدفع رقم ${updated.ipcNumber} — السبب: ${parsed.data.reason}`,
+          referenceEntityType: "ipc",
+          referenceEntityId: updated.id,
+        });
+      }
 
       return updated;
     });
