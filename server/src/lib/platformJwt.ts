@@ -2,6 +2,13 @@ import jwt from "jsonwebtoken";
 
 export interface PlatformTokenPayload {
   platformOperatorId: string;
+  // MIDAD Final Pre-Launch audit, Phase 9 — Ownership Transfer. Doubles as
+  // platform_operator_sessions.id (db/schema.ts), the exact same "sid"
+  // pattern lib/jwt.ts's tenant TokenPayload already uses via
+  // userSessions.id. Lets middleware/platformAuth.ts revoke one specific
+  // issued token rather than only the whole account (previously the only
+  // lever was deactivating platformOperators.status).
+  sessionId: string;
 }
 
 // MIDAD Phase D1 — deliberately NOT lib/jwt.ts's TokenPayload{userId,

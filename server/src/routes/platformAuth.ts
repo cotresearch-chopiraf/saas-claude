@@ -2,10 +2,11 @@ import { Router } from "express";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { platformOperators } from "../db/schema.js";
+import { platformOperators, platformOperatorSessions } from "../db/schema.js";
 import { verifyPassword } from "../lib/password.js";
 import { signPlatformToken } from "../lib/platformJwt.js";
 import { authRateLimit } from "../middleware/rateLimit.js";
+import { platformAuth } from "../middleware/platformAuth.js";
 
 // MIDAD Phase D1 — the ONLY authentication entry point for a platform
 // operator. Deliberately: no registration route here (see
@@ -45,6 +46,17 @@ platformAuthRouter.post("/login", async (req, res) => {
     return res.status(401).json({ error: "تم إلغاء تفعيل هذا الحساب" });
   }
 
-  const token = signPlatformToken({ platformOperatorId: operator.id });
-  res.json({ token, operator: { id: operator.id, name: operator.name, email: operator.email } });
+  // MIDAD Phase 9 — one row per issued token, exactly like routes/auth.ts's
+  // tenant login already does via userSessions. id doubles as the JWT's
+  // "sid" claim, so revoking this row immediately invalidates the one
+  // token issued here (see middleware/platformAuth.ts's own session check).
+  const [session] = await db.insert(platformOperatorSessions).values({ platformOperatorId: operator.id }).returning();
+
+  const token = signPlatformToken({ platformOperatorId: operator.id, sessionId: session.id });
+  res.json({ token, operator: { id: operator.id, name: operator.name, email: operator.email, role: operator.role } });
+});
+
+platformAuthRouter.post("/logout", platformAuth, async (req, res) => {
+  await db.update(platformOperatorSessions).set({ revokedAt: new Date() }).where(eq(platformOperatorSessions.id, req.platformSessionId!));
+  res.json({ message: "تم تسجيل الخروج" });
 });

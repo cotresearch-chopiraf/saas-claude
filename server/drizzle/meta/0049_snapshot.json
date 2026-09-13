@@ -1,6 +1,6 @@
 {
-  "id": "c65f6976-d8f6-422f-9369-3e96ea5e3985",
-  "prevId": "6b817c27-2a7b-4f07-9852-b83890092c56",
+  "id": "819dd70e-387e-4723-9758-82eae6b6469f",
+  "prevId": "c65f6976-d8f6-422f-9369-3e96ea5e3985",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -7999,6 +7999,75 @@
         }
       },
       "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.platform_operator_sessions": {
+      "name": "platform_operator_sessions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "platform_operator_id": {
+          "name": "platform_operator_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "revoked_at": {
+          "name": "revoked_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "platform_operator_sessions_operator_idx": {
+          "name": "platform_operator_sessions_operator_idx",
+          "columns": [
+            {
+              "expression": "platform_operator_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "platform_operator_sessions_platform_operator_id_platform_operators_id_fk": {
+          "name": "platform_operator_sessions_platform_operator_id_platform_operators_id_fk",
+          "tableFrom": "platform_operator_sessions",
+          "tableTo": "platform_operators",
+          "columnsFrom": [
+            "platform_operator_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},

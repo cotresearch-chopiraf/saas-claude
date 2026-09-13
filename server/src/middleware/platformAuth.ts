@@ -2,7 +2,7 @@ import type { NextFunction, Request, Response } from "express";
 import { eq } from "drizzle-orm";
 import { verifyPlatformToken } from "../lib/platformJwt.js";
 import { db } from "../db/client.js";
-import { platformOperators } from "../db/schema.js";
+import { platformOperators, platformOperatorSessions } from "../db/schema.js";
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -21,6 +21,13 @@ declare global {
       // platformPermissions.ts's requirePlatformCapability reads this
       // directly rather than re-querying platform_operators itself.
       platformOperatorRole?: string;
+      // MIDAD Phase 9 — set alongside platformOperatorId/Role. The one
+      // current reader is routes/platformAuth.ts's own /logout (revokes
+      // this exact session) and Phase 9's ownership-transfer route
+      // (revokes every OTHER active session belonging to the outgoing
+      // owner, never this one, so the operator issuing the transfer isn't
+      // logged out mid-request).
+      platformSessionId?: string;
     }
   }
 }
@@ -56,7 +63,22 @@ export async function platformAuth(req: Request, res: Response, next: NextFuncti
     return res.status(401).json({ error: "تم إلغاء تفعيل هذا الحساب" });
   }
 
+  // MIDAD Phase 9 — same re-read-on-every-request discipline as the
+  // status check above, applied to this specific token rather than the
+  // account as a whole. See db/schema.ts's platformOperatorSessions
+  // comment for why this exists (Ownership Transfer's "Revoke Previous
+  // Owner Sessions" step needs a real per-token revocation lever, not
+  // just an account-wide deactivate).
+  const session = await db.query.platformOperatorSessions.findFirst({
+    where: eq(platformOperatorSessions.id, payload.sessionId),
+    columns: { revokedAt: true },
+  });
+  if (!session || session.revokedAt) {
+    return res.status(401).json({ error: "جلسة غير صالحة، الرجاء تسجيل الدخول مجدداً" });
+  }
+
   req.platformOperatorId = payload.platformOperatorId;
   req.platformOperatorRole = operator.role;
+  req.platformSessionId = payload.sessionId;
   next();
 }

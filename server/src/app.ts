@@ -54,6 +54,7 @@ import { featureFlagsRouter } from "./routes/featureFlags.js";
 import { platformFeatureFlagsRouter } from "./routes/platformFeatureFlags.js";
 import { platformPlansRouter } from "./routes/platformPlans.js";
 import { platformSecurityRouter } from "./routes/platformSecurity.js";
+import { platformOwnershipTransferRouter } from "./routes/platformOwnershipTransfer.js";
 import { clientPortalUsersRouter } from "./routes/clientPortalUsers.js";
 import { clientPortalAuthRouter } from "./routes/clientPortalAuth.js";
 import { clientPortalProjectsRouter } from "./routes/clientPortalProjects.js";
@@ -228,6 +229,10 @@ export function buildApp() {
   // MIDAD Final Pre-Launch audit, Phase 7 — Security Center. Read-only,
   // gated by the "security.read" capability. See routes/platformSecurity.ts.
   app.use("/api/platform/security", platformAuth, platformSecurityRouter);
+  // MIDAD Final Pre-Launch audit, Phase 9 — Ownership Transfer. Gated by
+  // the "ownershipTransfer.manage" capability (platform_owner only). See
+  // routes/platformOwnershipTransfer.ts.
+  app.use("/api/platform/ownership-transfer", platformAuth, platformOwnershipTransferRouter);
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   app.use((err: Error, req: express.Request, res: express.Response, _next: express.NextFunction) => {

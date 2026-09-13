@@ -2286,6 +2286,33 @@ export const platformOperators = pgTable("platform_operators", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
+// MIDAD Final Pre-Launch audit, Phase 9 — Ownership Transfer. Until now, a
+// platform operator's JWT (lib/platformJwt.ts) was fully stateless — 7
+// days, no "sid" claim, no row anywhere that could invalidate one before
+// it naturally expires (only platformOperators.status, checked per-request
+// by middleware/platformAuth.ts, could force re-authentication, and only
+// by fully deactivating the account). Ownership Transfer's own required
+// "Revoke Previous Owner Sessions" step cannot be done truthfully without
+// a real revocable-session record — the exact same gap Phase A closed for
+// tenant users with userSessions above, mirrored here for platform
+// operators rather than left stateless. id doubles as the platform JWT's
+// "sid" claim, exactly like userSessions.id already does for tenant
+// tokens.
+export const platformOperatorSessions = pgTable(
+  "platform_operator_sessions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    platformOperatorId: uuid("platform_operator_id")
+      .notNull()
+      .references(() => platformOperators.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    revokedAt: timestamp("revoked_at"),
+  },
+  (table) => ({
+    operatorIdx: index("platform_operator_sessions_operator_idx").on(table.platformOperatorId),
+  }),
+);
+
 // ============================================================================
 // P0 hardening (MIDAD Final Pre-Launch, SaaS & Sale-Readiness Audit) —
 // Feature Flags foundation, Phase 2 of the launch/sale-readiness program.
