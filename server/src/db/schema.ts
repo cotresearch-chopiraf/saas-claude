@@ -2204,6 +2204,86 @@ export const platformOperators = pgTable("platform_operators", {
 });
 
 // ============================================================================
+// P0 hardening (MIDAD Final Pre-Launch, SaaS & Sale-Readiness Audit) —
+// Feature Flags foundation, Phase 2 of the launch/sale-readiness program.
+// ============================================================================
+// Deliberately a SEPARATE mechanism from `companies.featureFlags` above —
+// that JSONB column is a TENANT self-service preference toggle (a company
+// owner turning their own "invoicing" module on/off from Settings), never
+// touched by this table. This is the opposite: a PLATFORM-controlled
+// mechanism for progressively rolling a new feature out to tenants, which
+// a tenant cannot set for themselves. Conflating the two would let a
+// tenant accidentally "enable" a feature still mid-rollout, or a platform
+// rollout accidentally override a tenant's own explicit preference —
+// keeping them as two tables with two different write paths (tenant
+// Settings UI vs. platform admin) prevents both.
+//
+// Precedence (see lib/featureFlags.ts's isFeatureEnabled(), the one
+// evaluation function every enforcement point in the app calls — no
+// endpoint re-implements this logic):
+//   1. Unknown flag key -> false (fail closed).
+//   2. enabledEnvironments set and current NODE_ENV not in it -> false.
+//   3. globalEnabled = false -> false, unconditionally (no org override
+//      can turn on a feature the platform has switched off globally).
+//   4. globalEnabled = true -> an explicit per-company override (below)
+//      wins if one exists; otherwise defaultEnabledForOrgs decides.
+export const featureFlags = pgTable(
+  "feature_flags",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    // Stable machine key referenced by application code
+    // (requireFeatureFlag("key"), isFeatureEnabled(companyId, "key")) —
+    // never the row's own uuid, so a flag can be recreated without every
+    // call site needing to change.
+    key: text("key").notNull(),
+    description: text("description").notNull(),
+    globalEnabled: boolean("global_enabled").notNull().default(false),
+    defaultEnabledForOrgs: boolean("default_enabled_for_orgs").notNull().default(false),
+    // Optional allow-list of NODE_ENV values this flag may ever be true
+    // in (e.g. ["development","staging"] to keep a feature out of
+    // production while it's still being built). Null/empty = all
+    // environments, i.e. no environment restriction.
+    enabledEnvironments: jsonb("enabled_environments").$type<string[] | null>(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    keyUnique: uniqueIndex("feature_flags_key_unique").on(table.key),
+  }),
+);
+
+// One row per (company, flag) EXPLICIT decision by a platform operator —
+// absence of a row is not "disabled", it means "no override, fall back to
+// defaultEnabledForOrgs" (see precedence above). flagKey references
+// feature_flags.key (a unique, non-PK column) rather than the flag's uuid
+// so every write path in routes/platformFeatureFlags.ts can work with the
+// human-readable key end to end, matching how application code enforces
+// flags by key too.
+export const companyFeatureFlagOverrides = pgTable(
+  "company_feature_flag_overrides",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    flagKey: text("flag_key")
+      .notNull()
+      .references(() => featureFlags.key, { onDelete: "cascade" }),
+    enabled: boolean("enabled").notNull(),
+    setByPlatformOperatorId: uuid("set_by_platform_operator_id").references(() => platformOperators.id),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    companyFlagUnique: uniqueIndex("company_feature_flag_overrides_company_flag_unique").on(
+      table.companyId,
+      table.flagKey,
+    ),
+    companyIdx: index("company_feature_flag_overrides_company_idx").on(table.companyId),
+  }),
+);
+
+// ============================================================================
 // MIDAD Phase D2 — Platform Admin / Support Access
 // ============================================================================
 // A support session is an explicit, time-limited, revocable grant for ONE

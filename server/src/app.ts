@@ -50,6 +50,8 @@ import { platformAuthRouter } from "./routes/platformAuth.js";
 import { platformOrganizationsRouter } from "./routes/platformOrganizations.js";
 import { platformSupportSessionsRouter } from "./routes/platformSupportSessions.js";
 import { platformAuditEventsRouter } from "./routes/platformAuditEvents.js";
+import { featureFlagsRouter } from "./routes/featureFlags.js";
+import { platformFeatureFlagsRouter } from "./routes/platformFeatureFlags.js";
 import { clientPortalUsersRouter } from "./routes/clientPortalUsers.js";
 import { clientPortalAuthRouter } from "./routes/clientPortalAuth.js";
 import { clientPortalProjectsRouter } from "./routes/clientPortalProjects.js";
@@ -170,6 +172,9 @@ export function buildApp() {
   // same as every other master-data domain above; every mutation inside
   // additionally requires clientPortal.manage (see permissions.ts).
   app.use("/api/client-portal-users", requireAuth, clientPortalUsersRouter);
+  // P0 hardening (Final Pre-Launch audit) — tenant-facing read of the
+  // caller's own effective feature-flag set. See routes/featureFlags.ts.
+  app.use("/api/feature-flags", requireAuth, featureFlagsRouter);
 
   // MIDAD Phase B1 — CLIENT_PORTAL_SCOPE, structurally separate from every
   // route above (tenant) and below (platform): clientPortalAuthRouter is
@@ -210,6 +215,10 @@ export function buildApp() {
   // MIDAD ZATCA Admin Dashboard (Slice 3) — read-only, sanitized, never a
   // secret or raw credential value. See routes/platformZatca.ts.
   app.use("/api/platform/zatca", platformAuth, platformZatcaRouter);
+  // P0 hardening (Final Pre-Launch audit) — platform-admin CRUD over the
+  // feature-flag registry and per-company overrides. See
+  // routes/platformFeatureFlags.ts.
+  app.use("/api/platform/feature-flags", platformAuth, platformFeatureFlagsRouter);
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   app.use((err: Error, req: express.Request, res: express.Response, _next: express.NextFunction) => {
