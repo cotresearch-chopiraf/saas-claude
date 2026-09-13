@@ -29,21 +29,10 @@ This repository intentionally does not implement provider-specific backup automa
 
 ## If self-managing Postgres
 
-A minimal, provider-agnostic nightly backup using `pg_dump`, runnable from any host with network access to the database and enough disk to hold the dump:
+`server/src/db/backup.ts` and `server/src/db/restore.ts` (npm scripts `backup:create` / `backup:restore`) are the same provider-agnostic `pg_dump`/`pg_restore` commands this section used to document as raw shell, now a real, tested, committed capability instead of copy-pasted bash — see "New: backup/restore tooling" below for what they add (a manifest with checksums and a verified restore, not just a dump file). This section still documents the underlying commands directly, since the scripts are a thin, auditable wrapper around exactly this:
 
 ```bash
-#!/usr/bin/env bash
-set -euo pipefail
-
-BACKUP_DIR="/var/backups/contractor-os"
-TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
-FILE="$BACKUP_DIR/contractor-os-$TIMESTAMP.dump"
-
-mkdir -p "$BACKUP_DIR"
 pg_dump --format=custom --file="$FILE" "$DATABASE_URL"
-
-# Retention: delete dumps older than 30 days, keep at least the last 7 regardless of age.
-find "$BACKUP_DIR" -name '*.dump' -mtime +30 -type f | sort | head -n -7 | xargs -r rm --
 ```
 
 Restore:
@@ -52,7 +41,17 @@ Restore:
 pg_restore --clean --if-exists --dbname="$DATABASE_URL" "$FILE"
 ```
 
-Run the backup script from cron (or the self-managed host's scheduler) at least daily, and pipe its exit status into the observability setup below so a failed backup is not silent.
+Run `npm run backup:create --workspace server -- <output-dir>` from cron (or the self-managed host's scheduler) at least daily, and pipe its exit status into the observability setup below so a failed backup is not silent. Retention (delete dumps older than 30 days, keep at least the last 7 regardless of age) is an operational scheduling concern for whatever runs the script on a schedule — the script itself, like `pg_dump`, only produces one backup per invocation.
+
+### New: backup/restore tooling (`server/src/db/backup.ts` / `restore.ts`)
+
+Added to close the gap the MIDAD Final Pre-Launch, SaaS & Sale-Readiness Audit found: a backup script existing is not the same as a verified restore. These scripts do not change this document's stance on provider-specific automation (still deliberately not implemented — no provider is chosen) — they are the exact commands above, plus:
+
+- **A manifest** (`manifest.json`, written alongside the dump): backup timestamp, application `package.json` version, the exact applied-migration count and latest migration tag (from `drizzle/meta/_journal.json`), the dump file's SHA-256 checksum and size, and a row-count fingerprint (`companies`, `users`, `projects`, `invoices`) captured at backup time.
+- **Storage backup**: if `STORAGE_PROVIDER=local` (or unset), the two local-disk roots (`uploads/`, `private-uploads/` — see `lib/storage/localDiskProvider.ts`) are archived as a checksummed `storage.tar.gz` alongside the database dump. If `STORAGE_PROVIDER=s3`, the manifest records `storage.included: false` — durability is correctly delegated to the bucket provider (see "Storage failure" below), not something this repository's code can or should reach into.
+- **Integrity-checked restore**: `restore.ts` refuses to `pg_restore` a dump whose SHA-256 no longer matches the manifest (a corrupted or tampered backup file), and refuses to restore onto a target database identical to the source `DATABASE_URL` unless `--allow-same-database` is explicitly passed — the mandatory drill must always target an isolated scratch database.
+- **Automated verification**: after `pg_restore`, the script runs the same `SELECT 1` connectivity check `GET /api/health/ready` uses, then re-counts the same key tables and compares them against the manifest's recorded counts, printing `VERIFIED: PASS` or `VERIFIED: FAIL` with a line-by-line breakdown (and a non-zero exit code on failure) — not merely "the restore command didn't error."
+- **Tested for real**: `server/tests/backupRestore.test.ts` exercises the actual `pg_dump`/`createdb`/`pg_restore`/`dropdb` binaries against a real, isolated scratch database on every test run (not mocked) — including the corrupted-checksum-refusal and same-database-refusal safety checks, and the storage archive round-trip.
 
 ## Relationship to the CI pipeline
 
@@ -97,7 +96,7 @@ This is the full operational sequence, not just the `pg_restore` command — eve
 
 ## Restore verification drill (mandatory, isolated)
 
-A backup that has never been restored is an assumption, not a backup. The drill must run against an **isolated** scratch database — never against the live production database, and never in a way that could be mistaken for step 3 of the real restore procedure above:
+A backup that has never been restored is an assumption, not a backup. The drill must run against an **isolated** scratch database — never against the live production database, and never in a way that could be mistaken for step 3 of the real restore procedure above. `server/src/db/backup.ts` / `restore.ts` (npm scripts `backup:create` / `backup:restore`) automate every step of this diagram except creating/tearing down the scratch database itself (an operator command, deliberately left explicit rather than scripted — see "New: backup/restore tooling" above) and report `VERIFIED: PASS`/`VERIFIED: FAIL` rather than requiring a human to manually compare `\dt` output:
 
 ```text
 Production backup file
@@ -126,6 +125,15 @@ Run this quarterly at minimum (see the Required minimums table above), and once 
 **Local demonstration performed in this repository (2026-09-08):** the mechanics above were exercised end-to-end against this environment's local, disposable test database (`audit_test` — synthetic test fixtures only, never real customer data) to confirm the commands themselves are correct: `pg_dump --format=custom` of the local database, `createdb` of an isolated scratch database, `pg_restore --clean --if-exists`, then a row-count comparison (`companies`, `users`, and Drizzle's own `drizzle.__drizzle_migrations` tracking table) between source and restored databases, followed by a `SELECT 1` connectivity check against the restored database (the same query `/api/health/ready` runs) and teardown of the scratch database. Result: table count (50/50), `companies` (2/2), `users` (2/2), and `drizzle_migrations` (33/33) all matched exactly between source and restored database; the connectivity check succeeded.
 
 **This proves the documented commands work correctly — it is not a substitute for the mandatory production drill above.** It used no production credentials, no production data, and no production infrastructure; it does not establish a timing baseline for the RTO target (the local dataset is trivially small compared to real production data) and does not verify any provider-specific backup/restore mechanism. The first real drill, against an actual production-scale backup, using whichever hosting provider is eventually chosen, remains **UNVERIFIED** until performed by an operator with real production access.
+
+**Second local demonstration, using the new tooling (2026-09-13):** re-ran the same drill end to end, this time through `npm run backup:create` / `npm run backup:restore` (see "New: backup/restore tooling" above) instead of hand-typed commands, against this environment's local `audit_test` database — synthetic test fixtures only, never real customer data. Sequence actually executed and observed:
+
+1. `npm run backup:create -- ./backups/manual-drill-2026-09-13` → printed `BACKUP CREATED`, wrote `manifest.json` recording: 43 migrations applied (latest tag `0042_rare_stark_industries`), database dump checksum `1294db1e...3c27a0` (SHA-256, 269,973 bytes), row counts `{companies: 1, users: 1, projects: 0, invoices: 0}`, and a local-storage archive (`storage.tar.gz`, checksum `5a3a8e6f...09f608ea7`, 148,059 bytes) covering both `uploads/` and `private-uploads/`.
+2. An isolated scratch database (`midad_manual_restore_drill_20260913`, never the source database) was created via `createdb`.
+3. `npm run backup:restore -- ./backups/manual-drill-2026-09-13/manifest.json <scratch-db-url> --restore-storage-to ./backups/manual-drill-2026-09-13-storage-restored` → printed `RESTORING...`, then `RESTORED`, then **`VERIFIED: PASS`**, with every check reported individually: dump checksum matched, `pg_restore` completed, storage archive extracted, connectivity check (`SELECT 1`, the same query `/api/health/ready` runs) passed, and row counts matched the manifest exactly for every key table.
+4. The scratch database was torn down (`dropdb`) and the local backup/restore artifacts deleted — this was a drill, not a new environment to keep around, matching the mandatory-drill diagram above.
+
+This is the same class of evidence as the 2026-09-08 demonstration above (local, synthetic data, no production infrastructure) — it does not change the UNVERIFIED status of a real production drill, and does not establish a production RTO timing baseline. What it adds is that the drill is now driven by committed, tested, reusable tooling with automated pass/fail verification (checksum + connectivity + row-count comparison, not a human eyeballing `\dt` output), so the *next* real production drill has a script to run rather than commands to retype correctly under pressure during an actual incident.
 
 ## Secrets
 
