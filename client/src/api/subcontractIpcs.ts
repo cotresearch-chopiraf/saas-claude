@@ -71,6 +71,11 @@ export function rejectSubcontractIpc(projectId: string, ipcId: string, reason: s
   });
 }
 
-export function certifySubcontractIpc(projectId: string, ipcId: string): Promise<SubcontractIpc> {
-  return apiFetch<SubcontractIpc>(`/projects/${projectId}/subcontract-ipcs/${ipcId}/certify`, { method: "POST" });
+// P0 hardening (MIDAD Final Pre-Launch audit, §4/§19) — same reasoning as
+// api/ipcs.ts's certifyIpc().
+export function certifySubcontractIpc(projectId: string, ipcId: string, idempotencyKey?: string): Promise<SubcontractIpc> {
+  return apiFetch<SubcontractIpc>(`/projects/${projectId}/subcontract-ipcs/${ipcId}/certify`, {
+    method: "POST",
+    headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined,
+  });
 }

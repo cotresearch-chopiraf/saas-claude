@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { apiFetch, ApiError } from "../api/client";
 import { formatMoney } from "../lib/format";
 import type { ChangeOrder } from "../api/types";
@@ -18,6 +18,13 @@ export function ChangeOrdersPanel({ projectId }: { projectId: string }) {
   const [description, setDescription] = useState("");
   const [amountDelta, setAmountDelta] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // P0 hardening (MIDAD Final Pre-Launch audit, §4/§19) — a stable key per
+  // pending order, generated lazily on first decision and reused across a
+  // retry on the SAME order (so a network-retry-after-timeout replays the
+  // original decision instead of a confusing 409). A flat list, not a
+  // per-row subcomponent, so this is tracked in a ref keyed by order id
+  // rather than per-component useState like QuoteRowActions uses.
+  const decisionKeysRef = useRef<Map<string, string>>(new Map());
 
   function load() {
     apiFetch<ChangeOrder[]>(`/projects/${projectId}/change-orders`).then(setOrders);
@@ -44,11 +51,18 @@ export function ChangeOrdersPanel({ projectId }: { projectId: string }) {
 
   async function decide(order: ChangeOrder, status: "approved" | "rejected") {
     setError(null);
+    let key = decisionKeysRef.current.get(order.id);
+    if (!key) {
+      key = crypto.randomUUID();
+      decisionKeysRef.current.set(order.id, key);
+    }
     try {
       await apiFetch(`/projects/${projectId}/change-orders/${order.id}`, {
         method: "PATCH",
+        headers: { "Idempotency-Key": key },
         body: JSON.stringify({ status }),
       });
+      decisionKeysRef.current.delete(order.id);
       load();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("legacyBudgetPage.changeOrdersPanel.decisionError"));

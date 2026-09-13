@@ -1125,7 +1125,23 @@ export const files = pgTable(
 // idempotency (zatcaSubmissions' natural-key uniqueness below) — that
 // mechanism belongs to the frozen ZATCA compliance architecture and is
 // neither reused nor modified here.
-export const idempotencyOperationEnum = pgEnum("idempotency_operation", ["invoice.create", "quote.create"]);
+export const idempotencyOperationEnum = pgEnum("idempotency_operation", [
+  "invoice.create",
+  "quote.create",
+  // P0 hardening (MIDAD Final Pre-Launch audit, §4/§19) — the same
+  // "duplicate request creates a duplicate/confusing financial outcome"
+  // risk applies to these irreversible state transitions: a network retry
+  // after a client timeout on an ALREADY-successful request previously hit
+  // a plain "already approved/certified/posted" conflict instead of
+  // replaying the original success. No double side effect ever occurred
+  // (each route already row-locks and guards its own state transition —
+  // see ipcs.ts/subcontractIpcs.ts certify, changeOrders.ts approve,
+  // payrollPeriods.ts post), only a confusing response on retry.
+  "ipc.certify",
+  "subcontractIpc.certify",
+  "changeOrder.approve",
+  "payroll.post",
+]);
 export const idempotencyStatusEnum = pgEnum("idempotency_status", ["pending", "completed"]);
 
 export const idempotencyKeys = pgTable(

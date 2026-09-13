@@ -760,3 +760,66 @@ describe("Numbering", () => {
     expect(numbers).toEqual([1, 2, 3, 4, 5]);
   });
 });
+
+// P0 hardening (MIDAD Final Pre-Launch audit, §4/§19) — same reasoning as
+// ipc.test.ts's "IPC certify: idempotency" block: certify() already
+// prevents any genuine duplicate certification; this closes the
+// confusing-409-on-retry gap and proves a reused key never collides across
+// two different subcontract IPCs.
+async function setupApprovedSubcontractIpc() {
+  const { projectId, commitmentId, amountLineId } = await setupActiveSubcontract();
+  const ipc = await createSubcontractIpc(projectId, commitmentId);
+  await addLine(projectId, ipc.body.id, { commitmentLineId: amountLineId, currentValue: 1000 });
+  await submit(projectId, ipc.body.id);
+  await approve(projectId, ipc.body.id);
+  return { projectId, ipcId: ipc.body.id as string };
+}
+
+function certifyWithKey(projectId: string, ipcId: string, key: string, token = ownerToken) {
+  return request(app)
+    .post(`/api/projects/${projectId}/subcontract-ipcs/${ipcId}/certify`)
+    .set("Authorization", `Bearer ${token}`)
+    .set("Idempotency-Key", key);
+}
+
+describe("Subcontract IPC certify: idempotency", () => {
+  it("a retry with the same Idempotency-Key replays the original 200, not a 409", async () => {
+    const { projectId, ipcId } = await setupApprovedSubcontractIpc();
+    const key = `subipc-certify-${Math.random()}`;
+
+    const first = await certifyWithKey(projectId, ipcId, key);
+    expect(first.status).toBe(200);
+    expect(first.body.status).toBe("certified");
+
+    const retry = await certifyWithKey(projectId, ipcId, key);
+    expect(retry.status).toBe(200);
+    expect(retry.body.id).toBe(first.body.id);
+    expect(retry.body.netCertified).toBe(first.body.netCertified);
+  });
+
+  it("without an Idempotency-Key header, a second certify attempt still gets 409", async () => {
+    const { projectId, ipcId } = await setupApprovedSubcontractIpc();
+    const first = await certify(projectId, ipcId);
+    expect(first.status).toBe(200);
+
+    const second = await certify(projectId, ipcId);
+    expect(second.status).toBe(409);
+  });
+
+  it("reusing the same key against a DIFFERENT subcontract IPC is a safe conflict, never a wrong-resource replay", async () => {
+    const ipcA = await setupApprovedSubcontractIpc();
+    const ipcB = await setupApprovedSubcontractIpc();
+    const key = `subipc-certify-shared-key-${Math.random()}`;
+
+    const first = await certifyWithKey(ipcA.projectId, ipcA.ipcId, key);
+    expect(first.status).toBe(200);
+
+    const second = await certifyWithKey(ipcB.projectId, ipcB.ipcId, key);
+    expect(second.status).toBe(409);
+
+    const ipcBState = await request(app)
+      .get(`/api/projects/${ipcB.projectId}/subcontract-ipcs/${ipcB.ipcId}`)
+      .set("Authorization", `Bearer ${ownerToken}`);
+    expect(ipcBState.body.status).toBe("approved");
+  });
+});

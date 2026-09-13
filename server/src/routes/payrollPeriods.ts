@@ -7,6 +7,7 @@ import { requirePermission } from "../lib/permissions.js";
 import { recordAuditEvent } from "../lib/audit.js";
 import { pgErrorInfo } from "../lib/pgError.js";
 import { roundMoney, sumMoney } from "../lib/money.js";
+import { withIdempotency, IdempotencyConflictError } from "../lib/idempotency.js";
 
 // MIDAD Phase A3 — Payroll Periods. Company-wide (not project-scoped —
 // project labor allocation is a later slice), reusing the A1
@@ -419,12 +420,13 @@ payrollPeriodsRouter.post(
 // itself uses. The two partial unique indexes on labor_cost_postings
 // (schema.ts) are the DB-level backstop under that lock, not a substitute
 // for it.
-payrollPeriodsRouter.post(
-  "/:id/post",
-  requirePermission("payroll.post"),
-  async (req: Request<{ id: string }>, res: Response) => {
-    const existing = await findOwnedPeriod(req.companyId!, req.params.id);
-    if (!existing) return res.status(404).json({ error: "فترة الرواتب غير موجودة" });
+async function postPayrollPeriod(
+  companyId: string,
+  actorUserId: string,
+  periodId: string,
+): Promise<{ status: number; body: unknown }> {
+    const existing = await findOwnedPeriod(companyId, periodId);
+    if (!existing) return { status: 404, body: { error: "فترة الرواتب غير موجودة" } };
 
     const result = await db.transaction(async (tx) => {
       const [locked] = await tx.select().from(payrollPeriods).where(eq(payrollPeriods.id, existing.id)).for("update");
@@ -487,12 +489,12 @@ payrollPeriodsRouter.post(
         const [posting] = await tx
           .insert(laborCostPostings)
           .values({
-            companyId: req.companyId!,
+            companyId,
             payrollPeriodId: locked.id,
             laborAllocationId: allocation.id,
             expenseId: expense.id,
             kind: "posting",
-            postedBy: req.userId!,
+            postedBy: actorUserId,
           })
           .returning();
 
@@ -500,8 +502,8 @@ payrollPeriodsRouter.post(
         postedAmounts.push(Number(allocation.amount));
 
         await recordAuditEvent(tx, {
-          companyId: req.companyId!,
-          actorUserId: req.userId!,
+          companyId,
+          actorUserId,
           action: "laborCostPosting.created",
           entityType: "labor_cost_posting",
           entityId: posting.id,
@@ -521,14 +523,14 @@ payrollPeriodsRouter.post(
 
       const [updatedPeriod] = await tx
         .update(payrollPeriods)
-        .set({ status: "posted", postedBy: req.userId!, postedAt: new Date(), updatedAt: new Date() })
+        .set({ status: "posted", postedBy: actorUserId, postedAt: new Date(), updatedAt: new Date() })
         .where(and(eq(payrollPeriods.id, locked.id), eq(payrollPeriods.status, "approved")))
         .returning();
       if (!updatedPeriod) return { outcome: "conflict" as const };
 
       await recordAuditEvent(tx, {
-        companyId: req.companyId!,
-        actorUserId: req.userId!,
+        companyId,
+        actorUserId,
         action: "payrollPeriod.posted",
         entityType: "payroll_period",
         entityId: locked.id,
@@ -541,11 +543,45 @@ payrollPeriodsRouter.post(
     });
 
     if (result.outcome === "conflict") {
-      return res.status(409).json({ error: "لا يمكن ترحيل فترة ليست معتمدة، أو تم ترحيلها بالفعل" });
+      return { status: 409, body: { error: "لا يمكن ترحيل فترة ليست معتمدة، أو تم ترحيلها بالفعل" } };
     }
     if (result.outcome === "noAllocations") {
-      return res.status(400).json({ error: "لا يوجد توزيع تكلفة عمالة غير مرحّل لترحيله في هذه الفترة" });
+      return { status: 400, body: { error: "لا يوجد توزيع تكلفة عمالة غير مرحّل لترحيله في هذه الفترة" } };
     }
-    res.json({ period: result.period, postings: result.postings, totalPosted: result.totalPosted });
+    return { status: 200, body: { period: result.period, postings: result.postings, totalPosted: result.totalPosted } };
+}
+
+payrollPeriodsRouter.post(
+  "/:id/post",
+  requirePermission("payroll.post"),
+  async (req: Request<{ id: string }>, res: Response) => {
+    // P0 hardening (MIDAD Final Pre-Launch audit, §4/§19) — same opt-in
+    // pattern as ipcs.ts/changeOrders.ts: a retry with the same
+    // Idempotency-Key replays the original posting response instead of a
+    // confusing 409 after a network-retry-following-timeout.
+    const idempotencyKey = req.header("Idempotency-Key");
+    if (idempotencyKey) {
+      try {
+        // Fingerprint includes the period id explicitly, same reasoning as
+        // ipcs.ts's certify() — a body-less action must never let a reused
+        // key collide across two different resources.
+        const outcome = await withIdempotency(
+          req.companyId!,
+          "payroll.post",
+          idempotencyKey,
+          { periodId: req.params.id },
+          () => postPayrollPeriod(req.companyId!, req.userId!, req.params.id),
+        );
+        return res.status(outcome.status).json(outcome.body);
+      } catch (err) {
+        if (err instanceof IdempotencyConflictError) {
+          return res.status(409).json({ error: "تم استخدام مفتاح idempotency هذا مسبقاً بطلب مختلف" });
+        }
+        throw err;
+      }
+    }
+
+    const result = await postPayrollPeriod(req.companyId!, req.userId!, req.params.id);
+    res.status(result.status).json(result.body);
   },
 );

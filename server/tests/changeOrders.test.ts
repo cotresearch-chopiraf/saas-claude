@@ -153,3 +153,91 @@ describe("change orders: tenant isolation", () => {
     expect(stillThere.body.map((c: { id: string }) => c.id)).toContain(coRes.body.id);
   });
 });
+
+// P0 hardening (MIDAD Final Pre-Launch audit, §4/§19) — the "cannot decide
+// twice" guard above already prevents a genuine duplicate decision; this
+// closes the confusing-409-on-retry gap for a network-retry-after-timeout
+// on an ALREADY-decided change order, and proves a reused key never
+// collides across two different change orders.
+function decideWithKey(
+  projectId: string,
+  changeOrderId: string,
+  status: "approved" | "rejected",
+  key: string,
+  token: string,
+) {
+  return request(app)
+    .patch(`/api/projects/${projectId}/change-orders/${changeOrderId}`)
+    .set("Authorization", `Bearer ${token}`)
+    .set("Idempotency-Key", key)
+    .send({ status });
+}
+
+describe("change orders: idempotency", () => {
+  beforeEach(resetDb);
+
+  it("a retry with the same Idempotency-Key replays the original 200, not a 409", async () => {
+    const { token, projectId } = await setupProject();
+    const coRes = await request(app)
+      .post(`/api/projects/${projectId}/change-orders`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ title: "Add skylight", amountDelta: 1500 });
+    const key = `co-approve-${Math.random()}`;
+
+    const first = await decideWithKey(projectId, coRes.body.id, "approved", key, token);
+    expect(first.status).toBe(200);
+    expect(first.body.status).toBe("approved");
+
+    const retry = await decideWithKey(projectId, coRes.body.id, "approved", key, token);
+    expect(retry.status).toBe(200);
+    expect(retry.body.id).toBe(first.body.id);
+
+    // Only one budget increment happened, not two.
+    const project = await request(app).get(`/api/projects/${projectId}`).set("Authorization", `Bearer ${token}`);
+    expect(Number(project.body.budgetTotal)).toBe(11500);
+  });
+
+  it("without an Idempotency-Key header, a second decision attempt still gets 409", async () => {
+    const { token, projectId } = await setupProject();
+    const coRes = await request(app)
+      .post(`/api/projects/${projectId}/change-orders`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ title: "Once only", amountDelta: 1000 });
+
+    const first = await request(app)
+      .patch(`/api/projects/${projectId}/change-orders/${coRes.body.id}`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ status: "approved" });
+    expect(first.status).toBe(200);
+
+    const second = await request(app)
+      .patch(`/api/projects/${projectId}/change-orders/${coRes.body.id}`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ status: "approved" });
+    expect(second.status).toBe(409);
+  });
+
+  it("reusing the same key against a DIFFERENT change order is a safe conflict (different changeOrderId, so a fingerprint mismatch)", async () => {
+    const { token, projectId } = await setupProject();
+    const coA = await request(app)
+      .post(`/api/projects/${projectId}/change-orders`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ title: "Order A", amountDelta: 100 });
+    const coB = await request(app)
+      .post(`/api/projects/${projectId}/change-orders`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ title: "Order B", amountDelta: 200 });
+    const key = `co-shared-key-${Math.random()}`;
+
+    const first = await decideWithKey(projectId, coA.body.id, "approved", key, token);
+    expect(first.status).toBe(200);
+
+    const second = await decideWithKey(projectId, coB.body.id, "approved", key, token);
+    expect(second.status).toBe(409);
+
+    // Change order B was never actually decided by the mismatched-key retry.
+    const list = await request(app).get(`/api/projects/${projectId}/change-orders`).set("Authorization", `Bearer ${token}`);
+    const orderB = list.body.find((c: { id: string }) => c.id === coB.body.id);
+    expect(orderB.status).toBe("pending");
+  });
+});

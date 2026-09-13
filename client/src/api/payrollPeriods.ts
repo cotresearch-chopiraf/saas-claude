@@ -62,6 +62,11 @@ export function rejectPayrollPeriod(id: string, reason: string): Promise<Payroll
 // real `expenses` rows server-side; this call has no undo — see
 // reverseLaborCostPosting in api/laborCostPostings.ts for the only
 // controlled correction path.
-export function postPayrollPeriod(id: string): Promise<PayrollPeriodPostResult> {
-  return apiFetch<PayrollPeriodPostResult>(`/payroll-periods/${id}/post`, { method: "POST" });
+// P0 hardening (MIDAD Final Pre-Launch audit, §4/§19) — same reasoning as
+// api/ipcs.ts's certifyIpc().
+export function postPayrollPeriod(id: string, idempotencyKey?: string): Promise<PayrollPeriodPostResult> {
+  return apiFetch<PayrollPeriodPostResult>(`/payroll-periods/${id}/post`, {
+    method: "POST",
+    headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined,
+  });
 }

@@ -919,3 +919,85 @@ describe("Phase 3.2 hardening — VAL-001: finite numeric validation", () => {
     expect(res.status).toBe(201);
   });
 });
+
+// P0 hardening (MIDAD Final Pre-Launch audit, §4/§19) — certify() already
+// row-locks and guards against a genuine duplicate certification (the
+// "approved" -> "certified" WHERE guard above never certifies twice). What
+// was missing: a network-retry-after-timeout on an ALREADY-successful
+// certify() request got a confusing 409 instead of the original success.
+async function setupApprovedIpc(quantity = 40, measuredQuantity = 100) {
+  const { projectId, contractId, revisionId, boqItemId } = await setupPublishedBoq(100, 10);
+  await approveMeasurement(projectId, contractId, revisionId, boqItemId, measuredQuantity);
+  const ipc = await createDraftIpc(projectId, contractId, revisionId);
+  await addLine(projectId, ipc.id, { boqItemId, currentQuantity: quantity });
+  await submit(projectId, ipc.id);
+  await approve(projectId, ipc.id);
+  return { projectId, ipcId: ipc.id };
+}
+
+function certifyWithKey(projectId: string, ipcId: string, key: string, token = ownerToken) {
+  return request(app)
+    .post(`/api/projects/${projectId}/ipcs/${ipcId}/certify`)
+    .set("Authorization", `Bearer ${token}`)
+    .set("Idempotency-Key", key);
+}
+
+describe("IPC certify: idempotency", () => {
+  it("a retry with the same Idempotency-Key replays the original 200, not a 409", async () => {
+    const { projectId, ipcId } = await setupApprovedIpc();
+    const key = `ipc-certify-${Math.random()}`;
+
+    const first = await certifyWithKey(projectId, ipcId, key);
+    expect(first.status).toBe(200);
+    expect(first.body.status).toBe("certified");
+
+    const retry = await certifyWithKey(projectId, ipcId, key);
+    expect(retry.status).toBe(200);
+    expect(retry.body.id).toBe(first.body.id);
+    expect(retry.body.netCertified).toBe(first.body.netCertified);
+  });
+
+  it("N concurrent certify requests with the SAME key produce exactly one certification, all replaying the same result", async () => {
+    const { projectId, ipcId } = await setupApprovedIpc();
+    const key = `ipc-certify-concurrent-${Math.random()}`;
+
+    const results = await Promise.all(Array.from({ length: 6 }, () => certifyWithKey(projectId, ipcId, key)));
+    expect(results.every((r) => r.status === 200)).toBe(true);
+    const netCertifiedValues = new Set(results.map((r) => r.body.netCertified));
+    expect(netCertifiedValues.size).toBe(1);
+  });
+
+  it("without an Idempotency-Key header, a second certify attempt still gets the original conflict behavior (409)", async () => {
+    const { projectId, ipcId } = await setupApprovedIpc();
+    const first = await certify(projectId, ipcId);
+    expect(first.status).toBe(200);
+
+    const second = await certify(projectId, ipcId);
+    expect(second.status).toBe(409);
+  });
+
+  it("reusing the same key against a DIFFERENT ipc is a safe fingerprint-mismatch conflict, never a wrong-resource replay", async () => {
+    // certify() has no request body, so the fingerprint is keyed off the
+    // ipcId, not req.body — this proves a client bug that reuses one key
+    // across two different IPCs gets a deterministic 409 on the second
+    // call, never IPC A's certification result silently returned for a
+    // request against IPC B.
+    const ipcA = await setupApprovedIpc();
+    const ipcB = await setupApprovedIpc();
+    const key = `ipc-certify-shared-key-${Math.random()}`;
+
+    const first = await certifyWithKey(ipcA.projectId, ipcA.ipcId, key);
+    expect(first.status).toBe(200);
+    expect(first.body.id).toBe(ipcA.ipcId);
+
+    const second = await certifyWithKey(ipcB.projectId, ipcB.ipcId, key);
+    expect(second.status).toBe(409);
+    expect(second.body.error).toContain("idempotency");
+
+    // IPC B was never touched by the mismatched-key request.
+    const ipcBState = await request(app)
+      .get(`/api/projects/${ipcB.projectId}/ipcs/${ipcB.ipcId}`)
+      .set("Authorization", `Bearer ${ownerToken}`);
+    expect(ipcBState.body.status).toBe("approved");
+  });
+});

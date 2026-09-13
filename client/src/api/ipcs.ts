@@ -65,6 +65,14 @@ export function rejectIpc(projectId: string, ipcId: string, reason: string): Pro
   });
 }
 
-export function certifyIpc(projectId: string, ipcId: string): Promise<Ipc> {
-  return apiFetch<Ipc>(`/projects/${projectId}/ipcs/${ipcId}/certify`, { method: "POST" });
+// P0 hardening (MIDAD Final Pre-Launch audit, §4/§19) — certify() is a
+// financially irreversible action; an Idempotency-Key protects a
+// network-retry-after-timeout from returning a confusing conflict instead
+// of the original successful certification, exactly as createInvoice()
+// already does.
+export function certifyIpc(projectId: string, ipcId: string, idempotencyKey?: string): Promise<Ipc> {
+  return apiFetch<Ipc>(`/projects/${projectId}/ipcs/${ipcId}/certify`, {
+    method: "POST",
+    headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined,
+  });
 }

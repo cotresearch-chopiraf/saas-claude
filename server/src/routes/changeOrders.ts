@@ -6,6 +6,7 @@ import { changeOrders, projects } from "../db/schema.js";
 import { requirePermission } from "../lib/permissions.js";
 import { recordAuditEvent } from "../lib/audit.js";
 import { logger } from "../lib/logger.js";
+import { withIdempotency, IdempotencyConflictError } from "../lib/idempotency.js";
 
 type ProjectParams = { projectId: string };
 type ChangeOrderParams = ProjectParams & { changeOrderId: string };
@@ -87,6 +88,59 @@ const decisionSchema = z.object({
 // no read-modify-write in JS) — so two different change orders on the same
 // project, approved concurrently, can never lose one delta to the other's
 // overwrite.
+async function decideChangeOrder(
+  companyId: string,
+  actorUserId: string,
+  projectId: string,
+  changeOrderId: string,
+  status: "approved" | "rejected",
+): Promise<{ status: number; body: unknown }> {
+  const existing = await db.query.changeOrders.findFirst({
+    where: and(eq(changeOrders.id, changeOrderId), eq(changeOrders.projectId, projectId)),
+  });
+  if (!existing) return { status: 404, body: { error: "أمر التغيير غير موجود" } };
+
+  const updated = await db.transaction(async (tx) => {
+    const [decided] = await tx
+      .update(changeOrders)
+      .set({ status })
+      .where(and(eq(changeOrders.id, changeOrderId), eq(changeOrders.status, "pending")))
+      .returning();
+    if (!decided) return null; // another request already decided this one
+
+    if (status === "approved") {
+      await tx
+        .update(projects)
+        .set({ budgetTotal: sql`${projects.budgetTotal} + ${existing.amountDelta}` })
+        .where(eq(projects.id, projectId));
+    }
+
+    await recordAuditEvent(tx, {
+      companyId,
+      actorUserId,
+      action: "changeOrder.decided",
+      entityType: "change_order",
+      entityId: decided.id,
+      beforeValue: { status: existing.status },
+      afterValue: { status: decided.status },
+      metadata: { projectId, amountDelta: decided.amountDelta },
+    });
+
+    return decided;
+  });
+
+  if (!updated) return { status: 409, body: { error: "تم البتّ في أمر التغيير هذا مسبقاً" } };
+
+  logger.info("financial_mutation", {
+    action: "changeOrder.decide",
+    userId: actorUserId,
+    companyId,
+    changeOrderId,
+    status,
+  });
+  return { status: 200, body: updated };
+}
+
 changeOrdersRouter.patch(
   "/:changeOrderId",
   requirePermission("changeOrder.approve"),
@@ -94,53 +148,48 @@ changeOrdersRouter.patch(
     const parsed = decisionSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
 
-    const existing = await db.query.changeOrders.findFirst({
-      where: and(
-        eq(changeOrders.id, req.params.changeOrderId),
-        eq(changeOrders.projectId, req.params.projectId),
-      ),
-    });
-    if (!existing) return res.status(404).json({ error: "أمر التغيير غير موجود" });
-
-    const updated = await db.transaction(async (tx) => {
-      const [decided] = await tx
-        .update(changeOrders)
-        .set({ status: parsed.data.status })
-        .where(and(eq(changeOrders.id, req.params.changeOrderId), eq(changeOrders.status, "pending")))
-        .returning();
-      if (!decided) return null; // another request already decided this one
-
-      if (parsed.data.status === "approved") {
-        await tx
-          .update(projects)
-          .set({ budgetTotal: sql`${projects.budgetTotal} + ${existing.amountDelta}` })
-          .where(eq(projects.id, req.params.projectId));
+    // P0 hardening (MIDAD Final Pre-Launch audit, §4/§19) — opt-in
+    // idempotency, same pattern as invoices.ts/quotes.ts: a client that
+    // sends Idempotency-Key is protected from a network-retry-after-timeout
+    // on an ALREADY-decided change order returning a confusing 409 instead
+    // of replaying the original decision's response. A client that doesn't
+    // send the header keeps the exact prior behavior. The underlying
+    // "cannot decide twice" guard above is unchanged either way — this
+    // never allows a genuinely duplicate decision, it only makes a true
+    // retry of the SAME request return the SAME result.
+    const idempotencyKey = req.header("Idempotency-Key");
+    if (idempotencyKey) {
+      try {
+        // The fingerprint includes changeOrderId explicitly, not just
+        // req.body: two different change orders decided with the same
+        // reused key must never collide into a single claim (which would
+        // otherwise replay one change order's decision as if it were the
+        // other's) — see ipcs.ts's certify() for the same reasoning
+        // applied to a body-less action.
+        const outcome = await withIdempotency(
+          req.companyId!,
+          "changeOrder.approve",
+          idempotencyKey,
+          { changeOrderId: req.params.changeOrderId, ...req.body },
+          () => decideChangeOrder(req.companyId!, req.userId!, req.params.projectId, req.params.changeOrderId, parsed.data.status),
+        );
+        return res.status(outcome.status).json(outcome.body);
+      } catch (err) {
+        if (err instanceof IdempotencyConflictError) {
+          return res.status(409).json({ error: "تم استخدام مفتاح idempotency هذا مسبقاً بطلب مختلف" });
+        }
+        throw err;
       }
+    }
 
-      await recordAuditEvent(tx, {
-        companyId: req.companyId!,
-        actorUserId: req.userId!,
-        action: "changeOrder.decided",
-        entityType: "change_order",
-        entityId: decided.id,
-        beforeValue: { status: existing.status },
-        afterValue: { status: decided.status },
-        metadata: { projectId: req.params.projectId, amountDelta: decided.amountDelta },
-      });
-
-      return decided;
-    });
-
-    if (!updated) return res.status(409).json({ error: "تم البتّ في أمر التغيير هذا مسبقاً" });
-
-    logger.info("financial_mutation", {
-      action: "changeOrder.decide",
-      userId: req.userId,
-      companyId: req.companyId,
-      changeOrderId: req.params.changeOrderId,
-      status: parsed.data.status,
-    });
-    res.json(updated);
+    const result = await decideChangeOrder(
+      req.companyId!,
+      req.userId!,
+      req.params.projectId,
+      req.params.changeOrderId,
+      parsed.data.status,
+    );
+    res.status(result.status).json(result.body);
   },
 );
 

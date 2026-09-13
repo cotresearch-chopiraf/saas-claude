@@ -66,6 +66,10 @@ export function PayrollPeriodDetail() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
   const [postings, setPostings] = useState<LaborCostPosting[] | null>(null);
+  // P0 hardening (MIDAD Final Pre-Launch audit, §4/§19) — stable per period
+  // id (this route component does not remount when the URL param alone
+  // changes), reused across a retry on the same period.
+  const postKey = useMemo(() => crypto.randomUUID(), [id]);
   const [showRejectModal, setShowRejectModal] = useState(false);
 
   function load() {
@@ -145,7 +149,7 @@ export function PayrollPeriodDetail() {
     setActionBusy(true);
     setActionError(null);
     try {
-      await postPayrollPeriod(period.id);
+      await postPayrollPeriod(period.id, postKey);
       load();
     } catch (err) {
       setActionError(err instanceof ApiError ? err.message : t("payrollPeriodDetailPage.postError"));

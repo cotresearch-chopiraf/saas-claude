@@ -146,7 +146,7 @@ export function SubcontractIpcSection() {
       />
 
       {selectedId && commitment && (
-        <SubcontractIpcDetail projectId={projectId} ipcId={selectedId} commitment={commitment} onChanged={load} />
+        <SubcontractIpcDetail key={selectedId} projectId={projectId} ipcId={selectedId} commitment={commitment} onChanged={load} />
       )}
     </div>
   );
@@ -268,6 +268,10 @@ function SubcontractIpcDetail({
   const [showReject, setShowReject] = useState(false);
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const [actingBusy, setActingBusy] = useState(false);
+  // P0 hardening (MIDAD Final Pre-Launch audit, §4/§19) — generated once
+  // per mount (this component remounts per ipcId via the `key` prop at its
+  // call site), reused across a retry on the same subcontract IPC.
+  const [certifyKey] = useState(() => crypto.randomUUID());
 
   function load() {
     setError(null);
@@ -286,7 +290,7 @@ function SubcontractIpcDetail({
     try {
       if (pendingAction === "submit") await submitSubcontractIpc(projectId, ipcId);
       else if (pendingAction === "approve") await approveSubcontractIpc(projectId, ipcId);
-      else if (pendingAction === "certify") await certifySubcontractIpc(projectId, ipcId);
+      else if (pendingAction === "certify") await certifySubcontractIpc(projectId, ipcId, certifyKey);
       setPendingAction(null);
       load();
       onChanged();

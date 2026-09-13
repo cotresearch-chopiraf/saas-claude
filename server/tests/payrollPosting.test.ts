@@ -783,3 +783,70 @@ describe("Labor cost status display (A5.1)", () => {
     expect(foreignRes.status).toBe(404);
   });
 });
+
+// P0 hardening (MIDAD Final Pre-Launch audit, §4/§19) — post() already
+// row-locks the period and guards "approved -> posted" against a genuine
+// duplicate; this closes the confusing-409-on-retry gap and proves a
+// reused key never collides across two different periods.
+function postPeriodWithKey(periodId: string, key: string, token = ownerToken) {
+  return request(app)
+    .post(`/api/payroll-periods/${periodId}/post`)
+    .set("Authorization", `Bearer ${token}`)
+    .set("Idempotency-Key", key);
+}
+
+describe("payroll posting: idempotency", () => {
+  it("a retry with the same Idempotency-Key replays the original 200, not a 409", async () => {
+    const { periodId, recordId } = await createRecordInFreshPeriod(10000);
+    await createAllocation({ payrollRecordId: recordId, projectId, percentage: 100 });
+    await submitAndApprove(periodId);
+    const key = `payroll-post-${Math.random()}`;
+
+    const first = await postPeriodWithKey(periodId, key);
+    expect(first.status).toBe(200);
+    expect(first.body.totalPosted).toBe(10000);
+
+    const retry = await postPeriodWithKey(periodId, key);
+    expect(retry.status).toBe(200);
+    expect(retry.body.period.id).toBe(first.body.period.id);
+
+    // Only one posting/expense was ever created for THIS period, not two —
+    // scoped to payrollPeriodId, since projectId is shared across every
+    // test in this file.
+    const postings = await db.query.laborCostPostings.findMany({ where: eq(laborCostPostings.payrollPeriodId, periodId) });
+    expect(postings).toHaveLength(1);
+  });
+
+  it("without an Idempotency-Key header, a second post attempt still gets 409", async () => {
+    const { periodId, recordId } = await createRecordInFreshPeriod(5000);
+    await createAllocation({ payrollRecordId: recordId, projectId, percentage: 100 });
+    await submitAndApprove(periodId);
+
+    const first = await postPeriod(periodId);
+    expect(first.status).toBe(200);
+
+    const second = await postPeriod(periodId);
+    expect(second.status).toBe(409);
+  });
+
+  it("reusing the same key against a DIFFERENT payroll period is a safe conflict, never a wrong-resource replay", async () => {
+    const a = await createRecordInFreshPeriod(1000);
+    await createAllocation({ payrollRecordId: a.recordId, projectId, percentage: 100 });
+    await submitAndApprove(a.periodId);
+
+    const b = await createRecordInFreshPeriod(2000);
+    await createAllocation({ payrollRecordId: b.recordId, projectId, percentage: 100 });
+    await submitAndApprove(b.periodId);
+
+    const key = `payroll-post-shared-key-${Math.random()}`;
+    const first = await postPeriodWithKey(a.periodId, key);
+    expect(first.status).toBe(200);
+
+    const second = await postPeriodWithKey(b.periodId, key);
+    expect(second.status).toBe(409);
+
+    // Period B was never actually posted by the mismatched-key retry.
+    const periodB = await db.query.payrollPeriods.findFirst({ where: eq(payrollPeriods.id, b.periodId) });
+    expect(periodB!.status).toBe("approved");
+  });
+});

@@ -6,6 +6,7 @@ import { commitments, commitmentLines, subcontractIpcLines, subcontractIpcs, pro
 import { requirePermission } from "../lib/permissions.js";
 import { recordAuditEvent } from "../lib/audit.js";
 import { roundMoney, roundQuantity, sumMoney } from "../lib/money.js";
+import { withIdempotency, IdempotencyConflictError } from "../lib/idempotency.js";
 
 // MIDAD Phase 2 — Subcontractor IPC. See the schema.ts section comment
 // above subcontractIpcs for the full architectural rationale: this is a
@@ -461,12 +462,14 @@ subcontractIpcsRouter.post(
 // in a fixed sorted order (deadlock-safe, identical in shape to
 // ipcs.ts's own certify() — but locking commitment_lines here, NEVER
 // boq_items, and reading only this domain's own ledger).
-subcontractIpcsRouter.post(
-  "/:id/certify",
-  requirePermission("subcontractIpc.manage"),
-  async (req: Request<SubcontractIpcParams>, res: Response) => {
-    const ipc = await findOwnedSubcontractIpc(req.companyId!, req.params.projectId, req.params.id);
-    if (!ipc) return res.status(404).json({ error: "الشهادة غير موجودة" });
+async function certifySubcontractIpc(
+  companyId: string,
+  actorUserId: string,
+  projectId: string,
+  subcontractIpcId: string,
+): Promise<{ status: number; body: unknown }> {
+    const ipc = await findOwnedSubcontractIpc(companyId, projectId, subcontractIpcId);
+    if (!ipc) return { status: 404, body: { error: "الشهادة غير موجودة" } };
 
     const result = await db.transaction(async (tx) => {
       const [locked] = await tx.select().from(subcontractIpcs).where(eq(subcontractIpcs.id, ipc.id)).for("update");
@@ -568,7 +571,7 @@ subcontractIpcsRouter.post(
         .update(subcontractIpcs)
         .set({
           status: "certified",
-          certifiedBy: req.userId!,
+          certifiedBy: actorUserId,
           certifiedAt: new Date(),
           grossValue: String(grossValue),
           retentionPercent: String(retentionPercent),
@@ -583,8 +586,8 @@ subcontractIpcsRouter.post(
       if (!updated) return { outcome: "conflict" as const };
 
       await recordAuditEvent(tx, {
-        companyId: req.companyId!,
-        actorUserId: req.userId!,
+        companyId,
+        actorUserId,
         action: "subcontractIpc.certified",
         entityType: "subcontract_ipc",
         entityId: ipc.id,
@@ -605,20 +608,56 @@ subcontractIpcsRouter.post(
     });
 
     if (result.outcome === "conflict") {
-      return res.status(409).json({ error: "لا يمكن تصديق شهادة ليست بانتظار التصديق" });
+      return { status: 409, body: { error: "لا يمكن تصديق شهادة ليست بانتظار التصديق" } };
     }
     if (result.outcome === "overrun") {
-      return res.status(409).json({
-        error: "التصديق سيتجاوز القيمة المتعاقد عليها لهذا البند",
-        commitmentLineId: result.commitmentLineId,
-        ceiling: result.ceiling,
-        alreadyCertified: result.alreadyCertified,
-        requested: result.requested,
-      });
+      return {
+        status: 409,
+        body: {
+          error: "التصديق سيتجاوز القيمة المتعاقد عليها لهذا البند",
+          commitmentLineId: result.commitmentLineId,
+          ceiling: result.ceiling,
+          alreadyCertified: result.alreadyCertified,
+          requested: result.requested,
+        },
+      };
     }
     if (result.outcome === "negativeNet") {
-      return res.status(409).json({ error: "صافي الشهادة المصدَّقة لا يمكن أن يكون سالباً" });
+      return { status: 409, body: { error: "صافي الشهادة المصدَّقة لا يمكن أن يكون سالباً" } };
     }
-    res.json(result.ipc);
+    return { status: 200, body: result.ipc };
+}
+
+subcontractIpcsRouter.post(
+  "/:id/certify",
+  requirePermission("subcontractIpc.manage"),
+  async (req: Request<SubcontractIpcParams>, res: Response) => {
+    // P0 hardening (MIDAD Final Pre-Launch audit, §4/§19) — same opt-in
+    // pattern as ipcs.ts's certify(): a retry with the same Idempotency-Key
+    // replays the original response instead of a confusing 409.
+    const idempotencyKey = req.header("Idempotency-Key");
+    if (idempotencyKey) {
+      try {
+        // Fingerprint includes the subcontract IPC id explicitly, same
+        // reasoning as ipcs.ts's certify() — a body-less action must never
+        // let a reused key collide across two different resources.
+        const outcome = await withIdempotency(
+          req.companyId!,
+          "subcontractIpc.certify",
+          idempotencyKey,
+          { subcontractIpcId: req.params.id },
+          () => certifySubcontractIpc(req.companyId!, req.userId!, req.params.projectId, req.params.id),
+        );
+        return res.status(outcome.status).json(outcome.body);
+      } catch (err) {
+        if (err instanceof IdempotencyConflictError) {
+          return res.status(409).json({ error: "تم استخدام مفتاح idempotency هذا مسبقاً بطلب مختلف" });
+        }
+        throw err;
+      }
+    }
+
+    const result = await certifySubcontractIpc(req.companyId!, req.userId!, req.params.projectId, req.params.id);
+    res.status(result.status).json(result.body);
   },
 );

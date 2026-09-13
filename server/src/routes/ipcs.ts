@@ -9,6 +9,7 @@ import { roundMoney, roundQuantity, sumMoney } from "../lib/money.js";
 import { sumApprovedQuantity } from "./measurements.js";
 import { CONTRACT_EXECUTION_BLOCKED_STATUSES } from "./contracts.js";
 import { createNotification } from "../lib/notifications.js";
+import { withIdempotency, IdempotencyConflictError } from "../lib/idempotency.js";
 
 type ProjectParams = { projectId: string };
 type IpcParams = ProjectParams & { ipcId: string };
@@ -462,12 +463,14 @@ ipcsRouter.post(
 // locks for the whole transaction so a concurrent certify() on an
 // overlapping item blocks and re-reads the true post-commit state rather
 // than a stale one.
-ipcsRouter.post(
-  "/:ipcId/certify",
-  requirePermission("ipc.manage"),
-  async (req: Request<IpcParams>, res: Response) => {
-    const ipc = await findOwnedIpc(req.companyId!, req.params.projectId, req.params.ipcId);
-    if (!ipc) return res.status(404).json({ error: "الشهادة غير موجودة" });
+async function certifyIpc(
+  companyId: string,
+  actorUserId: string,
+  projectId: string,
+  ipcId: string,
+): Promise<{ status: number; body: unknown }> {
+    const ipc = await findOwnedIpc(companyId, projectId, ipcId);
+    if (!ipc) return { status: 404, body: { error: "الشهادة غير موجودة" } };
 
     const result = await db.transaction(async (tx) => {
       const [locked] = await tx.select().from(ipcs).where(eq(ipcs.id, ipc.id)).for("update");
@@ -563,7 +566,7 @@ ipcsRouter.post(
         .update(ipcs)
         .set({
           status: "certified",
-          certifiedBy: req.userId!,
+          certifiedBy: actorUserId,
           certifiedAt: new Date(),
           grossValue: String(grossValue),
           retentionAmount: String(retentionAmount),
@@ -577,8 +580,8 @@ ipcsRouter.post(
       if (!updated) return { outcome: "conflict" as const };
 
       await recordAuditEvent(tx, {
-        companyId: req.companyId!,
-        actorUserId: req.userId!,
+        companyId,
+        actorUserId,
         action: "ipc.certified",
         entityType: "ipc",
         entityId: ipc.id,
@@ -603,20 +606,61 @@ ipcsRouter.post(
     });
 
     if (result.outcome === "conflict") {
-      return res.status(409).json({ error: "لا يمكن تصديق شهادة ليست بانتظار التصديق" });
+      return { status: 409, body: { error: "لا يمكن تصديق شهادة ليست بانتظار التصديق" } };
     }
     if (result.outcome === "overrun") {
-      return res.status(409).json({
-        error: "التصديق سيتجاوز الكمية المعتمدة لهذا البند",
-        boqItemId: result.boqItemId,
-        approved: result.approved,
-        alreadyCertified: result.alreadyCertifiedQty,
-        requested: result.thisIpcQty,
-      });
+      return {
+        status: 409,
+        body: {
+          error: "التصديق سيتجاوز الكمية المعتمدة لهذا البند",
+          boqItemId: result.boqItemId,
+          approved: result.approved,
+          alreadyCertified: result.alreadyCertifiedQty,
+          requested: result.thisIpcQty,
+        },
+      };
     }
     if (result.outcome === "negativeNet") {
-      return res.status(409).json({ error: "صافي الشهادة المصدَّقة لا يمكن أن يكون سالباً" });
+      return { status: 409, body: { error: "صافي الشهادة المصدَّقة لا يمكن أن يكون سالباً" } };
     }
-    res.json(result.ipc);
+    return { status: 200, body: result.ipc };
+}
+
+ipcsRouter.post(
+  "/:ipcId/certify",
+  requirePermission("ipc.manage"),
+  async (req: Request<IpcParams>, res: Response) => {
+    // P0 hardening (MIDAD Final Pre-Launch audit, §4/§19) — same opt-in
+    // pattern as invoices.ts/changeOrders.ts: a client that sends
+    // Idempotency-Key is protected from a network-retry-after-timeout on an
+    // ALREADY-certified IPC returning a confusing 409 instead of replaying
+    // the original certification's response. The underlying row-locked
+    // "approved -> certified" guard above is unchanged either way.
+    const idempotencyKey = req.header("Idempotency-Key");
+    if (idempotencyKey) {
+      try {
+        // certify() has no request body — fingerprinting ipcId explicitly
+        // (not just req.body, which would be a constant {} for every IPC)
+        // means a key accidentally reused across two different IPCs is a
+        // fingerprint MISMATCH (safe 409), never a silent replay of one
+        // IPC's certification result for a request against a different one.
+        const outcome = await withIdempotency(
+          req.companyId!,
+          "ipc.certify",
+          idempotencyKey,
+          { ipcId: req.params.ipcId },
+          () => certifyIpc(req.companyId!, req.userId!, req.params.projectId, req.params.ipcId),
+        );
+        return res.status(outcome.status).json(outcome.body);
+      } catch (err) {
+        if (err instanceof IdempotencyConflictError) {
+          return res.status(409).json({ error: "تم استخدام مفتاح idempotency هذا مسبقاً بطلب مختلف" });
+        }
+        throw err;
+      }
+    }
+
+    const result = await certifyIpc(req.companyId!, req.userId!, req.params.projectId, req.params.ipcId);
+    res.status(result.status).json(result.body);
   },
 );
