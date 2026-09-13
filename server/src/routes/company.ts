@@ -10,6 +10,7 @@ import { requirePermission } from "../lib/permissions.js";
 import { recordAuditEvent } from "../lib/audit.js";
 import { logger } from "../lib/logger.js";
 import { uploadFile, publicUrlFor } from "../lib/storage/index.js";
+import { assertWithinLimit, countActiveUsers, LimitExceededError } from "../lib/entitlements.js";
 
 export const companyRouter = Router();
 
@@ -212,6 +213,18 @@ companyRouter.post("/invites", requireOwner, async (req, res) => {
 
   const existingUser = await db.query.users.findFirst({ where: eq(users.email, parsed.data.email) });
   if (existingUser) return res.status(409).json({ error: "هذا البريد الإلكتروني مسجّل مسبقاً" });
+
+  // P0 hardening (MIDAD Final Pre-Launch audit, §5/§19) — a plan's
+  // maxUsers limit, evaluated centrally via lib/entitlements.ts. A company
+  // with no plan assigned (planId = null, today's default for every
+  // company) is unlimited — this only takes effect once a platform
+  // operator explicitly assigns a plan with a real cap.
+  try {
+    await assertWithinLimit(req.companyId!, "maxUsers", await countActiveUsers(req.companyId!));
+  } catch (err) {
+    if (err instanceof LimitExceededError) return res.status(403).json({ error: err.message });
+    throw err;
+  }
 
   const token = generateToken();
   const [invite] = await db

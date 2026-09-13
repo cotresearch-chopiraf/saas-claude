@@ -21,7 +21,7 @@ export async function resetDb() {
       zatca_egs_units, zatca_icv_counters, zatca_submissions,
       employees, payroll_periods, payroll_records, labor_allocations,
       labor_cost_postings, payroll_import_batches, payroll_import_rows,
-      feature_flags, company_feature_flag_overrides
+      feature_flags, company_feature_flag_overrides, plans
     RESTART IDENTITY CASCADE
   `);
 }

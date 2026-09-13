@@ -98,6 +98,48 @@ export const sourceTypeEnum = pgEnum("source_type", [
 
 export const overrideStatusEnum = pgEnum("override_status", ["active", "reset"]);
 
+// ============================================================================
+// P0 hardening (MIDAD Final Pre-Launch, SaaS & Sale-Readiness Audit) —
+// Plans & Entitlements foundation, Phase 3 of the launch/sale-readiness
+// program. Deliberately no price/billing column anywhere here — this
+// models WHAT a plan grants (features + usage limits), never what it
+// costs or how it's paid for, which stays a genuinely separate, not-yet-
+// decided concern (no payment provider integration exists or is implied
+// by this table). Plan names below (Starter/Professional/Enterprise) are
+// illustrative placeholders an operator can rename/reconfigure freely —
+// nothing in this schema or the routes that manage it hardcodes them.
+export interface PlanLimits {
+  // null = unlimited (no cap enforced) for that resource.
+  maxUsers: number | null;
+  maxProjects: number | null;
+  maxStorageMb: number | null;
+  maxInvoicesPerMonth: number | null;
+}
+
+export const defaultPlanLimits: PlanLimits = {
+  maxUsers: null,
+  maxProjects: null,
+  maxStorageMb: null,
+  maxInvoicesPerMonth: null,
+};
+
+export const plans = pgTable(
+  "plans",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    key: text("key").notNull(),
+    name: text("name").notNull(),
+    description: text("description"),
+    isActive: boolean("is_active").notNull().default(true),
+    limits: jsonb("limits").$type<PlanLimits>().notNull().default(defaultPlanLimits),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    keyUnique: uniqueIndex("plans_key_unique").on(table.key),
+  }),
+);
+
 // A company is the tenant boundary — every other table hangs off it,
 // and every query in the app is scoped by companyId to keep tenants isolated.
 export const companies = pgTable("companies", {
@@ -118,6 +160,15 @@ export const companies = pgTable("companies", {
   nextQuoteNumber: integer("next_quote_number").notNull().default(0),
   nextInvoiceNumber: integer("next_invoice_number").notNull().default(0),
   featureFlags: jsonb("feature_flags").$type<CompanyFeatureFlags>().notNull().default(defaultFeatureFlags),
+  // Nullable, no default plan assignment — deliberately. Every company
+  // that exists today (and every company self-registering right now, via
+  // routes/auth.ts's /register) gets planId = null, meaning "no plan
+  // assigned" = unlimited (see lib/entitlements.ts's fail-open precedent
+  // for missing plan data). Auto-assigning a "free"/"starter" plan on
+  // registration would be inventing a monetization/onboarding business
+  // rule that has not been decided — a platform operator assigns a plan
+  // explicitly via routes/platformPlans.ts when that decision is made.
+  planId: uuid("plan_id").references(() => plans.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

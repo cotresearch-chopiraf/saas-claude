@@ -52,6 +52,7 @@ import { platformSupportSessionsRouter } from "./routes/platformSupportSessions.
 import { platformAuditEventsRouter } from "./routes/platformAuditEvents.js";
 import { featureFlagsRouter } from "./routes/featureFlags.js";
 import { platformFeatureFlagsRouter } from "./routes/platformFeatureFlags.js";
+import { platformPlansRouter } from "./routes/platformPlans.js";
 import { clientPortalUsersRouter } from "./routes/clientPortalUsers.js";
 import { clientPortalAuthRouter } from "./routes/clientPortalAuth.js";
 import { clientPortalProjectsRouter } from "./routes/clientPortalProjects.js";
@@ -219,6 +220,10 @@ export function buildApp() {
   // feature-flag registry and per-company overrides. See
   // routes/platformFeatureFlags.ts.
   app.use("/api/platform/feature-flags", platformAuth, platformFeatureFlagsRouter);
+  // P0 hardening (Final Pre-Launch audit) — platform-admin CRUD over the
+  // plan registry and per-company plan assignment. See
+  // routes/platformPlans.ts.
+  app.use("/api/platform/plans", platformAuth, platformPlansRouter);
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   app.use((err: Error, req: express.Request, res: express.Response, _next: express.NextFunction) => {
