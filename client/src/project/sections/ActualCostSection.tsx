@@ -108,21 +108,39 @@ function ExpenseForm({
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  // E1 pre-launch hardening — unlike NewInvoiceForm/IpcSection's certify
+  // form (which unmount/remount per attempt, so a lazy useState(() =>
+  // crypto.randomUUID()) initializer alone is enough), this form is
+  // permanently mounted on the page and only clears its fields on success
+  // — it never remounts. A key generated once via a lazy initializer would
+  // therefore never change again, silently colliding every later,
+  // genuinely new expense with the first one's key. So the key is instead
+  // advanced explicitly, exactly once, right after a successful submission
+  // (below) — never on failure, so a retry of a failed/timed-out attempt
+  // with the same still-visible field values reuses the identical key and
+  // stays protected by the server's idempotency guard.
+  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID());
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
     setSubmitting(true);
     try {
-      await createExpense(projectId, {
-        description,
-        amount: Number(amount),
-        expenseDate,
-        budgetItemId: budgetItemId || undefined,
-      });
+      await createExpense(
+        projectId,
+        {
+          description,
+          amount: Number(amount),
+          expenseDate,
+          budgetItemId: budgetItemId || undefined,
+        },
+        idempotencyKey,
+      );
       setDescription("");
       setAmount("");
       setExpenseDate("");
       setBudgetItemId("");
+      setIdempotencyKey(crypto.randomUUID());
       onSaved();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("actualCost.form.genericError"));

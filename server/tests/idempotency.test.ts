@@ -377,4 +377,29 @@ describe("Idempotency: expense creation", () => {
     expect(second.status).toBe(201);
     expect(first.body.id).not.toBe(second.body.id);
   });
+
+  // E1 — the expense.create path shares withIdempotency() with
+  // invoice/quote creation above, but conflicting-payload behavior had
+  // never been exercised for expenses specifically until now. This proves
+  // the existing semantics (same key + materially different payload → a
+  // deterministic 409, never a silent replay of the wrong expense) already
+  // hold for expenses too — nothing about withIdempotency() itself changes
+  // here.
+  it("same key reused with a materially different payload returns a deterministic 409, not a silent replay", async () => {
+    const projectId = await createProject(tokenA);
+    const key = "expense-conflict-1";
+    const first = await request(app)
+      .post(`/api/projects/${projectId}/budget/expenses`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .set("Idempotency-Key", key)
+      .send(expensePayload({ description: "Original expense" }));
+    expect(first.status).toBe(201);
+
+    const conflict = await request(app)
+      .post(`/api/projects/${projectId}/budget/expenses`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .set("Idempotency-Key", key)
+      .send(expensePayload({ description: "Different expense" }));
+    expect(conflict.status).toBe(409);
+  });
 });

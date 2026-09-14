@@ -48,10 +48,17 @@ export interface ExpenseInput {
   budgetItemId?: string;
 }
 
-export function createExpense(projectId: string, input: ExpenseInput): Promise<Expense> {
+// E1 pre-launch hardening — idempotencyKey is optional (matching the
+// server's own opt-in design in lib/idempotency.ts), same convention as
+// createInvoice()/certifyIpc() above their own routes. The caller
+// (ActualCostSection's ExpenseForm) owns the key's lifetime — this
+// function only forwards whatever it is given as the Idempotency-Key
+// header, exactly as the server already expects.
+export function createExpense(projectId: string, input: ExpenseInput, idempotencyKey?: string): Promise<Expense> {
   return apiFetch<Expense>(`/projects/${projectId}/budget/expenses`, {
     method: "POST",
     body: JSON.stringify(input),
+    headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined,
   });
 }
 
