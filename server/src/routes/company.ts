@@ -5,6 +5,7 @@ import { db } from "../db/client.js";
 import { companies, companyInvites, defaultFeatureFlags, users, type CompanyFeatureFlags } from "../db/schema.js";
 import { generateToken, hashToken } from "../lib/tokens.js";
 import { sendMail } from "../lib/mailer.js";
+import { buildAppUrl } from "../lib/appUrl.js";
 import { handleLogoUpload } from "../lib/uploads.js";
 import { requirePermission } from "../lib/permissions.js";
 import { recordAuditEvent } from "../lib/audit.js";
@@ -289,7 +290,7 @@ companyRouter.post("/invites", requireOwner, async (req, res) => {
     await sendMail(
       parsed.data.email,
       "دعوة للانضمام إلى فريقك على نظام تشغيل المقاولين",
-      `رابط قبول الدعوة (صالح 7 أيام): /accept-invite?token=${token}`,
+      `رابط قبول الدعوة (صالح 7 أيام): ${buildAppUrl(`/accept-invite?token=${encodeURIComponent(token)}`)}`,
     );
   } catch {
     emailDelivered = false;

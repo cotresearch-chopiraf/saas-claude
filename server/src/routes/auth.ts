@@ -9,6 +9,7 @@ import { requireAuth } from "../middleware/auth.js";
 import { authRateLimit } from "../middleware/rateLimit.js";
 import { generateToken, hashToken } from "../lib/tokens.js";
 import { sendMail } from "../lib/mailer.js";
+import { buildAppUrl } from "../lib/appUrl.js";
 import { logger } from "../lib/logger.js";
 import { pgErrorInfo } from "../lib/pgError.js";
 import { recordAuditEvent } from "../lib/audit.js";
@@ -201,7 +202,7 @@ authRouter.post("/request-password-reset", async (req, res) => {
       await sendMail(
         user.email,
         "إعادة تعيين كلمة المرور",
-        `رابط إعادة التعيين (صالح لساعة واحدة): /reset-password?token=${token}`,
+        `رابط إعادة التعيين (صالح لساعة واحدة): ${buildAppUrl(`/reset-password?token=${encodeURIComponent(token)}`)}`,
       );
     } catch {
       logger.error("password_reset_email_failed", { userId: user.id });
