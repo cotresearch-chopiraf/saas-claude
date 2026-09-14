@@ -14,6 +14,12 @@ import { assertWithinLimit, countActiveUsers, LimitExceededError } from "../lib/
 
 export const companyRouter = Router();
 
+// Wave 1E fix: thrown when the FOR UPDATE-locked re-check inside the
+// transaction below finds that this change would still leave zero active
+// owners — meaning a concurrent request already removed the other one.
+// Distinct from a plain Error so the route can map it to 409 rather than 500.
+class LastOwnerConflictError extends Error {}
+
 // Only the company owner can invite teammates or see pending invites.
 // Backed by the shared permission matrix (lib/permissions.ts) rather than a
 // standalone check, so this stays in sync with every other owner-only gate.
@@ -140,6 +146,10 @@ companyRouter.patch("/members/:id", requireOwner, async (req: Request<{ id: stri
       (parsed.data.status !== undefined && parsed.data.status !== "active"));
 
   if (removesActiveOwner) {
+    // Fast-path only — a plain read taken before the transaction opens, so
+    // a concurrent request racing this one can still slip past it (see the
+    // authoritative, lock-based re-check inside the transaction below,
+    // which is what actually closes the race).
     const otherActiveOwners = await db.query.users.findMany({
       where: and(
         eq(users.companyId, req.companyId!),
@@ -154,42 +164,72 @@ companyRouter.patch("/members/:id", requireOwner, async (req: Request<{ id: stri
     }
   }
 
-  const updated = await db.transaction(async (tx) => {
-    const [row] = await tx.update(users).set(parsed.data).where(eq(users.id, existing.id)).returning();
+  let updated;
+  try {
+    updated = await db.transaction(async (tx) => {
+      // Wave 1E fix: locks every currently active-owner row for this
+      // company (not just `existing`'s own row) before re-checking the
+      // invariant. Two concurrent requests demoting/deactivating two
+      // DIFFERENT owners target two different `users` rows, so a lock on
+      // `existing.id` alone would never make them wait on each other —
+      // locking the whole active-owner set is what forces the second
+      // transaction to block until the first commits, then see the
+      // now-current (post-commit) owner count rather than the stale
+      // pre-transaction read. Same FOR UPDATE-before-checking discipline
+      // as projects.ts's delete route.
+      if (removesActiveOwner) {
+        const lockedOwners = await tx
+          .select({ id: users.id })
+          .from(users)
+          .where(and(eq(users.companyId, req.companyId!), eq(users.role, "owner"), eq(users.status, "active")))
+          .for("update");
+        const stillHasOtherOwner = lockedOwners.some((o) => o.id !== existing.id);
+        if (!stillHasOtherOwner) {
+          throw new LastOwnerConflictError();
+        }
+      }
 
-    if (parsed.data.role !== undefined && parsed.data.role !== existing.role) {
-      await recordAuditEvent(tx, {
-        companyId: req.companyId!,
-        actorUserId: req.userId!,
-        action: "user.roleChanged",
-        entityType: "user",
-        entityId: existing.id,
-        beforeValue: { role: existing.role },
-        afterValue: { role: row.role },
-      });
-    }
-    if (parsed.data.status !== undefined && parsed.data.status !== existing.status) {
-      await recordAuditEvent(tx, {
-        companyId: req.companyId!,
-        actorUserId: req.userId!,
-        action: "user.statusChanged",
-        entityType: "user",
-        entityId: existing.id,
-        beforeValue: { status: existing.status },
-        afterValue: { status: row.status },
-      });
-      if (row.status === "deactivated") {
-        logger.warn("destructive_mutation", {
-          action: "user.deactivate",
-          actorUserId: req.userId,
-          companyId: req.companyId,
-          targetUserId: existing.id,
+      const [row] = await tx.update(users).set(parsed.data).where(eq(users.id, existing.id)).returning();
+
+      if (parsed.data.role !== undefined && parsed.data.role !== existing.role) {
+        await recordAuditEvent(tx, {
+          companyId: req.companyId!,
+          actorUserId: req.userId!,
+          action: "user.roleChanged",
+          entityType: "user",
+          entityId: existing.id,
+          beforeValue: { role: existing.role },
+          afterValue: { role: row.role },
         });
       }
-    }
+      if (parsed.data.status !== undefined && parsed.data.status !== existing.status) {
+        await recordAuditEvent(tx, {
+          companyId: req.companyId!,
+          actorUserId: req.userId!,
+          action: "user.statusChanged",
+          entityType: "user",
+          entityId: existing.id,
+          beforeValue: { status: existing.status },
+          afterValue: { status: row.status },
+        });
+        if (row.status === "deactivated") {
+          logger.warn("destructive_mutation", {
+            action: "user.deactivate",
+            actorUserId: req.userId,
+            companyId: req.companyId,
+            targetUserId: existing.id,
+          });
+        }
+      }
 
-    return row;
-  });
+      return row;
+    });
+  } catch (err) {
+    if (err instanceof LastOwnerConflictError) {
+      return res.status(409).json({ error: "لا يمكن أن تبقى الشركة بدون مالك واحد نشط على الأقل" });
+    }
+    throw err;
+  }
 
   res.json({ id: updated.id, name: updated.name, email: updated.email, role: updated.role, status: updated.status, createdAt: updated.createdAt });
 });

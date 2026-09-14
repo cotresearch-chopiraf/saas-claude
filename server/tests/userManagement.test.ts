@@ -232,3 +232,65 @@ describe("User Account Completeness (Phase A)", () => {
     expect(meRes.body[0].status).toBe("active");
   });
 });
+
+// Red-Team Remediation Wave 1E (W1E-001) — the last-active-owner invariant
+// (test 11/12 above) was previously enforced by a plain read taken BEFORE
+// the transaction opened, with an unconditional UPDATE inside it. Two
+// owners in a 2-owner company could each demote the OTHER at the same
+// time: both requests' pre-transaction reads see the other owner as still
+// active, both pass, and both commit, leaving zero active owners (an
+// unrecoverable state through this API). This test proves the fix (a FOR
+// UPDATE-locked re-check of the whole active-owner set inside the
+// transaction) actually closes that race under genuine concurrent
+// execution — each request authenticates as its OWN owner and targets the
+// other, so neither request's own permission check is entangled with the
+// other's outcome (unlike a self-demotion scenario, where the loser's
+// requirePermission re-check could itself flip to 403 depending on
+// commit-order timing — this design keeps the assertion deterministic).
+describe("User Account Completeness (Phase A): last-owner concurrency (Wave 1E fix)", () => {
+  it("two owners concurrently demoting each other: exactly one succeeds, at least one owner remains, no partial state", async () => {
+    const ownerRes = await request(app)
+      .post("/api/auth/register")
+      .send({ companyName: "Race Co", name: "Owner Race A", email: uniqueEmail("um-race-a"), password: "password123" });
+    expect(ownerRes.status).toBe(201);
+    const ownerAToken = ownerRes.body.token as string;
+    const ownerAId = ownerRes.body.user.id as string;
+
+    const { token: ownerBToken, userId: ownerBId } = await inviteAndAccept(ownerAToken, "owner", "um-race-b");
+
+    // A demotes B (authenticated as A) and B demotes A (authenticated as
+    // B) — fired concurrently via Promise.all, not sequentially.
+    const [aDemotesB, bDemotesA] = await Promise.all([
+      patchMember(ownerBId, { role: "member" }, ownerAToken),
+      patchMember(ownerAId, { role: "member" }, ownerBToken),
+    ]);
+
+    // Exactly one of the two competing requests succeeds. The loser's
+    // status code depends on exactly when its own requirePermission check
+    // runs relative to the winner's commit: if the winner has already
+    // committed by then, the loser (whose own role the winner just
+    // changed) is rejected at the permission gate itself (403) rather than
+    // reaching the invariant check (409) — both are correct "did not
+    // silently succeed" outcomes for this same underlying race; only the
+    // "exactly one success, and the company still has an owner" invariant
+    // below is what this test is actually proving.
+    const statuses = [aDemotesB.status, bDemotesA.status];
+    expect(statuses.filter((s) => s === 200)).toHaveLength(1);
+    expect(statuses.filter((s) => s === 409 || s === 403)).toHaveLength(1);
+
+    const members = await listMembers(ownerAToken);
+    expect(members.status).toBe(200);
+    const activeOwners = members.body.filter((m: { role: string; status: string }) => m.role === "owner" && m.status === "active");
+    // At least one active owner remains — never zero.
+    expect(activeOwners.length).toBeGreaterThanOrEqual(1);
+
+    // No partially-applied state: the winning demotion actually took
+    // effect (exactly one of A/B is now "member"), and the loser is
+    // completely unchanged from its pre-race state (still "owner") — never
+    // left in some intermediate state by the rolled-back transaction.
+    const aRow = members.body.find((m: { id: string }) => m.id === ownerAId);
+    const bRow = members.body.find((m: { id: string }) => m.id === ownerBId);
+    const roles = [aRow.role, bRow.role].sort();
+    expect(roles).toEqual(["member", "owner"]);
+  });
+});

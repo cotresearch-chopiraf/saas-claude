@@ -187,7 +187,16 @@ quotesRouter.patch("/:id/send", requirePermission("quote.send"), async (req: Req
   if (!quote) return res.status(404).json({ error: "عرض السعر غير موجود" });
   if (quote.status !== "draft") return res.status(409).json({ error: "تم إرسال عرض السعر مسبقاً" });
 
-  const [updated] = await db.update(quotes).set({ status: "sent" }).where(eq(quotes.id, quote.id)).returning();
+  // Wave 1E fix: the status check above is a fast-path only — the WHERE
+  // clause itself is what actually closes the race between two concurrent
+  // sends, the same conditional-UPDATE pattern already used by invoices.ts's
+  // /send and by this file's own accept/reject routes below.
+  const [updated] = await db
+    .update(quotes)
+    .set({ status: "sent" })
+    .where(and(eq(quotes.id, quote.id), eq(quotes.status, "draft")))
+    .returning();
+  if (!updated) return res.status(409).json({ error: "تم إرسال عرض السعر مسبقاً" });
   await recordAuditEvent(db, {
     companyId: req.companyId!,
     actorUserId: req.userId!,
@@ -201,12 +210,41 @@ quotesRouter.patch("/:id/send", requirePermission("quote.send"), async (req: Req
   res.json(updated);
 });
 
-quotesRouter.delete("/:id", async (req: Request<{ id: string }>, res: Response) => {
+// Wave 1E fix: previously ungated (any authenticated member could delete
+// any draft quote) and racy (a stale "still draft" read followed by an
+// unconditional delete could remove a quote a concurrent /send had just
+// transitioned to "sent"). Gated by quote.send — the only quote-specific
+// permission that exists; deleting a quote is at least as sensitive as
+// sending one and is only ever reachable pre-send, so this is the correct
+// existing permission to reuse rather than inventing a new one. Race-safety
+// and the audit event both mirror changeOrders.ts's own delete route
+// exactly: lock the row FOR UPDATE, re-check its status under that lock,
+// delete conditionally, and record the deletion — the established pattern
+// for every other destructive mutation in this codebase.
+quotesRouter.delete("/:id", requirePermission("quote.send"), async (req: Request<{ id: string }>, res: Response) => {
   const quote = await findOwnedQuote(req.companyId!, req.params.id);
   if (!quote) return res.status(404).json({ error: "عرض السعر غير موجود" });
   if (quote.status !== "draft") return res.status(409).json({ error: "لا يمكن حذف عرض سعر تم إرساله" });
 
-  await db.delete(quotes).where(eq(quotes.id, quote.id));
+  const deleted = await db.transaction(async (tx) => {
+    const [locked] = await tx.select().from(quotes).where(eq(quotes.id, quote.id)).for("update");
+    if (!locked || locked.status !== "draft") return null;
+
+    await tx.delete(quotes).where(and(eq(quotes.id, quote.id), eq(quotes.status, "draft")));
+
+    await recordAuditEvent(tx, {
+      companyId: req.companyId!,
+      actorUserId: req.userId!,
+      action: "quote.deleted",
+      entityType: "quote",
+      entityId: locked.id,
+      beforeValue: locked,
+    });
+
+    return locked;
+  });
+
+  if (!deleted) return res.status(409).json({ error: "لا يمكن حذف عرض سعر تم إرساله" });
   res.status(204).end();
 });
 

@@ -376,7 +376,19 @@ invoicesRouter.patch("/:id/send", requirePermission("invoice.send"), async (req:
   if (!invoice) return res.status(404).json({ error: "الفاتورة غير موجودة" });
   if (invoice.status !== "draft") return res.status(409).json({ error: "تم إرسال الفاتورة مسبقاً" });
 
-  const [updated] = await db.update(invoices).set({ status: "sent" }).where(eq(invoices.id, invoice.id)).returning();
+  // Wave 1E fix: the status check above is a fast-path only — the earlier
+  // findOwnedInvoice read alone was a read-then-write race (two concurrent
+  // sends could both pass it before either write executed). The WHERE
+  // clause itself is what actually closes the race: only the request whose
+  // UPDATE still finds status='draft' at the moment it runs can succeed,
+  // the same conditional-UPDATE pattern already used by mark-paid
+  // immediately below and by quotes.ts's accept/reject.
+  const [updated] = await db
+    .update(invoices)
+    .set({ status: "sent" })
+    .where(and(eq(invoices.id, invoice.id), eq(invoices.status, "draft")))
+    .returning();
+  if (!updated) return res.status(409).json({ error: "تم إرسال الفاتورة مسبقاً" });
   await recordAuditEvent(db, {
     companyId: req.companyId!,
     actorUserId: req.userId!,
