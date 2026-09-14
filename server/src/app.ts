@@ -4,6 +4,7 @@
 // malformed request, e.g. a non-UUID :id hitting Postgres, used to take the
 // entire server down for every concurrent user).
 import "express-async-errors";
+import path from "node:path";
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
@@ -84,12 +85,24 @@ export function buildApp() {
   app.use(requestIdMiddleware);
   app.use(errorEnvelopeMiddleware);
   app.use(requestLogMiddleware);
-  // Production launch hardening — no CSP: this server never serves HTML (it
-  // is a pure JSON API plus PDF/logo binary responses), so a document-level
-  // policy like CSP has nothing to apply to and forcing one on would be
-  // exactly the kind of blind policy this hardening pass was told not to
-  // add. Every other Helmet default (X-Content-Type-Options, Referrer-Policy,
-  // frameguard, etc.) is safe here and left on.
+  // A1 remediation — this server now DOES serve HTML (the built React SPA,
+  // below), so the prior "never serves HTML" rationale for leaving CSP off
+  // no longer holds. Still deliberately left off here rather than enabled
+  // as a side effect of this deployment-topology change: the built client
+  // (client/dist/index.html) is clean by inspection — one same-origin
+  // <script type="module"> + one same-origin stylesheet <link>, no inline
+  // script/style, no external CDN or font host referenced anywhere in the
+  // client source — so a minimal `default-src 'self'` policy (plus
+  // `img-src 'self' data:` for any client-side data-URI image preview) is
+  // very likely safe. "Very likely" from a static read is not the same bar
+  // as verifying every page/flow actually renders correctly under an
+  // enforced policy in a real browser, which is real, separate,
+  // dedicated verification work — deliberately out of scope for this
+  // change. Recommendation for that future task: start with
+  // `{ directives: { defaultSrc: ["'self'"], imgSrc: ["'self'", "data:"] } }`
+  // and widen only if a real browser check finds a legitimate blocked
+  // resource. Every other Helmet default (X-Content-Type-Options,
+  // Referrer-Policy, frameguard, etc.) is unaffected and stays on.
   app.use(helmet({ contentSecurityPolicy: false }));
   // CORS_ORIGIN is unset by default (local dev, CI, and every existing test
   // never set it), so outside production this is cors(undefined) —
@@ -254,6 +267,32 @@ export function buildApp() {
   // MIDAD Final Pre-Launch audit, Phase 17 — Sale/Handover Center. See
   // routes/platformHandover.ts.
   app.use("/api/platform/handover", platformAuth, platformHandoverRouter);
+
+  // A1 remediation — single-origin frontend serving. Registered AFTER every
+  // /api/* mount and /uploads above (Express matches middleware in
+  // registration order, so a real API/upload request is always satisfied by
+  // its own route first and never reaches this point). clientDistDir is
+  // resolved the same process.cwd()-relative way lib/storage/localDiskProvider.ts
+  // already resolves uploadsDir — WORKDIR is the server/ directory both in
+  // local dev (npm workspaces sets cwd to the workspace root) and in the
+  // Docker runtime image (WORKDIR /app/server), so "../client/dist"
+  // consistently means the client build directory copied alongside it.
+  const clientDistDir = path.resolve(process.cwd(), "../client/dist");
+  app.use(express.static(clientDistDir));
+
+  // BrowserRouter (client/src/main.tsx) needs a real HTTP 200 + index.html
+  // for a direct GET to any client-side route (a deep link, a bookmark, or
+  // a page refresh on e.g. /projects/:id/boq) — without this, such a
+  // request 404s before React Router ever loads, since no server route
+  // matches that literal path. Deliberately not a bare app.get("*", ...):
+  // the negative-lookahead regex excludes any path starting with "/api/"
+  // or "/api" (exact) and "/uploads/" or "/uploads" (exact) — a request to
+  // an *unmatched* API route must still fall through to the ordinary
+  // Express 404 (and this app's own global error handler below), never
+  // silently receive the SPA shell instead.
+  app.get(/^\/(?!(api|uploads)(\/|$)).*/, (_req, res) => {
+    res.sendFile(path.join(clientDistDir, "index.html"));
+  });
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   app.use((err: Error, req: express.Request, res: express.Response, _next: express.NextFunction) => {

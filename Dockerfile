@@ -1,9 +1,12 @@
-# Slice Z — production image for the server (API) only. The client is a
-# static Vite build (client/dist/) meant to be served separately (a static
-# host / CDN) — this image does not serve it, matching how CORS_ORIGIN /
-# corsOrigins.ts already assumes a split-origin deployment. Multi-stage:
-# the build stage has full devDependencies + TypeScript; the runtime stage
-# keeps only production dependencies and the compiled output.
+# A1 remediation — single-origin production image: the same Express process
+# serves the API (/api/*), /uploads, and the built React SPA (everything
+# else), so the client's own relative fetch("/api/...") calls resolve
+# correctly with no reverse proxy, CDN rewrite, or separate frontend host
+# involved (see app.ts's static/SPA-fallback wiring). Multi-stage: the build
+# stage has full devDependencies + TypeScript for both workspaces; the
+# runtime stage keeps only production server dependencies plus the two
+# compiled/built outputs (server/dist, client/dist) — no client source, no
+# devDependencies, no node_modules from the client workspace.
 
 # ---- build stage ----
 FROM node:22-bookworm-slim AS build
@@ -21,9 +24,13 @@ RUN npm ci
 COPY server server
 COPY client client
 
-# Only the server needs to be compiled for this image — the client build is
-# a separate deployment artifact (see file header comment above).
+# Both workspaces are built for this image now — the server compiles to
+# server/dist (tsc), and the client compiles to client/dist (tsc --noEmit +
+# vite build), the same production build each already used before this
+# change. Reuses the existing package scripts unchanged; no new build step
+# was invented.
 RUN npm run build --workspace server
+RUN npm run build --workspace client
 
 # ---- production runtime stage ----
 FROM node:22-bookworm-slim AS runtime
@@ -49,6 +56,14 @@ RUN npx playwright install --with-deps chromium
 # at runtime (drizzle-orm's migrator does not read from compiled dist/).
 COPY --from=build /app/server/dist server/dist
 COPY server/drizzle server/drizzle
+
+# A1 remediation — the built client (static index.html + JS/CSS assets
+# only, no source, no node_modules) as a sibling of server/, matching
+# app.ts's own process.cwd()-relative resolution (path.resolve(process.cwd(),
+# "../client/dist"), the same convention lib/storage/localDiskProvider.ts
+# already uses for uploadsDir) — WORKDIR is /app/server at runtime (below),
+# so process.cwd() + "../client/dist" resolves to exactly this path.
+COPY --from=build /app/client/dist client/dist
 
 # Run as a non-root user, not the image's default root.
 RUN addgroup --system app \
