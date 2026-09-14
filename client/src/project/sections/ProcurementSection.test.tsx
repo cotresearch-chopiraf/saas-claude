@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { AuthProvider } from "../../auth/AuthContext";
 import { I18nProvider } from "../../i18n/I18nProvider";
@@ -270,5 +270,135 @@ describe("<ProcurementSection/>", () => {
     // No submit call has actually been made yet — only the confirmation
     // dialog opened, never an eager call on click.
     expect(apiFetch).not.toHaveBeenCalledWith(expect.stringContaining("/submit"), expect.anything());
+  });
+});
+
+// E2 (production-readiness remediation) — proves the client actually sends
+// the Idempotency-Key header the server now supports for commitment
+// creation (server/src/routes/commitments.ts, lib/idempotency.ts), and
+// that the key's lifetime matches E1/invoice's exact requirement:
+// identical across a retry of the same logical submission, different for a
+// genuinely new one. CommitmentCreateForm unmounts on success (onCreated
+// closes it) exactly like NewInvoiceForm, so this mirrors
+// InvoicesSection.test.tsx's "create-invoice Idempotency-Key wiring" block.
+describe("<ProcurementSection/> — create-commitment Idempotency-Key wiring", () => {
+  beforeEach(() => {
+    vi.mocked(apiFetch).mockClear();
+  });
+
+  const newCommitmentFixture = makeCommitment({ id: "c-new", commitmentNumber: 1 });
+
+  function openCreateForm() {
+    fireEvent.click(screen.getByText("+ التزام جديد"));
+  }
+
+  function submit() {
+    fireEvent.click(screen.getByText("إنشاء الالتزام"));
+  }
+
+  function postCommitmentCalls() {
+    return vi
+      .mocked(apiFetch)
+      .mock.calls.filter((c) => c[0] === "/projects/p1/commitments" && (c[1] as RequestInit | undefined)?.method === "POST");
+  }
+
+  it("sends a real Idempotency-Key header on a normal commitment creation", async () => {
+    vi.mocked(apiFetch).mockImplementation((path: unknown, reqOpts?: RequestInit) => {
+      const p = String(path);
+      const method = reqOpts?.method ?? "GET";
+      if (p === "/auth/me") return Promise.resolve({ user: { id: "u1", name: "Test", email: "t@test.com", role: "owner" }, company: { id: "c1", name: "Test Co" } });
+      if (p === "/projects/p1/commitments" && method === "GET") return Promise.resolve([]);
+      if (p === "/suppliers") return Promise.resolve([fixtureSupplier]);
+      if (p === "/projects/p1/contracts") return Promise.resolve([]);
+      if (p === "/cost-codes?projectId=p1") return Promise.resolve([]);
+      if (p === "/projects/p1/boq-revisions") return Promise.resolve([]);
+      if (p === "/projects/p1/commitments" && method === "POST") return Promise.resolve(newCommitmentFixture);
+      return Promise.reject(new Error(`unexpected apiFetch call in test: ${p} ${method}`));
+    });
+    renderSection();
+    await waitFor(() => expect(screen.getByText("+ التزام جديد")).toBeInTheDocument());
+
+    openCreateForm();
+    await waitFor(() => expect(screen.getByText("إنشاء الالتزام")).toBeInTheDocument());
+    submit();
+    await waitFor(() => expect(postCommitmentCalls()).toHaveLength(1));
+
+    const headers = (postCommitmentCalls()[0][1] as RequestInit).headers as Record<string, string>;
+    expect(headers["Idempotency-Key"]).toBeTruthy();
+    expect(headers["Idempotency-Key"]).toMatch(/^[0-9a-f-]{36}$/i);
+  });
+
+  it("a retry after a failed submission on the SAME open form reuses the identical key", async () => {
+    let firstAttempt = true;
+    vi.mocked(apiFetch).mockImplementation((path: unknown, reqOpts?: RequestInit) => {
+      const p = String(path);
+      const method = reqOpts?.method ?? "GET";
+      if (p === "/auth/me") return Promise.resolve({ user: { id: "u1", name: "Test", email: "t@test.com", role: "owner" }, company: { id: "c1", name: "Test Co" } });
+      if (p === "/projects/p1/commitments" && method === "GET") return Promise.resolve([]);
+      if (p === "/suppliers") return Promise.resolve([fixtureSupplier]);
+      if (p === "/projects/p1/contracts") return Promise.resolve([]);
+      if (p === "/cost-codes?projectId=p1") return Promise.resolve([]);
+      if (p === "/projects/p1/boq-revisions") return Promise.resolve([]);
+      if (p === "/projects/p1/commitments" && method === "POST") {
+        if (firstAttempt) {
+          firstAttempt = false;
+          return Promise.reject(new Error("انقطع الاتصال"));
+        }
+        return Promise.resolve(newCommitmentFixture);
+      }
+      return Promise.reject(new Error(`unexpected apiFetch call in test: ${p} ${method}`));
+    });
+    renderSection();
+    await waitFor(() => expect(screen.getByText("+ التزام جديد")).toBeInTheDocument());
+
+    openCreateForm();
+    await waitFor(() => expect(screen.getByText("إنشاء الالتزام")).toBeInTheDocument());
+
+    // First attempt fails (simulating a lost response / network error) —
+    // the form stays open (onCreated is never called on failure).
+    submit();
+    await waitFor(() => expect(postCommitmentCalls()).toHaveLength(1));
+
+    // Retry on the SAME still-open form.
+    submit();
+    await waitFor(() => expect(postCommitmentCalls()).toHaveLength(2));
+
+    const keyAttempt1 = ((postCommitmentCalls()[0][1] as RequestInit).headers as Record<string, string>)["Idempotency-Key"];
+    const keyAttempt2 = ((postCommitmentCalls()[1][1] as RequestInit).headers as Record<string, string>)["Idempotency-Key"];
+    expect(keyAttempt1).toBe(keyAttempt2);
+  });
+
+  it("a genuinely new commitment (form closed and reopened) gets a different key from the previous submission", async () => {
+    vi.mocked(apiFetch).mockImplementation((path: unknown, reqOpts?: RequestInit) => {
+      const p = String(path);
+      const method = reqOpts?.method ?? "GET";
+      if (p === "/auth/me") return Promise.resolve({ user: { id: "u1", name: "Test", email: "t@test.com", role: "owner" }, company: { id: "c1", name: "Test Co" } });
+      if (p === "/projects/p1/commitments" && method === "GET") return Promise.resolve([]);
+      if (p === "/suppliers") return Promise.resolve([fixtureSupplier]);
+      if (p === "/projects/p1/contracts") return Promise.resolve([]);
+      if (p === "/cost-codes?projectId=p1") return Promise.resolve([]);
+      if (p === "/projects/p1/boq-revisions") return Promise.resolve([]);
+      if (p === "/projects/p1/commitments" && method === "POST") return Promise.resolve(newCommitmentFixture);
+      return Promise.reject(new Error(`unexpected apiFetch call in test: ${p} ${method}`));
+    });
+    renderSection();
+    await waitFor(() => expect(screen.getByText("+ التزام جديد")).toBeInTheDocument());
+
+    // First commitment: open, submit successfully — onCreated() closes the form.
+    openCreateForm();
+    await waitFor(() => expect(screen.getByText("إنشاء الالتزام")).toBeInTheDocument());
+    submit();
+    await waitFor(() => expect(postCommitmentCalls()).toHaveLength(1));
+    await waitFor(() => expect(screen.queryByText("إنشاء الالتزام")).not.toBeInTheDocument());
+
+    // Second, genuinely separate commitment: reopen the (now unmounted) form.
+    openCreateForm();
+    await waitFor(() => expect(screen.getByText("إنشاء الالتزام")).toBeInTheDocument());
+    submit();
+    await waitFor(() => expect(postCommitmentCalls()).toHaveLength(2));
+
+    const keyFirstCommitment = ((postCommitmentCalls()[0][1] as RequestInit).headers as Record<string, string>)["Idempotency-Key"];
+    const keySecondCommitment = ((postCommitmentCalls()[1][1] as RequestInit).headers as Record<string, string>)["Idempotency-Key"];
+    expect(keyFirstCommitment).not.toBe(keySecondCommitment);
   });
 });

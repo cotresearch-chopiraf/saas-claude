@@ -15,6 +15,7 @@ import {
 import { requirePermission } from "../lib/permissions.js";
 import { recordAuditEvent } from "../lib/audit.js";
 import { roundMoney, roundQuantity, sumMoney } from "../lib/money.js";
+import { withIdempotency, IdempotencyConflictError } from "../lib/idempotency.js";
 import { CONTRACT_EXECUTION_BLOCKED_STATUSES } from "./contracts.js";
 
 type ProjectParams = { projectId: string };
@@ -61,12 +62,88 @@ const createSchema = z.object({
   retentionPercent: retentionPercentSchema,
 });
 
+type CommitmentCreateRow = { id: string; commitment_number: number; status: string; created_at: string };
+
+// E2 hardening — factored out of the route handler so both the idempotent
+// path (wrapped in withIdempotency below) and the plain non-idempotent path
+// can share the exact same validation/insert/audit logic without
+// duplication, same shape as budget.ts's createExpense(). Business logic
+// (reference validation, number claiming, insert, audit event) is
+// completely unchanged from before E2.
+//
 // commitmentNumber is claimed via an INSERT ... SELECT MAX+1 subquery,
 // inside a transaction that locks the parent company row FOR UPDATE first
 // (see docs/MIDAD_CONCURRENCY_HARDENING.md) — scoped per company (not per
 // project), matching how invoice/quote numbers are company-wide
 // sequences. Two concurrent "create a commitment" requests for this
 // company can never be handed the same number.
+async function createCommitment(
+  companyId: string,
+  actorUserId: string,
+  projectId: string,
+  data: z.infer<typeof createSchema>,
+): Promise<{ error: string; status: number } | { commitment: CommitmentCreateRow }> {
+  // Neither reference is trusted as-is: a supplier must belong to this
+  // company, and a contract (if given) must belong to this project — never
+  // assumed safe merely because the ID exists.
+  const supplier = await db.query.suppliers.findFirst({
+    where: and(eq(suppliers.id, data.supplierId), eq(suppliers.companyId, companyId)),
+  });
+  if (!supplier) return { error: "المورد غير موجود", status: 404 };
+
+  if (data.contractId) {
+    const contract = await db.query.contracts.findFirst({
+      where: and(eq(contracts.id, data.contractId), eq(contracts.projectId, projectId)),
+    });
+    if (!contract) return { error: "العقد غير موجود", status: 404 };
+    // Phase 3.2 remediation (CTR-001) — a contract that is completed or
+    // terminated must not accept new execution activity.
+    if (CONTRACT_EXECUTION_BLOCKED_STATUSES.includes(contract.status)) {
+      return { error: "لا يمكن إنشاء التزام مرتبط بعقد منتهٍ أو ملغى", status: 409 };
+    }
+  }
+
+  // The MAX+1 subquery alone is not race-safe: two concurrent INSERTs can
+  // each read the same prior MAX before either commits. Locking the parent
+  // company row (companyId is always the caller's own authenticated
+  // company, never an untrusted input) for the duration of the transaction
+  // serializes concurrent commitment creation for this company — same fix
+  // already proven for IPC numbering (routes/ipcs.ts).
+  const commitment = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT id FROM companies WHERE id = ${companyId} FOR UPDATE`);
+    const result = await tx.execute<CommitmentCreateRow>(sql`
+      INSERT INTO commitments (company_id, project_id, contract_id, supplier_id, type, status, commitment_number, description, currency, retention_percent, created_by)
+      VALUES (
+        ${companyId},
+        ${projectId},
+        ${data.contractId ?? null},
+        ${data.supplierId},
+        ${data.type},
+        'draft',
+        (SELECT COALESCE(MAX(commitment_number), 0) + 1 FROM commitments WHERE company_id = ${companyId}),
+        ${data.description ?? null},
+        ${data.currency ?? "SAR"},
+        ${data.retentionPercent ?? null},
+        ${actorUserId}
+      )
+      RETURNING id, commitment_number, status, created_at
+    `);
+    return result.rows[0];
+  });
+
+  await recordAuditEvent(db, {
+    companyId,
+    actorUserId,
+    action: "commitment.created",
+    entityType: "commitment",
+    entityId: commitment.id,
+    afterValue: commitment,
+    metadata: { supplierId: data.supplierId, type: data.type },
+  });
+
+  return { commitment };
+}
+
 commitmentsRouter.post(
   "/",
   requirePermission("commitment.manage"),
@@ -74,70 +151,38 @@ commitmentsRouter.post(
     const parsed = createSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
 
-    // Neither reference is trusted as-is: a supplier must belong to this
-    // company, and a contract (if given) must belong to this project —
-    // never assumed safe merely because the ID exists.
-    const supplier = await db.query.suppliers.findFirst({
-      where: and(eq(suppliers.id, parsed.data.supplierId), eq(suppliers.companyId, req.companyId!)),
-    });
-    if (!supplier) return res.status(404).json({ error: "المورد غير موجود" });
-
-    if (parsed.data.contractId) {
-      const contract = await db.query.contracts.findFirst({
-        where: and(eq(contracts.id, parsed.data.contractId), eq(contracts.projectId, req.params.projectId)),
-      });
-      if (!contract) return res.status(404).json({ error: "العقد غير موجود" });
-      // Phase 3.2 remediation (CTR-001) — a contract that is completed or
-      // terminated must not accept new execution activity.
-      if (CONTRACT_EXECUTION_BLOCKED_STATUSES.includes(contract.status)) {
-        return res.status(409).json({ error: "لا يمكن إنشاء التزام مرتبط بعقد منتهٍ أو ملغى" });
+    // E2 (production-readiness remediation) — opt-in idempotency, same
+    // pattern as budget.ts's createExpense()/invoices.ts/quotes.ts: a
+    // client that supplies an Idempotency-Key header is protected from
+    // creating a duplicate Commitment (and inflating committed cost) on a
+    // retried request; a client that doesn't send the header keeps the
+    // exact prior behavior.
+    const idempotencyKey = req.header("Idempotency-Key");
+    if (idempotencyKey) {
+      try {
+        const outcome = await withIdempotency<CommitmentCreateRow | { error: string; status: number }>(
+          req.companyId!,
+          "commitment.create",
+          idempotencyKey,
+          req.body,
+          async () => {
+            const result = await createCommitment(req.companyId!, req.userId!, req.params.projectId, parsed.data);
+            if ("error" in result) return { status: result.status, body: result };
+            return { status: 201, body: result.commitment };
+          },
+        );
+        return res.status(outcome.status).json(outcome.body);
+      } catch (err) {
+        if (err instanceof IdempotencyConflictError) {
+          return res.status(409).json({ error: "تم استخدام مفتاح idempotency هذا مسبقاً بطلب مختلف" });
+        }
+        throw err;
       }
     }
 
-    // The MAX+1 subquery alone is not race-safe: two concurrent INSERTs can
-    // each read the same prior MAX before either commits. Locking the
-    // parent company row (req.companyId is always the caller's own
-    // authenticated company, never an untrusted input) for the duration of
-    // the transaction serializes concurrent commitment creation for this
-    // company — same fix already proven for IPC numbering (routes/ipcs.ts).
-    const commitment = await db.transaction(async (tx) => {
-      await tx.execute(sql`SELECT id FROM companies WHERE id = ${req.companyId} FOR UPDATE`);
-      const result = await tx.execute<{
-        id: string;
-        commitment_number: number;
-        status: string;
-        created_at: string;
-      }>(sql`
-        INSERT INTO commitments (company_id, project_id, contract_id, supplier_id, type, status, commitment_number, description, currency, retention_percent, created_by)
-        VALUES (
-          ${req.companyId},
-          ${req.params.projectId},
-          ${parsed.data.contractId ?? null},
-          ${parsed.data.supplierId},
-          ${parsed.data.type},
-          'draft',
-          (SELECT COALESCE(MAX(commitment_number), 0) + 1 FROM commitments WHERE company_id = ${req.companyId}),
-          ${parsed.data.description ?? null},
-          ${parsed.data.currency ?? "SAR"},
-          ${parsed.data.retentionPercent ?? null},
-          ${req.userId}
-        )
-        RETURNING id, commitment_number, status, created_at
-      `);
-      return result.rows[0];
-    });
-
-    await recordAuditEvent(db, {
-      companyId: req.companyId!,
-      actorUserId: req.userId!,
-      action: "commitment.created",
-      entityType: "commitment",
-      entityId: commitment.id,
-      afterValue: commitment,
-      metadata: { supplierId: parsed.data.supplierId, type: parsed.data.type },
-    });
-
-    res.status(201).json(commitment);
+    const result = await createCommitment(req.companyId!, req.userId!, req.params.projectId, parsed.data);
+    if ("error" in result) return res.status(result.status).json({ error: result.error });
+    res.status(201).json(result.commitment);
   },
 );
 

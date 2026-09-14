@@ -195,18 +195,31 @@ function CommitmentCreateForm({
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  // E2 pre-launch hardening — this form unmounts on success (onCreated
+  // closes it) and only ever exists for one logical commitment-creation
+  // attempt, exactly like NewInvoiceForm/IpcSection's certify form: a lazy
+  // useState initializer alone is enough. It stays stable across a
+  // failed/timed-out retry on this same mounted form, and a genuinely new
+  // commitment always starts from a fresh mount (reopening the form) with
+  // a fresh key.
+  const [idempotencyKey] = useState(() => crypto.randomUUID());
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
     setSubmitting(true);
     try {
-      const commitment = await createCommitment(projectId, {
-        supplierId,
-        type,
-        contractId: contractId || undefined,
-        description: description || undefined,
-        ...(type === "subcontract" && retentionPercent ? { retentionPercent: Number(retentionPercent) } : {}),
-      });
+      const commitment = await createCommitment(
+        projectId,
+        {
+          supplierId,
+          type,
+          contractId: contractId || undefined,
+          description: description || undefined,
+          ...(type === "subcontract" && retentionPercent ? { retentionPercent: Number(retentionPercent) } : {}),
+        },
+        idempotencyKey,
+      );
       onCreated(commitment);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("procurement.createForm.genericError"));

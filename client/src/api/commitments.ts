@@ -23,10 +23,16 @@ export interface CreateCommitmentInput {
   retentionPercent?: number;
 }
 
-export function createCommitment(projectId: string, input: CreateCommitmentInput): Promise<Commitment> {
+// E2 pre-launch hardening — idempotencyKey is optional (matching the
+// server's own opt-in design in lib/idempotency.ts), same convention as
+// createInvoice()/createExpense() above their own routes. The caller owns
+// the key's lifetime — this function only forwards whatever it is given as
+// the Idempotency-Key header, exactly as the server already expects.
+export function createCommitment(projectId: string, input: CreateCommitmentInput, idempotencyKey?: string): Promise<Commitment> {
   return apiFetch<Commitment>(`/projects/${projectId}/commitments`, {
     method: "POST",
     body: JSON.stringify(input),
+    headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined,
   });
 }
 

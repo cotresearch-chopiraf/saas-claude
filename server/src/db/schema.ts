@@ -1223,6 +1223,11 @@ export const idempotencyOperationEnum = pgEnum("idempotency_operation", [
   // or double-submit on POST /api/projects/:projectId/budget/expenses must
   // not create a second expense row.
   "expense.create",
+  // E2 (production-readiness remediation) — a network retry or double-submit
+  // on POST /api/projects/:projectId/commitments must not create a second
+  // Commitment (and inflate committed cost). Same risk class as
+  // expense.create above.
+  "commitment.create",
 ]);
 export const idempotencyStatusEnum = pgEnum("idempotency_status", ["pending", "completed"]);
 

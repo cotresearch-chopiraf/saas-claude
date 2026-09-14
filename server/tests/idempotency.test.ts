@@ -56,6 +56,18 @@ function expensePayload(overrides: Partial<{ description: string }> = {}) {
   return { description: "Idem Expense", amount: 250, expenseDate: "2026-01-01", ...overrides };
 }
 
+async function createSupplier(token: string) {
+  const res = await request(app)
+    .post("/api/suppliers")
+    .set("Authorization", `Bearer ${token}`)
+    .send({ name: `Idem Supplier ${Math.random()}`, type: "supplier" });
+  return res.body.id as string;
+}
+
+function commitmentPayload(supplierId: string, overrides: Partial<{ type: string; description: string }> = {}) {
+  return { supplierId, type: "purchase_order", ...overrides };
+}
+
 describe("Idempotency: invoice creation", () => {
   it("first request creates an invoice and returns 201", async () => {
     const res = await request(app)
@@ -401,5 +413,207 @@ describe("Idempotency: expense creation", () => {
       .set("Idempotency-Key", key)
       .send(expensePayload({ description: "Different expense" }));
     expect(conflict.status).toBe(409);
+  });
+});
+
+// E2 (production-readiness remediation) — same opt-in Idempotency-Key
+// matrix as invoice/quote/expense creation above, applied to Commitment
+// creation: a network retry, double-submit, or concurrent duplicate
+// request must not create two logically identical Commitments and inflate
+// committed cost.
+describe("Idempotency: commitment creation", () => {
+  it("normal commitment creation still succeeds", async () => {
+    const projectId = await createProject(tokenA);
+    const supplierId = await createSupplier(tokenA);
+    const res = await request(app)
+      .post(`/api/projects/${projectId}/commitments`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .set("Idempotency-Key", "commitment-first-1")
+      .send(commitmentPayload(supplierId));
+    expect(res.status).toBe(201);
+    expect(res.body.id).toBeDefined();
+  });
+
+  it("same key repeated sequentially creates exactly one commitment", async () => {
+    const projectId = await createProject(tokenA);
+    const supplierId = await createSupplier(tokenA);
+    const key = "commitment-exact-retry-1";
+    const first = await request(app)
+      .post(`/api/projects/${projectId}/commitments`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .set("Idempotency-Key", key)
+      .send(commitmentPayload(supplierId));
+    expect(first.status).toBe(201);
+
+    const retry = await request(app)
+      .post(`/api/projects/${projectId}/commitments`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .set("Idempotency-Key", key)
+      .send(commitmentPayload(supplierId));
+    expect(retry.status).toBe(201);
+    expect(retry.body.id).toBe(first.body.id);
+
+    const list = await request(app).get(`/api/projects/${projectId}/commitments`).set("Authorization", `Bearer ${tokenA}`);
+    expect(list.body.filter((c: { id: string }) => c.id === first.body.id).length).toBe(1);
+  });
+
+  it("N concurrent requests with the SAME key create exactly one commitment (genuine concurrency)", async () => {
+    const projectId = await createProject(tokenA);
+    const supplierId = await createSupplier(tokenA);
+    const key = "commitment-concurrent-1";
+    const results = await Promise.all(
+      Array.from({ length: 8 }, () =>
+        request(app)
+          .post(`/api/projects/${projectId}/commitments`)
+          .set("Authorization", `Bearer ${tokenA}`)
+          .set("Idempotency-Key", key)
+          .send(commitmentPayload(supplierId)),
+      ),
+    );
+    expect(results.every((r) => r.status === 201)).toBe(true);
+    const ids = new Set(results.map((r) => r.body.id));
+    // Without withIdempotency, 8 concurrent inserts would each claim their
+    // own commitment_number and this set would have size 8, not 1.
+    expect(ids.size).toBe(1);
+
+    const list = await request(app).get(`/api/projects/${projectId}/commitments`).set("Authorization", `Bearer ${tokenA}`);
+    expect(list.body.length).toBe(1);
+  });
+
+  it("different keys create separate commitments", async () => {
+    const projectId = await createProject(tokenA);
+    const supplierId = await createSupplier(tokenA);
+    const a = await request(app)
+      .post(`/api/projects/${projectId}/commitments`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .set("Idempotency-Key", "commitment-key-a")
+      .send(commitmentPayload(supplierId));
+    const b = await request(app)
+      .post(`/api/projects/${projectId}/commitments`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .set("Idempotency-Key", "commitment-key-b")
+      .send(commitmentPayload(supplierId));
+    expect(a.status).toBe(201);
+    expect(b.status).toBe(201);
+    expect(a.body.id).not.toBe(b.body.id);
+  });
+
+  it("cross-tenant: the same key used by a different company creates its own independent commitment", async () => {
+    const projectA = await createProject(tokenA);
+    const projectB = await createProject(tokenB);
+    const supplierA = await createSupplier(tokenA);
+    const supplierB = await createSupplier(tokenB);
+    const key = "commitment-cross-tenant-1";
+    const a = await request(app)
+      .post(`/api/projects/${projectA}/commitments`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .set("Idempotency-Key", key)
+      .send(commitmentPayload(supplierA));
+    const b = await request(app)
+      .post(`/api/projects/${projectB}/commitments`)
+      .set("Authorization", `Bearer ${tokenB}`)
+      .set("Idempotency-Key", key)
+      .send(commitmentPayload(supplierB));
+    expect(a.status).toBe(201);
+    expect(b.status).toBe(201);
+    expect(a.body.id).not.toBe(b.body.id);
+  });
+
+  it("replay returns the original response (same id, same fields) rather than a fresh row", async () => {
+    const projectId = await createProject(tokenA);
+    const supplierId = await createSupplier(tokenA);
+    const key = "commitment-replay-1";
+    const first = await request(app)
+      .post(`/api/projects/${projectId}/commitments`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .set("Idempotency-Key", key)
+      .send(commitmentPayload(supplierId, { description: "Replay target commitment" }));
+    expect(first.status).toBe(201);
+
+    const replay = await request(app)
+      .post(`/api/projects/${projectId}/commitments`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .set("Idempotency-Key", key)
+      .send(commitmentPayload(supplierId, { description: "Replay target commitment" }));
+    expect(replay.status).toBe(201);
+    expect(replay.body).toEqual(first.body);
+  });
+
+  it("replay does not create a duplicate audit event", async () => {
+    const projectId = await createProject(tokenA);
+    const supplierId = await createSupplier(tokenA);
+    const key = "commitment-audit-1";
+    const first = await request(app)
+      .post(`/api/projects/${projectId}/commitments`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .set("Idempotency-Key", key)
+      .send(commitmentPayload(supplierId));
+    expect(first.status).toBe(201);
+
+    await request(app)
+      .post(`/api/projects/${projectId}/commitments`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .set("Idempotency-Key", key)
+      .send(commitmentPayload(supplierId));
+
+    const events = await db.query.auditEvents.findMany({
+      where: and(eq(auditEvents.entityType, "commitment"), eq(auditEvents.entityId, first.body.id), eq(auditEvents.action, "commitment.created")),
+    });
+    expect(events.length).toBe(1);
+  });
+
+  it("without an Idempotency-Key header, behavior is unchanged (each request creates a new commitment)", async () => {
+    const projectId = await createProject(tokenA);
+    const supplierId = await createSupplier(tokenA);
+    const first = await request(app)
+      .post(`/api/projects/${projectId}/commitments`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .send(commitmentPayload(supplierId));
+    const second = await request(app)
+      .post(`/api/projects/${projectId}/commitments`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .send(commitmentPayload(supplierId));
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(201);
+    expect(first.body.id).not.toBe(second.body.id);
+  });
+
+  it("same key reused with a materially different payload returns a deterministic 409, not a silent replay", async () => {
+    const projectId = await createProject(tokenA);
+    const supplierId = await createSupplier(tokenA);
+    const key = "commitment-conflict-1";
+    const first = await request(app)
+      .post(`/api/projects/${projectId}/commitments`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .set("Idempotency-Key", key)
+      .send(commitmentPayload(supplierId, { description: "Original commitment" }));
+    expect(first.status).toBe(201);
+
+    const conflict = await request(app)
+      .post(`/api/projects/${projectId}/commitments`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .set("Idempotency-Key", key)
+      .send(commitmentPayload(supplierId, { description: "Different commitment" }));
+    expect(conflict.status).toBe(409);
+  });
+
+  // Existing Commitment authorization must remain intact: requirePermission
+  // runs as route middleware BEFORE the idempotency-wrapped handler runs, so
+  // a caller who fails RBAC (procurement.test.ts's "a member cannot create a
+  // commitment" test) is rejected regardless of whether an Idempotency-Key
+  // header is sent — nothing here changes that ordering. Cross-tenant
+  // reference validation (a supplierId belonging to a different company)
+  // behaves the same way: it also runs before withIdempotency claims a key,
+  // proven directly by procurement.test.ts's own "rejects a supplierId
+  // belonging to another company" test.
+  it("an idempotency key does not bypass ownership validation — a cross-tenant supplierId is still rejected", async () => {
+    const projectId = await createProject(tokenA);
+    const supplierFromCompanyB = await createSupplier(tokenB);
+    const res = await request(app)
+      .post(`/api/projects/${projectId}/commitments`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .set("Idempotency-Key", "commitment-authz-1")
+      .send(commitmentPayload(supplierFromCompanyB));
+    expect(res.status).toBe(404);
   });
 });
