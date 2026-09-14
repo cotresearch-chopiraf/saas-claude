@@ -1218,6 +1218,11 @@ export const idempotencyOperationEnum = pgEnum("idempotency_operation", [
   "subcontractIpc.certify",
   "changeOrder.approve",
   "payroll.post",
+  // Wave 1F (W1E-002 remediation) — same duplicate-financial-document risk
+  // as invoice/quote creation applies to expense creation: a network retry
+  // or double-submit on POST /api/projects/:projectId/budget/expenses must
+  // not create a second expense row.
+  "expense.create",
 ]);
 export const idempotencyStatusEnum = pgEnum("idempotency_status", ["pending", "completed"]);
 

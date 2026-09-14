@@ -7,6 +7,7 @@ import { sumMoney, roundMoney } from "../lib/money.js";
 import { recordAuditEvent } from "../lib/audit.js";
 import { requirePermission } from "../lib/permissions.js";
 import { pgErrorInfo } from "../lib/pgError.js";
+import { withIdempotency, IdempotencyConflictError } from "../lib/idempotency.js";
 
 type ProjectParams = { projectId: string };
 type ItemParams = ProjectParams & { itemId: string };
@@ -264,10 +265,17 @@ const expenseSchema = z.object({
   budgetItemId: z.string().uuid().optional(),
 });
 
-budgetRouter.post("/expenses", requirePermission("budget.manage"), async (req: Request<ProjectParams>, res: Response) => {
-  const parsed = expenseSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
-
+// Factored out of the route handler so both the idempotent path (wrapped in
+// withIdempotency below) and the plain non-idempotent path can share the
+// exact same validation/insert/audit logic without duplication — same shape
+// as invoices.ts's createInvoice(). Business logic (validation, ownership
+// check, insert, audit event) is completely unchanged from before Wave 1F.
+async function createExpense(
+  companyId: string,
+  actorUserId: string,
+  projectId: string,
+  data: z.infer<typeof expenseSchema>,
+): Promise<{ error: string; status: number } | { expense: typeof expenses.$inferSelect }> {
   // A budget item id is never trusted as-is: without this check, any
   // authenticated member of THIS company could attach an expense to a
   // budget item belonging to a DIFFERENT project (this company's own, or —
@@ -275,39 +283,75 @@ budgetRouter.post("/expenses", requirePermission("budget.manage"), async (req: R
   // guessing a UUID) silently corrupting that other project's spent/
   // remaining totals. Same ownership-validation discipline invoices.ts
   // already applies to quoteId.
-  if (parsed.data.budgetItemId) {
+  if (data.budgetItemId) {
     const owningItem = await db.query.budgetItems.findFirst({
-      where: and(eq(budgetItems.id, parsed.data.budgetItemId), eq(budgetItems.projectId, req.params.projectId)),
+      where: and(eq(budgetItems.id, data.budgetItemId), eq(budgetItems.projectId, projectId)),
     });
-    if (!owningItem) return res.status(404).json({ error: "بند الميزانية غير موجود" });
+    if (!owningItem) return { error: "بند الميزانية غير موجود", status: 404 };
   }
 
   const expense = await db.transaction(async (tx) => {
     const [created] = await tx
       .insert(expenses)
       .values({
-        projectId: req.params.projectId,
-        description: parsed.data.description,
-        amount: String(parsed.data.amount),
-        expenseDate: parsed.data.expenseDate,
-        budgetItemId: parsed.data.budgetItemId,
+        projectId,
+        description: data.description,
+        amount: String(data.amount),
+        expenseDate: data.expenseDate,
+        budgetItemId: data.budgetItemId,
       })
       .returning();
 
     await recordAuditEvent(tx, {
-      companyId: req.companyId!,
-      actorUserId: req.userId!,
+      companyId,
+      actorUserId,
       action: "expense.created",
       entityType: "expense",
       entityId: created.id,
       afterValue: created,
-      metadata: { projectId: req.params.projectId },
+      metadata: { projectId },
     });
 
     return created;
   });
 
-  res.status(201).json(expense);
+  return { expense };
+}
+
+budgetRouter.post("/expenses", requirePermission("budget.manage"), async (req: Request<ProjectParams>, res: Response) => {
+  const parsed = expenseSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
+
+  // Wave 1F (W1E-002 remediation) — opt-in idempotency, same pattern as
+  // invoices.ts/quotes.ts: a client that supplies an Idempotency-Key header
+  // is protected from creating a duplicate expense on a retried request; a
+  // client that doesn't send the header keeps the exact prior behavior.
+  const idempotencyKey = req.header("Idempotency-Key");
+  if (idempotencyKey) {
+    try {
+      const outcome = await withIdempotency<typeof expenses.$inferSelect | { error: string; status: number }>(
+        req.companyId!,
+        "expense.create",
+        idempotencyKey,
+        req.body,
+        async () => {
+          const result = await createExpense(req.companyId!, req.userId!, req.params.projectId, parsed.data);
+          if ("error" in result) return { status: result.status, body: result };
+          return { status: 201, body: result.expense };
+        },
+      );
+      return res.status(outcome.status).json(outcome.body);
+    } catch (err) {
+      if (err instanceof IdempotencyConflictError) {
+        return res.status(409).json({ error: "تم استخدام مفتاح idempotency هذا مسبقاً بطلب مختلف" });
+      }
+      throw err;
+    }
+  }
+
+  const result = await createExpense(req.companyId!, req.userId!, req.params.projectId, parsed.data);
+  if ("error" in result) return res.status(result.status).json({ error: result.error });
+  res.status(201).json(result.expense);
 });
 
 // No PATCH /expenses/:expenseId route exists in this codebase — an

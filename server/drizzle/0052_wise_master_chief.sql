@@ -1,0 +1,1 @@
+ALTER TYPE "public"."idempotency_operation" ADD VALUE 'expense.create';
