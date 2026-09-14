@@ -62,6 +62,28 @@ export interface EffectiveSetting {
 // date — see overrides.ts for how a "change" (as opposed to a plain reset)
 // closes the previous override's window instead of deleting it, which is
 // what makes "what was effective on an older date" still answerable here.
+//
+// Country isolation (Wave 1 fix): an override row is tied to the country
+// it was created for (companyTaxOverrides.countryCode, denormalized from
+// ruleVersionId's own country at creation time — see schema.ts) — but
+// until this fix, this function matched an override by companyId +
+// settingKey alone, with no check that the override's OWN country still
+// matches the company's CURRENT country. A company that created a
+// Saudi-context override and later switched its compliance profile to
+// Morocco would still have that Saudi-era override applied to Morocco
+// calculations, since nothing here ever re-validated it against the
+// country actually in effect.
+//
+// The country filter is applied directly in the WHERE clause, not as an
+// application-code check on a single fetched row: a company can have
+// simultaneously active overrides for the same settingKey in two
+// different countries (e.g. one left over from before a country switch,
+// one created after), and without filtering by country in SQL, ORDER BY
+// effectiveFrom alone cannot reliably pick the right one when both rows
+// share the same effectiveFrom — Postgres has no defined tiebreaker there,
+// so fetch-one-then-check-in-app-code could silently return the wrong
+// country's row and fall through to the official default instead of
+// finding the actual match.
 export async function getEffectiveSettingValue(
   companyId: string,
   settingKey: string,
@@ -73,12 +95,15 @@ export async function getEffectiveSettingValue(
       eq(companyTaxOverrides.companyId, companyId),
       eq(companyTaxOverrides.settingKey, settingKey),
       eq(companyTaxOverrides.status, "active"),
+      eq(companyTaxOverrides.countryCode, ctx.countryCode),
       lte(companyTaxOverrides.effectiveFrom, asOfDate),
       or(isNull(companyTaxOverrides.effectiveTo), gt(companyTaxOverrides.effectiveTo, asOfDate)),
     ),
     orderBy: (o, { desc: d }) => [d(o.effectiveFrom)],
   });
-  if (override) return { value: override.overrideValue, overrideId: override.id, isOverridden: true };
+  if (override) {
+    return { value: override.overrideValue, overrideId: override.id, isOverridden: true };
+  }
   return { value: getRuleAtPath(ctx.rules, settingKey), overrideId: null, isOverridden: false };
 }
 

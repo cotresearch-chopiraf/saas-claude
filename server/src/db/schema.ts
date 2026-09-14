@@ -640,6 +640,17 @@ export const companyTaxOverrides = pgTable(
     ruleVersionId: uuid("rule_version_id")
       .notNull()
       .references(() => complianceRuleVersions.id),
+    // Denormalized from ruleVersionId's own countryCode at creation time
+    // (Wave 1 country-isolation fix). Country isolation logic (engine.ts's
+    // getEffectiveSettingValue, this file's runCreateOverride) previously
+    // had to join through ruleVersionId -> complianceRuleVersions every
+    // time it needed an override's country, and the one-open-active-per-
+    // setting unique index below could not be country-scoped at all
+    // without this column existing directly on the row. Backfilled for
+    // existing rows in the migration that adds this column; never updated
+    // after insert (an override's country is fixed at creation, same as
+    // ruleVersionId itself).
+    countryCode: countryCodeEnum("country_code").notNull(),
     status: overrideStatusEnum("status").notNull().default("active"),
     effectiveFrom: date("effective_from").notNull(),
     effectiveTo: date("effective_to"),
@@ -652,8 +663,12 @@ export const companyTaxOverrides = pgTable(
     resetBy: uuid("reset_by").references(() => users.id),
   },
   (table) => ({
+    // Country-scoped (Wave 1 fix): a company switching countries and
+    // creating an open-ended override in its new country must not collide
+    // with a still-open override left over from a previous country — those
+    // are two distinct, both-legitimate settings, not a conflict.
     oneOpenActivePerSetting: uniqueIndex("company_tax_overrides_one_open_active")
-      .on(table.companyId, table.settingKey)
+      .on(table.companyId, table.settingKey, table.countryCode)
       .where(sql`${table.status} = 'active' AND ${table.effectiveTo} IS NULL`),
   }),
 );

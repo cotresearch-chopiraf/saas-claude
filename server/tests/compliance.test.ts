@@ -308,3 +308,102 @@ describe("compliance: tenant isolation", () => {
     expect(stillActive.body.find((o: { id: string }) => o.id === overrideIdA)?.status).toBe("active");
   });
 });
+
+// Red-Team Production Readiness Audit, Wave 1A — country override
+// isolation. Before this fix, getEffectiveSettingValue (engine.ts) matched
+// an active override by companyId + settingKey alone, with no check that
+// the override's own country still matched the company's CURRENT country
+// — a Saudi-era override survived a switch to Morocco and kept being
+// applied there. The fix reads the override's existing ruleVersionId (via
+// its ruleVersion relation) and only applies it when that rule version's
+// countryCode matches the currently-resolved country — no schema change,
+// no data deleted, no override ever reset/closed by a country switch.
+describe("compliance: country override isolation (Wave 1A fix)", () => {
+  let token: string;
+  let saInvoiceId: string;
+  let saOverrideId: string;
+
+  beforeAll(async () => {
+    token = await registerOwner("Country Switch Co");
+    const profile = await request(app)
+      .post("/api/compliance/profile")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ countryCode: "SA" });
+    expect(profile.status).toBe(201);
+  });
+
+  it("Saudi company + Saudi override: invoice uses the Saudi override rate, not the 15% default", async () => {
+    const created = await request(app)
+      .post("/api/compliance/overrides")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ settingKey: "vat.standardRatePercent", value: 10, effectiveFrom: "2026-01-01", confirmed: true });
+    expect(created.status).toBe(201);
+    saOverrideId = created.body.override.id;
+
+    const invoice = await request(app)
+      .post("/api/invoices")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ clientName: "SA Client", items: [{ description: "x", amount: 100 }] });
+    expect(invoice.status).toBe(201);
+    expect(Number(invoice.body.taxRatePercent)).toBe(10);
+    saInvoiceId = invoice.body.id;
+  });
+
+  it("switching the company to Morocco: the Saudi override can no longer affect Morocco calculations", async () => {
+    const switchRes = await request(app)
+      .post("/api/compliance/profile")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ countryCode: "MA" });
+    expect(switchRes.status).toBe(201);
+    expect(switchRes.body.countryCode).toBe("MA");
+
+    const invoice = await request(app)
+      .post("/api/invoices")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ clientName: "Morocco Client", items: [{ description: "x", amount: 100 }] });
+    expect(invoice.status).toBe(201);
+    // Morocco's own official default (20%) — never the leaked Saudi 10% override.
+    expect(Number(invoice.body.taxRatePercent)).toBe(20);
+  });
+
+  it("the stale Saudi override is no longer listed as currently active once on Morocco", async () => {
+    const overrides = await request(app).get("/api/compliance/overrides").set("Authorization", `Bearer ${token}`);
+    expect(overrides.status).toBe(200);
+    expect(overrides.body.find((o: { id: string }) => o.id === saOverrideId)).toBeUndefined();
+  });
+
+  it("a Morocco override only applies to Morocco, and does not leak back to Saudi after switching again", async () => {
+    const maOverride = await request(app)
+      .post("/api/compliance/overrides")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ settingKey: "vat.standardRatePercent", value: 15, effectiveFrom: "2026-01-01", confirmed: true });
+    expect(maOverride.status).toBe(201);
+
+    const maInvoice = await request(app)
+      .post("/api/invoices")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ clientName: "Morocco Override Client", items: [{ description: "x", amount: 100 }] });
+    expect(Number(maInvoice.body.taxRatePercent)).toBe(15);
+
+    const switchBack = await request(app)
+      .post("/api/compliance/profile")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ countryCode: "SA" });
+    expect(switchBack.status).toBe(201);
+
+    // The original Saudi override (10%) reapplies exactly as before — it
+    // was never deleted or reset by either country switch — and the
+    // Morocco-only override (15%) must not leak into this Saudi context.
+    const saInvoiceAgain = await request(app)
+      .post("/api/invoices")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ clientName: "Back to Saudi Client", items: [{ description: "x", amount: 100 }] });
+    expect(Number(saInvoiceAgain.body.taxRatePercent)).toBe(10);
+  });
+
+  it("historical invoice from before the country switch keeps its original frozen tax rate", async () => {
+    const reread = await request(app).get(`/api/invoices/${saInvoiceId}`).set("Authorization", `Bearer ${token}`);
+    expect(reread.status).toBe(200);
+    expect(Number(reread.body.taxRatePercent)).toBe(10);
+  });
+});

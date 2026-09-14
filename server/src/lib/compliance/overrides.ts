@@ -87,11 +87,24 @@ async function runCreateOverride(input: CreateOverrideInput) {
     const rules = version.rules as ComplianceRules;
     const officialDefault = getRuleAtPath(rules, input.settingKey);
 
+    // Country-scoped (Wave 1 fix, same root cause as engine.ts's
+    // getEffectiveSettingValue): only a prior active override in the
+    // company's CURRENT country is "prior" for this purpose. Before this
+    // fix, a company that switched countries and then created a new
+    // override for the same settingKey would silently close out a
+    // still-valid override left over from its previous country — a
+    // country it might switch back to later, at which point that override
+    // should still apply. That override is not just closed for reporting
+    // purposes either; it now shares a country-scoped unique index
+    // (schema.ts's company_tax_overrides_one_open_active) so a different
+    // country's open-ended override for the same setting can coexist with
+    // it instead of tripping the concurrency-conflict check.
     const priorActive = await tx.query.companyTaxOverrides.findFirst({
       where: and(
         eq(companyTaxOverrides.companyId, input.companyId),
         eq(companyTaxOverrides.settingKey, input.settingKey),
         eq(companyTaxOverrides.status, "active"),
+        eq(companyTaxOverrides.countryCode, profile.countryCode),
       ),
     });
     let previousValue = officialDefault;
@@ -111,6 +124,7 @@ async function runCreateOverride(input: CreateOverrideInput) {
         overrideValue: input.value,
         officialDefaultSnapshot: officialDefault,
         ruleVersionId: version.id,
+        countryCode: profile.countryCode,
         effectiveFrom: input.effectiveFrom,
         effectiveTo: input.effectiveTo ?? null,
         reason: input.reason ?? null,
@@ -193,9 +207,35 @@ export async function resetOverride(input: ResetOverrideInput) {
   });
 }
 
+// Country isolation (Wave 1 fix, same root cause as engine.ts's
+// getEffectiveSettingValue): a status="active" override row from a
+// company's PREVIOUS country is no longer eligible to affect tax
+// calculation (see that function), but this list previously kept
+// surfacing it as "active" regardless — confusing at best (GET
+// /compliance/overrides and /compliance/status's overrideCount would
+// both show a Saudi-era override as currently active on a Morocco-
+// profiled company that the engine had already started silently
+// ignoring). Filtered directly on the override's own denormalized
+// countryCode column, in SQL, the same way getEffectiveSettingValue is —
+// not a join-then-check, for the same reason: two simultaneously active
+// overrides for the same settingKey but different countries must not be
+// conflated. A company with no profile at all cannot have created an
+// override in the first place (runCreateOverride requires one) — the
+// empty-array branch exists for that case defensively, not because it's
+// expected to occur.
 export async function listActiveOverrides(companyId: string) {
+  const profile = await db.query.companyComplianceProfiles.findFirst({
+    where: eq(companyComplianceProfiles.companyId, companyId),
+    columns: { countryCode: true },
+  });
+  if (!profile) return [];
+
   return db.query.companyTaxOverrides.findMany({
-    where: and(eq(companyTaxOverrides.companyId, companyId), eq(companyTaxOverrides.status, "active")),
+    where: and(
+      eq(companyTaxOverrides.companyId, companyId),
+      eq(companyTaxOverrides.status, "active"),
+      eq(companyTaxOverrides.countryCode, profile.countryCode),
+    ),
     orderBy: (o, { desc: d }) => [d(o.createdAt)],
   });
 }
