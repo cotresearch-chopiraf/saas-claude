@@ -1,7 +1,11 @@
-import { describe, it, expect, beforeAll, vi } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, vi } from "vitest";
 import request from "supertest";
+import { eq } from "drizzle-orm";
 import { buildApp } from "../src/app.js";
 import { resetDb } from "./setup.js";
+import { db } from "../src/db/client.js";
+import { companies, companyComplianceProfiles, companyTaxOverrides, users } from "../src/db/schema.js";
+import { calculateTax } from "../src/lib/compliance/engine.js";
 
 vi.mock("../src/lib/mailer.js", () => ({ sendMail: vi.fn() }));
 import { sendMail } from "../src/lib/mailer.js";
@@ -405,5 +409,78 @@ describe("compliance: country override isolation (Wave 1A fix)", () => {
     const reread = await request(app).get(`/api/invoices/${saInvoiceId}`).set("Authorization", `Bearer ${token}`);
     expect(reread.status).toBe(200);
     expect(Number(reread.body.taxRatePercent)).toBe(10);
+  });
+});
+
+// Red-Team Remediation Wave 1B: routes/invoices.ts's tax-fallback fix
+// distinguishes calculateTax()'s reviewReason values, but two of them
+// (unresolvable_vat_rate, no_published_rule_version_for_date) aren't
+// reachable through any current legitimate HTTP path — every published
+// country pack always defines a numeric standardRatePercent, and
+// createOverride's own technical validation rejects a non-numeric
+// override value, while invoice creation always uses today's date, which
+// every pack's published rule version already covers. These two tests
+// exercise calculateTax() directly instead of inventing an artificial
+// HTTP scenario the application can't actually produce.
+describe("compliance engine: reviewReasons not reachable via HTTP (Wave 1B coverage)", () => {
+  beforeEach(resetDb);
+
+  it("no_published_rule_version_for_date: a transaction dated before any published rule version", async () => {
+    const token = await registerOwner("Old Date Co");
+    const profileRes = await request(app)
+      .post("/api/compliance/profile")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ countryCode: "SA" });
+    expect(profileRes.status).toBe(201);
+
+    const company = await db.query.companies.findFirst({ where: eq(companies.name, "Old Date Co") });
+    const result = await calculateTax({
+      companyId: company!.id,
+      transactionDate: "1900-01-01",
+      taxCategory: "standard_rate",
+      itemAmounts: [100],
+    });
+    expect(result.status).toBe("review_required");
+    expect(result.reviewReason).toBe("no_published_rule_version_for_date");
+  });
+
+  it("unresolvable_vat_rate: an override whose value cannot be resolved to a number", async () => {
+    const token = await registerOwner("Bad Override Co");
+    const profileRes = await request(app)
+      .post("/api/compliance/profile")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ countryCode: "SA" });
+    expect(profileRes.status).toBe(201);
+
+    const company = await db.query.companies.findFirst({ where: eq(companies.name, "Bad Override Co") });
+    const profile = await db.query.companyComplianceProfiles.findFirst({
+      where: eq(companyComplianceProfiles.companyId, company!.id),
+    });
+    const owner = await db.query.users.findFirst({ where: eq(users.companyId, company!.id) });
+
+    // Bypasses the API entirely (createOverride's validateTechnical would
+    // reject this) — the point is to prove the engine's own defensive
+    // handling of a row that should never exist via the normal path, not
+    // to exercise the override-creation API again.
+    await db.insert(companyTaxOverrides).values({
+      companyId: company!.id,
+      settingKey: "vat.standardRatePercent",
+      overrideValue: "not-a-number",
+      officialDefaultSnapshot: 15,
+      ruleVersionId: profile!.activeRuleVersionId,
+      countryCode: "SA",
+      status: "active",
+      effectiveFrom: "2020-01-01",
+      createdBy: owner!.id,
+    });
+
+    const result = await calculateTax({
+      companyId: company!.id,
+      transactionDate: "2026-01-01",
+      taxCategory: "standard_rate",
+      itemAmounts: [100],
+    });
+    expect(result.status).toBe("review_required");
+    expect(result.reviewReason).toBe("unresolvable_vat_rate");
   });
 });

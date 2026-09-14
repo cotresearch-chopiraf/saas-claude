@@ -121,6 +121,78 @@ describe("invoice tax calculation", () => {
   });
 });
 
+// Red-Team Remediation Wave 1B: routes/invoices.ts previously collapsed
+// every calculateTax() reviewReason into the same "use the company's flat
+// defaultTaxRatePercent" fallback — including cases where a compliance
+// profile DOES exist and the engine genuinely failed to resolve a rate
+// (unresolvable_tax_category, unresolvable_vat_rate,
+// no_published_rule_version_for_date), not just the legitimate
+// "no_compliance_profile" case. These tests pin down the corrected
+// per-reviewReason behavior.
+describe("invoice tax fallback (Wave 1B fix)", () => {
+  beforeEach(resetDb);
+
+  it("calculated: a company with a compliance profile gets the engine's computed rate, not the flat default", async () => {
+    const token = await setupCompany();
+    await request(app)
+      .patch("/api/company/settings")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ defaultTaxRatePercent: 99 });
+    await request(app).post("/api/compliance/profile").set("Authorization", `Bearer ${token}`).send({ countryCode: "SA" });
+
+    const invoice = await request(app)
+      .post("/api/invoices")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ clientName: "Client", taxCategory: "standard_rate", items: [{ description: "Work", amount: 100 }] });
+    expect(invoice.status).toBe(201);
+    // Saudi Arabia's own published standard rate — never the unrelated 99% flat default.
+    expect(Number(invoice.body.taxRatePercent)).toBe(15);
+  });
+
+  it("no_compliance_profile: the legacy flat-default fallback still works exactly as before", async () => {
+    const token = await setupCompany();
+    await request(app)
+      .patch("/api/company/settings")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ defaultTaxRatePercent: 7 });
+
+    const invoice = await request(app)
+      .post("/api/invoices")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ clientName: "Client", taxCategory: "standard_rate", items: [{ description: "Work", amount: 100 }] });
+    expect(invoice.status).toBe(201);
+    expect(Number(invoice.body.taxRatePercent)).toBe(7);
+  });
+
+  it("unresolvable_tax_category: rejects with 422 instead of silently using the flat default, and never consumes an invoice number", async () => {
+    const token = await setupCompany();
+    await request(app)
+      .patch("/api/company/settings")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ defaultTaxRatePercent: 42 });
+    await request(app).post("/api/compliance/profile").set("Authorization", `Bearer ${token}`).send({ countryCode: "SA" });
+
+    const rejected = await request(app)
+      .post("/api/invoices")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ clientName: "Client", taxCategory: "not_a_real_category", items: [{ description: "Work", amount: 100 }] });
+    expect(rejected.status).toBe(422);
+
+    // No invoice was created at all — not at the (wrong) 42% default, not at any rate.
+    const list = await request(app).get("/api/invoices").set("Authorization", `Bearer ${token}`);
+    expect(list.body.invoices).toHaveLength(0);
+
+    // The rejected attempt must not have burned an invoice number: the next
+    // successful invoice still gets sequence 0001, not 0002.
+    const invoice = await request(app)
+      .post("/api/invoices")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ clientName: "Client", items: [{ description: "Work", amount: 100 }] });
+    expect(invoice.status).toBe(201);
+    expect(invoice.body.invoiceNumber).toContain("-0001");
+  });
+});
+
 describe("document language", () => {
   beforeEach(resetDb);
 

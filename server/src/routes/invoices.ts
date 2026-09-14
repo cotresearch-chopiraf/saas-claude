@@ -186,7 +186,7 @@ async function createInvoice(
   companyId: string,
   userId: string,
   data: z.infer<typeof createSchema>,
-): Promise<{ error: string; status: 400 | 403 | 404 } | { invoice: typeof invoices.$inferSelect }> {
+): Promise<{ error: string; status: 400 | 403 | 404 | 422 } | { invoice: typeof invoices.$inferSelect }> {
   const relationship = await resolveInvoiceProjectContract(companyId, {
     projectId: data.projectId,
     contractId: data.contractId,
@@ -213,7 +213,6 @@ async function createInvoice(
   }
 
   const company = await db.query.companies.findFirst({ where: eq(companies.id, companyId) });
-  const invoiceNumber = await nextInvoiceNumber(companyId);
   const issueDate = new Date().toISOString().slice(0, 10);
 
   // An explicit taxRatePercent in the request always wins (preserves the
@@ -221,10 +220,18 @@ async function createInvoice(
   // compliance profile configured, the tax engine computes the rate and
   // the result is frozen onto the invoice as a historical snapshot
   // (taxCategory/ruleVersionId/overrideReference) — a later rule or
-  // override change never rewrites this invoice. A company with no
-  // compliance profile (the common case until the customer completes
-  // country onboarding) falls back to the company's flat default rate,
-  // exactly as it always has.
+  // override change never rewrites this invoice.
+  //
+  // Wave 1B fix: only reviewReason "no_compliance_profile" (the common
+  // case until the customer completes country onboarding) falls back to
+  // the company's flat default rate, exactly as it always has. The other
+  // reviewReasons (no_published_rule_version_for_date, unresolvable_vat_
+  // rate, unresolvable_tax_category) mean a compliance profile DOES exist
+  // and the engine tried and failed to resolve a real rate — silently
+  // substituting the unrelated flat default there would issue a
+  // misleading invoice. Those are rejected instead; the existing
+  // invoice.overrideTax-gated manual taxRatePercent field (see above) is
+  // the intended remediation path, not a new mechanism.
   let taxRatePercent = data.taxRatePercent;
   let taxCategory: string | undefined;
   let ruleVersionId: string | undefined;
@@ -243,10 +250,20 @@ async function createInvoice(
       taxCategory = taxResult.taxCategory;
       ruleVersionId = taxResult.ruleVersionId!;
       overrideReference = taxResult.overrideReference ?? undefined;
-    } else {
+    } else if (taxResult.reviewReason === "no_compliance_profile") {
       taxRatePercent = Number(company!.defaultTaxRatePercent);
+    } else {
+      return {
+        error: "تعذّر تحديد نسبة الضريبة تلقائياً بسبب مشكلة في إعدادات الضريبة — يلزم تصحيح الإعداد أو إدخال نسبة الضريبة يدوياً من قبل مالك الحساب",
+        status: 422,
+      };
     }
   }
+
+  // Wave 1B fix: allocated only after tax resolution has succeeded (or
+  // legitimately fallen back) — a 422 rejection above must not burn a
+  // permanent gap in the company's sequential invoice numbering.
+  const invoiceNumber = await nextInvoiceNumber(companyId);
 
   // Parent insert, audit event, and line items must land together or not at
   // all — the same db.transaction pattern every other financial-creation
