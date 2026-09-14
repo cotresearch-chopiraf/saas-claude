@@ -379,6 +379,13 @@
       "when": 1789418783759,
       "tag": "0053_typical_kulan_gath",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1789420137574,
+      "tag": "0054_certain_red_skull",
+      "breakpoints": true
     }
   ]
 }

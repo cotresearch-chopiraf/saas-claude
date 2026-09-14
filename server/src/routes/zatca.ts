@@ -17,6 +17,7 @@ import {
   updateEgsUnitStatus,
   getZatcaTenantIdentity,
   upsertZatcaTenantIdentity,
+  ZatcaIdentityConflictError,
   getSubmission,
   listSubmissionsForEgsUnit,
   listSubmissionsForCompany,
@@ -140,7 +141,18 @@ zatcaRouter.patch("/config", requireConfigure, async (req: Request, res: Respons
   }
 
   const before = await getZatcaTenantIdentity(req.companyId!);
-  const identity = await upsertZatcaTenantIdentity(req.companyId!, parsed.data);
+  let identity: Awaited<ReturnType<typeof upsertZatcaTenantIdentity>>;
+  try {
+    identity = await upsertZatcaTenantIdentity(req.companyId!, parsed.data);
+  } catch (err) {
+    // ZATCA P2 remediation — a genuinely concurrent PATCH won the race
+    // (company_tax_identifiers_company_type_country_unique, schema.ts);
+    // this request's own change was not applied. A clean 409 tells the
+    // client to reload and retry, never a raw database error or a
+    // fabricated 200.
+    if (err instanceof ZatcaIdentityConflictError) return res.status(409).json({ error: err.message });
+    throw err;
+  }
   await recordAuditEvent(db, {
     companyId: req.companyId!,
     actorUserId: req.userId!,

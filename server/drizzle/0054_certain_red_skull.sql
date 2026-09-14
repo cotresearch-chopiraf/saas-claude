@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "company_tax_identifiers_company_type_country_unique" ON "company_tax_identifiers" USING btree ("company_id","identifier_type","country_code");

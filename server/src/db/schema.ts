@@ -702,17 +702,42 @@ export const complianceAuditEvents = pgTable("compliance_audit_events", {
 // registration, e-invoicing ID, ...). Which identifierType values are
 // relevant/required for a given company is decided by its country pack
 // (getRequiredFields()), not hard-coded here.
-export const companyTaxIdentifiers = pgTable("company_tax_identifiers", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  companyId: uuid("company_id")
-    .notNull()
-    .references(() => companies.id, { onDelete: "cascade" }),
-  identifierType: text("identifier_type").notNull(),
-  value: text("value").notNull(),
-  countryCode: countryCodeEnum("country_code").notNull(),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-  updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+//
+// ZATCA P2 remediation — lib/zatca/domain/config.ts's upsertIdentifier()
+// already treats (companyId, identifierType, countryCode) as identifying
+// AT MOST ONE row (its own find-then-insert-or-update check uses exactly
+// this triple) — that was always the intended shape: one current VAT
+// number and one current commercial registration per company per country,
+// same tenant-scoped-uniqueness discipline as idempotencyKeys' own
+// (companyId, operation, key) unique index. Until now that was only an
+// application-level check-then-act, so two concurrent PATCH /zatca/config
+// requests (a double-click, a retry) could both read "no existing row" and
+// both INSERT, silently producing two rows for the same triple. The unique
+// index below makes Postgres itself the final authority — see
+// routes/zatca.ts's 23505 handling on the same PATCH route for how a
+// losing concurrent request is turned into a clean 409, never a raw
+// database error or an unhandled 500.
+export const companyTaxIdentifiers = pgTable(
+  "company_tax_identifiers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    identifierType: text("identifier_type").notNull(),
+    value: text("value").notNull(),
+    countryCode: countryCodeEnum("country_code").notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    companyTypeCountryUnique: uniqueIndex("company_tax_identifiers_company_type_country_unique").on(
+      table.companyId,
+      table.identifierType,
+      table.countryCode,
+    ),
+  }),
+);
 
 export const companiesRelations = relations(companies, ({ many }) => ({
   users: many(users),

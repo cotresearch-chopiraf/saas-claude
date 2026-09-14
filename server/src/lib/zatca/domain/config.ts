@@ -8,10 +8,23 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "../../../db/client.js";
 import { companies, companyTaxIdentifiers } from "../../../db/schema.js";
+import { pgErrorInfo } from "../../pgError.js";
 
 const VAT_NUMBER_TYPE = "vat_number";
 const COMMERCIAL_REGISTRATION_TYPE = "commercial_registration";
 const ZATCA_COUNTRY = "SA" as const;
+
+const UNIQUE_VIOLATION = "23505";
+
+// ZATCA P2 remediation — thrown when the database's
+// company_tax_identifiers_company_type_country_unique index (schema.ts)
+// rejects a concurrent upsertIdentifier() insert that raced another one for
+// the same (companyId, identifierType, countryCode). Distinct from a plain
+// Error so the route can map it to 409 (a transient conflict to retry),
+// same convention as lib/compliance/overrides.ts's ComplianceConflictError
+// for the identical TOCTOU shape — never a raw database error reaching the
+// client.
+export class ZatcaIdentityConflictError extends Error {}
 
 export interface ZatcaTenantIdentity {
   legalName: string | null;
@@ -41,6 +54,15 @@ export interface UpdateZatcaTenantIdentityInput {
   commercialRegistration?: string;
 }
 
+// ZATCA P2 remediation — the findFirst-then-insert-or-update below is only
+// a fast path now: two near-simultaneous PATCH /zatca/config requests for
+// the same (companyId, identifierType) can both read "no existing row" and
+// both attempt the insert branch. The database's own
+// company_tax_identifiers_company_type_country_unique index is the real
+// backstop — exactly one insert can win; the other fails with 23505,
+// caught below and turned into ZatcaIdentityConflictError rather than an
+// unhandled 500. UPDATE (by primary key id) never touches the unique
+// columns, so it can never itself trigger this race.
 async function upsertIdentifier(companyId: string, identifierType: string, value: string): Promise<void> {
   const existing = await db.query.companyTaxIdentifiers.findFirst({
     where: and(
@@ -51,8 +73,15 @@ async function upsertIdentifier(companyId: string, identifierType: string, value
   });
   if (existing) {
     await db.update(companyTaxIdentifiers).set({ value, updatedAt: new Date() }).where(eq(companyTaxIdentifiers.id, existing.id));
-  } else {
+    return;
+  }
+  try {
     await db.insert(companyTaxIdentifiers).values({ companyId, identifierType, value, countryCode: ZATCA_COUNTRY });
+  } catch (err) {
+    if (pgErrorInfo(err).code === UNIQUE_VIOLATION) {
+      throw new ZatcaIdentityConflictError("تم تحديث بيانات الهوية الضريبية بواسطة طلب متزامن آخر، يرجى إعادة المحاولة");
+    }
+    throw err;
   }
 }
 

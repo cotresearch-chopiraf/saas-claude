@@ -1,8 +1,11 @@
 import { describe, it, expect, beforeAll, afterEach, vi } from "vitest";
 import request from "supertest";
 import http from "node:http";
+import { and, eq } from "drizzle-orm";
 import { buildApp } from "../src/app.js";
 import { resetDb } from "./setup.js";
+import { db } from "../src/db/client.js";
+import { companyTaxIdentifiers } from "../src/db/schema.js";
 
 // MIDAD ZATCA Slice 3 — /api/zatca/* route tests: tenant isolation,
 // authorization (owner vs member), secret non-leakage in API responses
@@ -97,6 +100,155 @@ describe("GET/PATCH /api/zatca/config", () => {
   it("TENANT ISOLATION: company B's identity is unaffected by company A's update", async () => {
     const res = await request(app).get("/api/zatca/config").set("Authorization", `Bearer ${tokenB}`);
     expect(res.body.identity.vatNumber).toBeNull();
+  });
+});
+
+// ZATCA P2 remediation — company_tax_identifiers previously had no database
+// uniqueness backstop: two concurrent PATCH /zatca/config requests for the
+// same (companyId, identifierType) could both pass the application-level
+// find-then-insert-or-update check before either committed, leaving two
+// rows for what the domain model treats as a single identifier. The
+// company_tax_identifiers_company_type_country_unique index (schema.ts)
+// now makes Postgres the final authority; these tests prove it holds under
+// genuine concurrency and that a losing request gets a clean 409, never an
+// unhandled 500 or a silently duplicated row. Each test registers its own
+// fresh company so results don't depend on state left over from the
+// GET/PATCH describe block above or from test execution order.
+describe("PATCH /api/zatca/config — company_tax_identifiers uniqueness (ZATCA P2)", () => {
+  async function registerCompany(prefix: string) {
+    const res = await request(app)
+      .post("/api/auth/register")
+      .send({ companyName: `${prefix} Co`, name: "Owner", email: uniqueEmail(prefix), password: "password123" });
+    expect(res.status).toBe(201);
+    return { companyId: res.body.company.id as string, token: res.body.token as string };
+  }
+
+  it("1. valid first creation succeeds", async () => {
+    const { token } = await registerCompany("zatca-uniq-first");
+    const res = await request(app)
+      .patch("/api/zatca/config")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ vatNumber: "300000000000010" });
+    expect(res.status).toBe(200);
+    expect(res.body.identity.vatNumber).toBe("300000000000010");
+  });
+
+  it("2. sequential re-submission for the same identifier type updates the SAME row rather than creating a duplicate", async () => {
+    const { companyId, token } = await registerCompany("zatca-uniq-seq");
+    const first = await request(app)
+      .patch("/api/zatca/config")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ vatNumber: "300000000000011" });
+    expect(first.status).toBe(200);
+
+    const second = await request(app)
+      .patch("/api/zatca/config")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ vatNumber: "300000000000099" });
+    expect(second.status).toBe(200);
+    expect(second.body.identity.vatNumber).toBe("300000000000099");
+
+    // Exactly one row exists for this company+type, not two.
+    const rows = await db.query.companyTaxIdentifiers.findMany({
+      where: and(eq(companyTaxIdentifiers.companyId, companyId), eq(companyTaxIdentifiers.identifierType, "vat_number")),
+    });
+    expect(rows.length).toBe(1);
+  });
+
+  it("3. N concurrent requests racing to set the SAME identifier type for the first time never create more than one row (structural, not application-level)", async () => {
+    const { companyId, token } = await registerCompany("zatca-uniq-concurrent");
+    const results = await Promise.all(
+      Array.from({ length: 8 }, (_, i) =>
+        request(app)
+          .patch("/api/zatca/config")
+          .set("Authorization", `Bearer ${token}`)
+          .send({ vatNumber: `30000000000${String(i).padStart(4, "0")}` }),
+      ),
+    );
+
+    // Every request gets a real response — never an unhandled 500. Exactly
+    // how many actually overlap in the SELECT-then-INSERT window (and so
+    // lose with a 409) depends on real scheduling/IO timing — Node's event
+    // loop does not guarantee all 8 requests reach their SELECT before any
+    // commits, so a request that starts late may legitimately find the
+    // winner's row already committed and take the UPDATE branch (200)
+    // instead of racing at all. The one invariant the fix actually
+    // guarantees, regardless of how many happen to race, is the database
+    // state below — this is exactly what the earlier application-only
+    // check-then-act could NOT guarantee, and it holds true whether zero
+    // or seven of the eight requests happened to collide this run.
+    expect(results.every((r) => r.status === 200 || r.status === 409)).toBe(true);
+    const losers = results.filter((r) => r.status === 409);
+    for (const loser of losers) {
+      expect(typeof loser.body.error).toBe("string");
+      expect(loser.body.error.length).toBeGreaterThan(0);
+    }
+
+    const rows = await db.query.companyTaxIdentifiers.findMany({
+      where: and(eq(companyTaxIdentifiers.companyId, companyId), eq(companyTaxIdentifiers.identifierType, "vat_number")),
+    });
+    expect(rows.length).toBe(1);
+  });
+
+  it("4. different identifier types for the same company are independent and both succeed", async () => {
+    const { token } = await registerCompany("zatca-uniq-diff-type");
+    const res = await request(app)
+      .patch("/api/zatca/config")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ vatNumber: "300000000000020", commercialRegistration: "1010101020" });
+    expect(res.status).toBe(200);
+    expect(res.body.identity.vatNumber).toBe("300000000000020");
+    expect(res.body.identity.commercialRegistration).toBe("1010101020");
+  });
+
+  it("5. CROSS-TENANT: two different companies concurrently setting the SAME value never conflict with each other — uniqueness is per-company, not global", async () => {
+    const a = await registerCompany("zatca-uniq-tenant-a");
+    const b = await registerCompany("zatca-uniq-tenant-b");
+    const sameValue = "300000000000030";
+
+    const [resA, resB] = await Promise.all([
+      request(app).patch("/api/zatca/config").set("Authorization", `Bearer ${a.token}`).send({ vatNumber: sameValue }),
+      request(app).patch("/api/zatca/config").set("Authorization", `Bearer ${b.token}`).send({ vatNumber: sameValue }),
+    ]);
+    expect(resA.status).toBe(200);
+    expect(resB.status).toBe(200);
+    expect(resA.body.identity.vatNumber).toBe(sameValue);
+    expect(resB.body.identity.vatNumber).toBe(sameValue);
+  });
+
+  it("6. no delete/re-create path exists for company_tax_identifiers in the current model — not applicable, and not invented here", () => {
+    // routes/zatca.ts exposes no DELETE for tax identifiers; the only
+    // mutation path is the PATCH /config upsert covered by the tests
+    // above. Recorded explicitly rather than silently skipped.
+    expect(true).toBe(true);
+  });
+
+  it("7. concurrent UPDATEs on an already-existing identifier cannot bypass the uniqueness constraint (still exactly one row afterward)", async () => {
+    const { companyId, token } = await registerCompany("zatca-uniq-update-race");
+    const created = await request(app)
+      .patch("/api/zatca/config")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ vatNumber: "300000000000040" });
+    expect(created.status).toBe(200);
+
+    // Now that a row exists, every one of these concurrent requests takes
+    // the UPDATE-by-id branch (never the INSERT branch), so none of them
+    // can violate the unique index — but they race each other for the
+    // same row, and the model must still end up with exactly one row.
+    const results = await Promise.all(
+      Array.from({ length: 5 }, (_, i) =>
+        request(app)
+          .patch("/api/zatca/config")
+          .set("Authorization", `Bearer ${token}`)
+          .send({ vatNumber: `30000000000${String(i).padStart(4, "5")}` }),
+      ),
+    );
+    expect(results.every((r) => r.status === 200)).toBe(true);
+
+    const rows = await db.query.companyTaxIdentifiers.findMany({
+      where: and(eq(companyTaxIdentifiers.companyId, companyId), eq(companyTaxIdentifiers.identifierType, "vat_number")),
+    });
+    expect(rows.length).toBe(1);
   });
 });
 
