@@ -11,6 +11,7 @@ import { generateToken, hashToken } from "../lib/tokens.js";
 import { sendMail } from "../lib/mailer.js";
 import { logger } from "../lib/logger.js";
 import { pgErrorInfo } from "../lib/pgError.js";
+import { recordAuditEvent } from "../lib/audit.js";
 
 export const authRouter = Router();
 authRouter.use(authRateLimit);
@@ -105,10 +106,26 @@ authRouter.post("/login", async (req, res) => {
   // timing can't be used to tell whether an email is registered.
   const passwordMatches = await verifyPassword(password, user ? user.passwordHash : DUMMY_PASSWORD_HASH);
   if (!user || !passwordMatches) {
+    // Wave 1C audit: a failed-login audit_events row is deliberately NOT
+    // written here. AUTH-002 above exists specifically so a nonexistent
+    // email and a real one with a wrong password cost the same to answer
+    // — but only the real-user branch could safely attribute an audit
+    // row (companyId is NOT NULL, and inventing one for an unmatched
+    // email would violate the "never invent an actor" rule). Writing an
+    // extra DB row only on the real-user branch would reopen exactly the
+    // timing side-channel AUTH-002 closes, so this wave leaves failed
+    // tenant logins unaudited rather than weaken that existing hardening.
     return res.status(401).json({ error: "البريد الإلكتروني أو كلمة المرور غير صحيحة" });
   }
 
   const token = await issueSessionToken(user.id, user.companyId);
+  await recordAuditEvent(db, {
+    companyId: user.companyId,
+    actorUserId: user.id,
+    action: "user.login",
+    entityType: "user",
+    entityId: user.id,
+  });
   res.json({
     token,
     user: { id: user.id, name: user.name, email: user.email },
@@ -137,6 +154,15 @@ authRouter.get("/me", requireAuth, async (req, res) => {
 // already refused the second call before this handler runs).
 authRouter.post("/logout", requireAuth, async (req, res) => {
   await db.update(userSessions).set({ revokedAt: new Date() }).where(eq(userSessions.id, req.sessionId!));
+  // Wave 1C audit — req.userId/companyId are already verified (requireAuth
+  // ran, unlike login), so this is a real, safely-attributed actor.
+  await recordAuditEvent(db, {
+    companyId: req.companyId!,
+    actorUserId: req.userId!,
+    action: "user.logout",
+    entityType: "user",
+    entityId: req.userId!,
+  });
   res.json({ message: "تم تسجيل الخروج" });
 });
 

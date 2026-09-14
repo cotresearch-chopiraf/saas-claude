@@ -189,3 +189,102 @@ describe("data safety and shape", () => {
     }
   });
 });
+
+// Red-Team Remediation Wave 1C — tenant login/logout previously left zero
+// trace in audit_events (see routes/auth.ts). Self-contained: registers its
+// own companies rather than reusing the describe blocks above, so it never
+// perturbs their count/pagination-sensitive assertions.
+describe("tenant authentication audit trail (Wave 1C)", () => {
+  it("7 & 10. a successful login creates a user.login event carrying the real userId and companyId", async () => {
+    const email = uniqueEmail("authaudit-login");
+    const password = "password123";
+    const register = await request(app)
+      .post("/api/auth/register")
+      .send({ companyName: "Auth Audit Co", name: "Owner", email, password });
+    expect(register.status).toBe(201);
+    const userId = register.body.user.id as string;
+
+    const login = await request(app).post("/api/auth/login").send({ email, password });
+    expect(login.status).toBe(200);
+
+    const events = await listActivity(login.body.token, "?entityType=user&limit=100");
+    const loginEvents = events.body.events.filter((e: { action: string }) => e.action === "user.login");
+    expect(loginEvents).toHaveLength(1);
+    expect(loginEvents[0].actorUserId).toBe(userId);
+    expect(loginEvents[0].entityId).toBe(userId);
+    expect(loginEvents[0].actorEmail).toBe(email);
+  });
+
+  it("8 & 10. logout creates a user.logout event carrying the real userId and companyId", async () => {
+    const email = uniqueEmail("authaudit-logout");
+    const password = "password123";
+    const register = await request(app)
+      .post("/api/auth/register")
+      .send({ companyName: "Auth Audit Co", name: "Owner", email, password });
+    const userId = register.body.user.id as string;
+    const token = register.body.token as string;
+
+    const logout = await request(app).post("/api/auth/logout").set("Authorization", `Bearer ${token}`);
+    expect(logout.status).toBe(200);
+
+    // The logout call itself revoked this token's session, so re-login to
+    // read the trail back.
+    const relogin = await request(app).post("/api/auth/login").send({ email, password });
+    const events = await listActivity(relogin.body.token, "?entityType=user&limit=100");
+    const logoutEvents = events.body.events.filter((e: { action: string }) => e.action === "user.logout");
+    expect(logoutEvents).toHaveLength(1);
+    expect(logoutEvents[0].actorUserId).toBe(userId);
+    expect(logoutEvents[0].entityId).toBe(userId);
+  });
+
+  it("9. a failed login (wrong password or nonexistent email) never creates any audit event", async () => {
+    const email = uniqueEmail("authaudit-failed");
+    const password = "password123";
+    const register = await request(app)
+      .post("/api/auth/register")
+      .send({ companyName: "Auth Audit Co", name: "Owner", email, password });
+    const token = register.body.token as string;
+
+    const before = await listActivity(token, "?limit=100");
+    const countBefore = before.body.events.length;
+
+    const wrongPw = await request(app).post("/api/auth/login").send({ email, password: "wrongPassword999" });
+    expect(wrongPw.status).toBe(401);
+    const noAccount = await request(app)
+      .post("/api/auth/login")
+      .send({ email: uniqueEmail("authaudit-noaccount"), password: "wrongPassword999" });
+    expect(noAccount.status).toBe(401);
+
+    const after = await listActivity(token, "?limit=100");
+    // Deliberate: see routes/auth.ts's own comment — writing an audit row
+    // only for the real-user-wrong-password branch would reopen the
+    // AUTH-002 timing side-channel, so neither failure case is audited.
+    expect(after.body.events.length).toBe(countBefore);
+  });
+
+  it("11. tenant A cannot see tenant B's login/logout audit events", async () => {
+    const emailA = uniqueEmail("authaudit-tenantA");
+    const emailB = uniqueEmail("authaudit-tenantB");
+    const password = "password123";
+    const regA = await request(app)
+      .post("/api/auth/register")
+      .send({ companyName: "Tenant A Co", name: "Owner A", email: emailA, password });
+    const regB = await request(app)
+      .post("/api/auth/register")
+      .send({ companyName: "Tenant B Co", name: "Owner B", email: emailB, password });
+
+    // Generate extra login/logout activity for A only. Logging out revokes
+    // regA's own session, so the subsequent read uses the freshly-issued
+    // login token — still a valid session for the same tenant.
+    const loginA = await request(app).post("/api/auth/login").send({ email: emailA, password });
+    await request(app).post("/api/auth/logout").set("Authorization", `Bearer ${regA.body.token}`);
+
+    const bEvents = await listActivity(regB.body.token, "?entityType=user&limit=100");
+    const bAuthEvents = bEvents.body.events.filter((e: { action: string }) => e.action === "user.login" || e.action === "user.logout");
+    expect(bAuthEvents).toHaveLength(0);
+
+    const aEvents = await listActivity(loginA.body.token, "?entityType=user&limit=100");
+    const aAuthEvents = aEvents.body.events.filter((e: { action: string }) => e.action === "user.login" || e.action === "user.logout");
+    expect(aAuthEvents.length).toBeGreaterThan(0);
+  });
+});

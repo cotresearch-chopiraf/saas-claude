@@ -6,6 +6,12 @@ import { platformOperators, platformOperatorSessions } from "../db/schema.js";
 import { requirePlatformCapability } from "../lib/platformPermissions.js";
 import { logger } from "../lib/logger.js";
 
+// Wave 1C fix: thrown when the conditional demote-UPDATE below affects zero
+// rows — meaning a concurrent transfer already demoted the previous owner
+// first. Distinct from a plain Error so the route can map it to 409
+// (a real, already-resolved conflict) rather than a 500.
+class OwnershipTransferConflictError extends Error {}
+
 // MIDAD Final Pre-Launch audit, Phase 9 — Ownership Transfer. Gated by the
 // "ownershipTransfer.manage" capability, which only platform_owner holds
 // (see lib/platformPermissions.ts) — structurally prevents transfer by
@@ -91,30 +97,65 @@ platformOwnershipTransferRouter.post("/", requirePlatformCapability("ownershipTr
 
   const transferredAt = new Date();
 
-  const revokedSessionCount = await db.transaction(async (tx) => {
-    await tx.update(platformOperators).set({ role: "platform_owner", updatedAt: transferredAt }).where(eq(platformOperators.id, newOwner.id));
-    // Demoted to platform_admin, never deactivated — prevents "orphaned
-    // platform ownership" in the fuller sense: if anything goes wrong
-    // with the new owner immediately after transfer, a highly-privileged
-    // fallback operator still exists and can act, rather than the
-    // platform being left with exactly one account holding any real
-    // administrative capability.
-    await tx.update(platformOperators).set({ role: "platform_admin", updatedAt: transferredAt }).where(eq(platformOperators.id, previousOwner.id));
+  // Wave 1C fix — Ownership Transfer race: the checks above (including
+  // "previousOwner.role !== platform_owner") are all plain reads taken
+  // BEFORE this transaction opens. Without a condition on the demote
+  // UPDATE itself, two concurrent transfer requests from the same owner
+  // to two different targets could both pass every check above (neither
+  // has committed yet) and then both unconditionally promote their own
+  // target — leaving two accounts holding platform_owner at once, which
+  // is exactly the invariant ("at most one platform_owner after any
+  // transfer") this fix restores.
+  //
+  // The demote UPDATE below is now conditional on the row STILL holding
+  // role='platform_owner' at the moment it actually runs — the same
+  // atomic conditional-UPDATE discipline already used elsewhere in this
+  // codebase (changeOrders.ts, boq.ts's publish route, compliance/
+  // overrides.ts's resetOverride). Two concurrent transactions both
+  // updating previousOwner's row serialize on that row's lock; whichever
+  // commits first flips its role away from platform_owner, so the second
+  // transaction's conditional UPDATE (re-evaluated against the now-
+  // committed row once the lock is released) affects zero rows. That
+  // failure is detected here and the whole transaction — including its
+  // own newOwner promotion — is rolled back, so the losing request never
+  // partially applies.
+  let revokedSessionCount: number;
+  try {
+    revokedSessionCount = await db.transaction(async (tx) => {
+      await tx.update(platformOperators).set({ role: "platform_owner", updatedAt: transferredAt }).where(eq(platformOperators.id, newOwner.id));
+      // Demoted to platform_admin, never deactivated — prevents "orphaned
+      // platform ownership" in the fuller sense: if anything goes wrong
+      // with the new owner immediately after transfer, a highly-privileged
+      // fallback operator still exists and can act, rather than the
+      // platform being left with exactly one account holding any real
+      // administrative capability.
+      const [demoted] = await tx
+        .update(platformOperators)
+        .set({ role: "platform_admin", updatedAt: transferredAt })
+        .where(and(eq(platformOperators.id, previousOwner.id), eq(platformOperators.role, "platform_owner")))
+        .returning({ id: platformOperators.id });
+      if (!demoted) throw new OwnershipTransferConflictError();
 
-    // "Revoke Previous Owner Sessions" — every currently active session
-    // belonging to the outgoing owner, including the one making this very
-    // request (already past middleware/platformAuth.ts's check for this
-    // request; the NEXT request with this token will correctly fail and
-    // require a fresh login, which will mint a token reflecting the new
-    // platform_admin role).
-    const revoked = await tx
-      .update(platformOperatorSessions)
-      .set({ revokedAt: transferredAt })
-      .where(and(eq(platformOperatorSessions.platformOperatorId, previousOwner.id), isNull(platformOperatorSessions.revokedAt)))
-      .returning({ id: platformOperatorSessions.id });
+      // "Revoke Previous Owner Sessions" — every currently active session
+      // belonging to the outgoing owner, including the one making this very
+      // request (already past middleware/platformAuth.ts's check for this
+      // request; the NEXT request with this token will correctly fail and
+      // require a fresh login, which will mint a token reflecting the new
+      // platform_admin role).
+      const revoked = await tx
+        .update(platformOperatorSessions)
+        .set({ revokedAt: transferredAt })
+        .where(and(eq(platformOperatorSessions.platformOperatorId, previousOwner.id), isNull(platformOperatorSessions.revokedAt)))
+        .returning({ id: platformOperatorSessions.id });
 
-    return revoked.length;
-  });
+      return revoked.length;
+    });
+  } catch (err) {
+    if (err instanceof OwnershipTransferConflictError) {
+      return res.status(409).json({ error: "تم نقل الملكية بالفعل عبر طلب آخر — أعد تحميل الصفحة والمحاولة مجدداً" });
+    }
+    throw err;
+  }
 
   logger.info("platform_ownership_transferred", {
     previousOwnerId: previousOwner.id,

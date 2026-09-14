@@ -214,3 +214,56 @@ describe("platform ownership transfer: happy path", () => {
     expect((await request(app).get("/api/platform/organizations").set("Authorization", `Bearer ${targetSecondLogin.body.token}`)).status).toBe(200);
   });
 });
+
+// Red-Team Remediation Wave 1C — the checks preceding the transfer
+// transaction (including "is the caller still platform_owner") were all
+// plain reads taken BEFORE the transaction opened, with no condition on
+// the demote UPDATE itself: two concurrent transfers from the same owner
+// to two different targets could both pass every check and both commit,
+// leaving two accounts holding platform_owner at once. The fix makes the
+// previous-owner demote UPDATE conditional on the row still holding
+// role='platform_owner' at the moment it actually runs, and rolls back
+// (409) when it doesn't. This test proves the invariant holds under real
+// concurrent requests, not just sequentially.
+describe("platform ownership transfer: concurrency (Wave 1C fix)", () => {
+  it("two simultaneous transfers from the same owner to different targets: exactly one succeeds, exactly one platform_owner remains, no partial state", async () => {
+    const owner = await createOperator("platform_owner");
+    const targetB = await createOperator("platform_admin", "-race-b");
+    const targetC = await createOperator("platform_admin", "-race-c");
+
+    const [resB, resC] = await Promise.all([
+      request(app)
+        .post("/api/platform/ownership-transfer")
+        .set("Authorization", `Bearer ${owner.token}`)
+        .send({ newOwnerOperatorId: targetB.id, confirmationEmail: targetB.email, reason: "Race to B" }),
+      request(app)
+        .post("/api/platform/ownership-transfer")
+        .set("Authorization", `Bearer ${owner.token}`)
+        .send({ newOwnerOperatorId: targetC.id, confirmationEmail: targetC.email, reason: "Race to C" }),
+    ]);
+
+    // Exactly one request succeeds, exactly one is rejected as a conflict.
+    expect([resB.status, resC.status].sort()).toEqual([200, 409]);
+
+    // Exactly one platform_owner exists afterward, and it is whichever
+    // target actually won — never zero, never two.
+    const owners = await db.query.platformOperators.findMany({ where: eq(platformOperators.role, "platform_owner") });
+    expect(owners).toHaveLength(1);
+    expect([targetB.id, targetC.id]).toContain(owners[0].id);
+
+    // No partially-applied state: the original owner is cleanly demoted,
+    // and the losing target is completely unchanged — never left
+    // half-promoted by the rolled-back transaction.
+    const ownerRow = await db.query.platformOperators.findFirst({ where: eq(platformOperators.id, owner.id) });
+    expect(ownerRow!.role).toBe("platform_admin");
+
+    const loserId = owners[0].id === targetB.id ? targetC.id : targetB.id;
+    const loserRow = await db.query.platformOperators.findFirst({ where: eq(platformOperators.id, loserId) });
+    expect(loserRow!.role).toBe("platform_admin");
+
+    // Session revocation behavior remains correct for the winning
+    // transfer: the original owner's token is now dead.
+    const blocked = await request(app).get("/api/platform/organizations").set("Authorization", `Bearer ${owner.token}`);
+    expect(blocked.status).toBe(401);
+  });
+});
