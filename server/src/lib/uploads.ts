@@ -16,16 +16,57 @@ import { storageRoot } from "./storage/localDiskProvider.js";
 export const uploadsDir = storageRoot;
 fs.mkdirSync(uploadsDir, { recursive: true });
 
+// Security fix (SVG stored-XSS, read-only audit finding B) — SVG is an XML
+// document format: a browser that opens an uploaded file directly (no
+// Content-Disposition is set on the public /uploads mount, and none should
+// be — see this file's own serving comment) renders it as a live document,
+// executing any <script> or onload= handler it contains, in this app's own
+// origin. Confirmed exploitable in a real browser against this exact
+// endpoint before this fix. PNG/JPEG/WebP have no such capability — a
+// raster image format has no executable content model, so direct
+// navigation to one is inert regardless of Content-Disposition. SVG is
+// therefore removed from the allowed set entirely, not sanitized: this
+// app never needed SVG logos specifically, and sanitizing untrusted SVG
+// safely is a much larger, easier-to-get-wrong undertaking than simply not
+// accepting the one format that can carry a script.
 export const logoUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 2 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
-    if (!/^image\/(png|jpeg|jpg|webp|svg\+xml)$/.test(file.mimetype)) {
-      return cb(new Error("يُسمح فقط بملفات الصور (PNG, JPEG, WEBP, SVG)"));
+    if (!/^image\/(png|jpeg|jpg|webp)$/.test(file.mimetype)) {
+      return cb(new Error("يُسمح فقط بملفات الصور (PNG, JPEG, WEBP)"));
     }
     cb(null, true);
   },
 });
+
+// The read-only audit also proved the fileFilter check above is MIME-
+// header-only: a client controls the multipart Content-Type field freely,
+// so a non-image (or SVG) payload declared as "image/png" passed the
+// filter above untouched. This is the actual content check the audit
+// asked for — no image-processing dependency exists in this project
+// (checked server/package.json) and none is warranted for a 3-format
+// magic-byte check, so this is a small, dependency-free addition rather
+// than a new library. Each signature is the minimal, well-known byte
+// sequence every PNG/JPEG/WebP file begins with; anything else (including
+// an SVG re-labelled as one of these three MIME types) fails here even
+// though it already passed the MIME-based fileFilter.
+function bufferMatchesDeclaredImageType(buffer: Buffer, mimetype: string): boolean {
+  if (mimetype === "image/png") {
+    return buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  }
+  if (mimetype === "image/jpeg" || mimetype === "image/jpg") {
+    return buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
+  }
+  if (mimetype === "image/webp") {
+    return (
+      buffer.length >= 12 &&
+      buffer.subarray(0, 4).toString("latin1") === "RIFF" &&
+      buffer.subarray(8, 12).toString("latin1") === "WEBP"
+    );
+  }
+  return false;
+}
 
 // multer's fileFilter rejection (an unaccepted MIME type) surfaces as a
 // plain Error, not a multer.MulterError — the app-wide error handler in
@@ -40,6 +81,14 @@ export function handleLogoUpload(req: Request, res: Response, next: NextFunction
     if (err) {
       const message = err instanceof Error ? err.message : "تعذّر رفع الملف";
       return res.status(400).json({ error: message });
+    }
+    // fileFilter already rejected anything outside png/jpeg/jpg/webp by
+    // declared MIME type; this catches a MISMATCHED declaration (the
+    // spoofing case the audit demonstrated) now that the buffer is
+    // actually available (multer's fileFilter runs before the body is
+    // read, so it never has access to file.buffer).
+    if (req.file && !bufferMatchesDeclaredImageType(req.file.buffer, req.file.mimetype)) {
+      return res.status(400).json({ error: "محتوى الملف لا يطابق نوعه المعلن" });
     }
     next();
   });

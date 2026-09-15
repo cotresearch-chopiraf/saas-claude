@@ -85,25 +85,41 @@ export function buildApp() {
   app.use(requestIdMiddleware);
   app.use(errorEnvelopeMiddleware);
   app.use(requestLogMiddleware);
-  // A1 remediation — this server now DOES serve HTML (the built React SPA,
-  // below), so the prior "never serves HTML" rationale for leaving CSP off
-  // no longer holds. Still deliberately left off here rather than enabled
-  // as a side effect of this deployment-topology change: the built client
-  // (client/dist/index.html) is clean by inspection — one same-origin
-  // <script type="module"> + one same-origin stylesheet <link>, no inline
-  // script/style, no external CDN or font host referenced anywhere in the
-  // client source — so a minimal `default-src 'self'` policy (plus
-  // `img-src 'self' data:` for any client-side data-URI image preview) is
-  // very likely safe. "Very likely" from a static read is not the same bar
-  // as verifying every page/flow actually renders correctly under an
-  // enforced policy in a real browser, which is real, separate,
-  // dedicated verification work — deliberately out of scope for this
-  // change. Recommendation for that future task: start with
-  // `{ directives: { defaultSrc: ["'self'"], imgSrc: ["'self'", "data:"] } }`
-  // and widen only if a real browser check finds a legitimate blocked
-  // resource. Every other Helmet default (X-Content-Type-Options,
-  // Referrer-Policy, frameguard, etc.) is unaffected and stays on.
-  app.use(helmet({ contentSecurityPolicy: false }));
+  // CSP hardening — the A1-era comment this replaced left CSP off pending
+  // real-browser verification of every page under an enforced policy
+  // (static reading the client source is not the same bar as an actual
+  // enforced run). That verification has now been done: a dedicated
+  // read-only security audit built the production client, drove it with
+  // Playwright under exactly the policy below (injected as a real response
+  // header, server untouched), and exercised /, /settings (including the
+  // company-logo <img>), /projects, /invoices, /quotes on a real logged-in
+  // session — zero `securitypolicyviolation` events, zero console errors.
+  // That matches the static read: no inline script/style, no eval/new
+  // Function, no external script/font/API host anywhere in the client
+  // source (see client/dist/index.html — one same-origin <script
+  // type="module">, one same-origin stylesheet). `img-src` includes
+  // `data:` and `blob:` for the PDF-download blob-URL pattern used
+  // throughout the client (createObjectURL -> <a download> -> revoke) and
+  // any data-URI image preview; nothing here needed `'unsafe-inline'` or
+  // `'unsafe-eval'`, and none is added. `object-src 'none'` and
+  // `frame-ancestors 'self'` are additive hardening beyond what was
+  // strictly required to pass the browser check.
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'"],
+          styleSrc: ["'self'"],
+          imgSrc: ["'self'", "data:", "blob:"],
+          connectSrc: ["'self'"],
+          baseUri: ["'self'"],
+          objectSrc: ["'none'"],
+          frameAncestors: ["'self'"],
+        },
+      },
+    }),
+  );
   // CORS_ORIGIN is unset by default (local dev, CI, and every existing test
   // never set it), so outside production this is cors(undefined) —
   // identical to the previous cors() call, zero behavior change until a

@@ -4,11 +4,12 @@ import { buildApp } from "../src/app.js";
 import { buildCorsOptions, CorsConfigError } from "../src/lib/corsOrigins.js";
 
 // MIDAD production launch hardening: CORS_ORIGIN restriction (opt-in via
-// env, never a hardcoded domain) and safe Helmet defaults (no CSP — this
-// server serves no HTML). No auth/register calls in this file at all —
-// every assertion here works against the unauthenticated /api/health
-// endpoint, so this file can never contend with the shared authRateLimit
-// budget the way a heavier integration-test file could.
+// env, never a hardcoded domain) and safe Helmet defaults, including CSP
+// (enabled — see app.ts's own comment for the real-browser verification
+// behind the exact policy asserted below). No auth/register calls in this
+// file at all — every assertion here works against the unauthenticated
+// /api/health endpoint, so this file can never contend with the shared
+// authRateLimit budget the way a heavier integration-test file could.
 
 describe("buildCorsOptions (pure)", () => {
   it("returns undefined when CORS_ORIGIN is unset — identical to the previous cors() with no options", () => {
@@ -144,9 +145,29 @@ describe("security headers", () => {
     expect(res.headers["x-frame-options"]).toBe("SAMEORIGIN");
   });
 
-  it("does not set a Content-Security-Policy header (deliberately disabled — this server serves no HTML)", async () => {
+  // Security fix — CSP enabled with the policy a dedicated read-only audit
+  // browser-verified (zero securitypolicyviolation events, zero console
+  // errors) across /, /settings (incl. the logo <img>), /projects,
+  // /invoices, /quotes on the real production build. See app.ts's own
+  // comment for the full rationale; asserted here as individual directive
+  // substrings rather than one exact string so the test doesn't depend on
+  // Helmet's own directive-ordering/formatting.
+  it("sets the verified Content-Security-Policy header", async () => {
     const app = buildApp();
     const res = await request(app).get("/api/health");
-    expect(res.headers["content-security-policy"]).toBeUndefined();
+    const csp = res.headers["content-security-policy"];
+    expect(csp).toBeTruthy();
+    expect(csp).toContain("default-src 'self'");
+    expect(csp).toContain("script-src 'self'");
+    expect(csp).toContain("style-src 'self'");
+    expect(csp).toContain("img-src 'self' data: blob:");
+    expect(csp).toContain("connect-src 'self'");
+    expect(csp).toContain("base-uri 'self'");
+    expect(csp).toContain("object-src 'none'");
+    expect(csp).toContain("frame-ancestors 'self'");
+    // The exact directives this fix must never add, regardless of Helmet
+    // version/formatting changes.
+    expect(csp).not.toContain("unsafe-inline");
+    expect(csp).not.toContain("unsafe-eval");
   });
 });
