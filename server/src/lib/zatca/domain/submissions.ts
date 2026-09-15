@@ -151,11 +151,26 @@ export interface SubmissionOutcomeInput {
 // /submit handler. Never accepts or writes response body/header/secret
 // material; the caller is responsible for having already reduced the
 // provider's response to these safe, structured fields.
-export async function recordSubmissionOutcome(companyId: string, submissionId: string, input: SubmissionOutcomeInput) {
+//
+// 18-phase internal remediation follow-up — accepts an optional tx (same
+// established convention as createSubmission above) so a caller can make
+// this write atomic with a paired recordAuditEvent call: if the audit
+// insert fails, the whole transaction rolls back and this state write
+// never lands half-done, rather than the outcome being recorded correctly
+// while its own audit trail silently goes missing. This does NOT and
+// cannot make the earlier, already-completed HTTP call to the real ZATCA
+// provider transactional — see routes/zatca.ts's /submit handler for the
+// full explanation of what local atomicity can and cannot guarantee here.
+export async function recordSubmissionOutcome(
+  companyId: string,
+  submissionId: string,
+  input: SubmissionOutcomeInput,
+  dbOrTx: Tx | typeof db = db,
+) {
   const existing = await getSubmission(companyId, submissionId);
   if (!existing) return undefined;
 
-  const [updated] = await db
+  const [updated] = await dbOrTx
     .update(zatcaSubmissions)
     .set({
       state: input.state,

@@ -17,13 +17,13 @@ import { generateToken } from "../lib/tokens.js";
 import { buildDocumentHtml, type DocumentLanguage } from "../lib/documentHtml.js";
 import { renderHtmlToPdf } from "../lib/pdf.js";
 import { logoFileToDataUri } from "../lib/uploads.js";
-import { computeTotals } from "../lib/money.js";
+import { computeTotals, roundMoney } from "../lib/money.js";
 import { requirePermission, getUserRole, isPermittedRole } from "../lib/permissions.js";
 import { recordAuditEvent } from "../lib/audit.js";
 import { logger } from "../lib/logger.js";
 import { calculateTax } from "../lib/compliance/engine.js";
 import { withIdempotency, IdempotencyConflictError } from "../lib/idempotency.js";
-import { publicDocumentRateLimit } from "../middleware/rateLimit.js";
+import { publicDocumentRateLimit, expensiveOperationRateLimit } from "../middleware/rateLimit.js";
 import { getZatcaTenantIdentity } from "../lib/zatca/domain/config.js";
 import { buildInvoiceQrCodeDataUri } from "../lib/zatca/invoiceQr.js";
 
@@ -309,11 +309,19 @@ async function createInvoice(
       metadata: { projectId: relationship.projectId ?? null, contractId: relationship.contractId ?? null, quoteId: data.quoteId ?? null },
     });
 
+    // 18-phase internal remediation, Phase 7 — roundMoney() before storage,
+    // matching commitments.ts's resolveLineAmount discipline: the intent
+    // (per lib/money.ts's own comment) is that ALL money passes through one
+    // rounding point before it's ever persisted, so a later independent
+    // rounding (e.g. computeTotals's own toCents/Math.round) can never
+    // diverge from what the DB actually stored. Never previously enforced
+    // for invoice items — the numeric(12,2) column happened to round on
+    // INSERT regardless, so this closes an inconsistency, not a live bug.
     await tx.insert(invoiceItems).values(
       data.items.map((item) => ({
         invoiceId: created.id,
         description: item.description,
-        amount: String(item.amount),
+        amount: String(roundMoney(item.amount)),
       })),
     );
 
@@ -482,7 +490,10 @@ async function buildInvoicePdf(invoiceId: string, companyId: string) {
   return renderHtmlToPdf(html);
 }
 
-invoicesRouter.get("/:id/pdf", async (req: Request<{ id: string }>, res: Response) => {
+// 18-phase internal remediation, Phase 3 — audit finding: this
+// authenticated, headless-browser-backed PDF render had no rate limiter
+// at all (only the public token-gated twin below did).
+invoicesRouter.get("/:id/pdf", expensiveOperationRateLimit, async (req: Request<{ id: string }>, res: Response) => {
   try {
     const pdf = await buildInvoicePdf(req.params.id, req.companyId!);
     if (!pdf) return res.status(404).json({ error: "الفاتورة غير موجودة" });

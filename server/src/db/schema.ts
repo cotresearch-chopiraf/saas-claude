@@ -471,15 +471,28 @@ export const quotes = pgTable(
   }),
 );
 
-export const quoteItems = pgTable("quote_items", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  quoteId: uuid("quote_id")
-    .notNull()
-    .references(() => quotes.id, { onDelete: "cascade" }),
-  description: text("description").notNull(),
-  amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+export const quoteItems = pgTable(
+  "quote_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    quoteId: uuid("quote_id")
+      .notNull()
+      .references(() => quotes.id, { onDelete: "cascade" }),
+    description: text("description").notNull(),
+    amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    // 18-phase internal remediation, Phase 13 — routes/quotes.ts reads
+    // "every item for this quote" by quoteId alone on every quote detail/
+    // PDF/status-change read (quotes.ts:53,181,256,310). No index existed
+    // beyond the PK, unlike every sibling line-item table in this schema
+    // (commitment_lines, measurement_lines, ipc_lines, etc.), which
+    // already got this exact treatment in an earlier pass — this table
+    // just predates that convention.
+    quoteIdx: index("quote_items_quote_idx").on(table.quoteId),
+  }),
+);
 
 // An invoice can stand alone or trace back to the quote that won the job —
 // either way it carries its own frozen snapshot of the tax rate, so a later
@@ -536,15 +549,24 @@ export const invoices = pgTable(
   }),
 );
 
-export const invoiceItems = pgTable("invoice_items", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  invoiceId: uuid("invoice_id")
-    .notNull()
-    .references(() => invoices.id, { onDelete: "cascade" }),
-  description: text("description").notNull(),
-  amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+export const invoiceItems = pgTable(
+  "invoice_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    invoiceId: uuid("invoice_id")
+      .notNull()
+      .references(() => invoices.id, { onDelete: "cascade" }),
+    description: text("description").notNull(),
+    amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    // 18-phase internal remediation, Phase 13 — same gap and same fix as
+    // quote_items above; routes/invoices.ts reads by invoiceId alone on
+    // every invoice detail/PDF/status read (invoices.ts:79,121,370,451,510).
+    invoiceIdx: index("invoice_items_invoice_idx").on(table.invoiceId),
+  }),
+);
 
 // One immutable, versioned snapshot of a country's compliance rules. Never
 // mutated once published — a regulation change produces a NEW row (a new
@@ -1273,6 +1295,19 @@ export const idempotencyKeys = pgTable(
     responseStatus: integer("response_status"),
     responseBody: jsonb("response_body"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
+    // Fencing-token lease pair (18-phase internal remediation, follow-up to
+    // Phase 8) — replaces a flat "createdAt is old" heuristic, which could
+    // not tell "the leader crashed" apart from "the leader is alive but
+    // slow," with a real lease: ownerToken identifies whoever currently
+    // holds the claim, leaseExpiresAt is renewed by that holder's own
+    // heartbeat while its handler runs. A row is only ever reclaimable when
+    // leaseExpiresAt has actually passed — which cannot happen while the
+    // original holder is alive and renewing — and the leader's own
+    // completion write is conditioned on still holding ownerToken, so a
+    // leader that loses its lease can never report a false success. See
+    // lib/idempotency.ts's own file comment for the full mechanism.
+    ownerToken: text("owner_token"),
+    leaseExpiresAt: timestamp("lease_expires_at"),
   },
   (table) => ({
     companyOperationKeyUnique: uniqueIndex("idempotency_keys_company_operation_key_unique").on(

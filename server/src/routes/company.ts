@@ -12,6 +12,7 @@ import { recordAuditEvent } from "../lib/audit.js";
 import { logger } from "../lib/logger.js";
 import { uploadFile, publicUrlFor } from "../lib/storage/index.js";
 import { assertWithinLimit, countActiveUsers, LimitExceededError } from "../lib/entitlements.js";
+import { expensiveOperationRateLimit } from "../middleware/rateLimit.js";
 
 export const companyRouter = Router();
 
@@ -59,15 +60,51 @@ companyRouter.patch("/settings", requireOwner, async (req, res) => {
   const current = await db.query.companies.findFirst({ where: eq(companies.id, req.companyId!) });
   const mergedFlags = { ...defaultFeatureFlags, ...(current?.featureFlags as CompanyFeatureFlags), ...featureFlags };
 
-  const [updated] = await db
-    .update(companies)
-    .set({
-      ...rest,
-      ...(defaultTaxRatePercent !== undefined ? { defaultTaxRatePercent: String(defaultTaxRatePercent) } : {}),
-      featureFlags: mergedFlags,
-    })
-    .where(eq(companies.id, req.companyId!))
-    .returning();
+  // 18-phase internal remediation, Phase 9 — this owner-gated,
+  // company-wide settings mutation (including defaultTaxRatePercent, which
+  // feeds every future invoice's tax fallback) had no audit trail at all,
+  // unlike zatca.ts's near-identical PATCH /config. Wrapped in a
+  // transaction so the update and its audit row commit atomically, same
+  // discipline as every other audited mutation in this codebase.
+  const updated = await db.transaction(async (tx) => {
+    const [row] = await tx
+      .update(companies)
+      .set({
+        ...rest,
+        ...(defaultTaxRatePercent !== undefined ? { defaultTaxRatePercent: String(defaultTaxRatePercent) } : {}),
+        featureFlags: mergedFlags,
+      })
+      .where(eq(companies.id, req.companyId!))
+      .returning();
+
+    await recordAuditEvent(tx, {
+      companyId: req.companyId!,
+      actorUserId: req.userId!,
+      action: "company.settingsUpdated",
+      entityType: "company",
+      entityId: req.companyId!,
+      beforeValue: current
+        ? {
+            name: current.name,
+            address: current.address,
+            taxId: current.taxId,
+            phone: current.phone,
+            defaultTaxRatePercent: current.defaultTaxRatePercent,
+            featureFlags: current.featureFlags,
+          }
+        : null,
+      afterValue: {
+        name: row.name,
+        address: row.address,
+        taxId: row.taxId,
+        phone: row.phone,
+        defaultTaxRatePercent: row.defaultTaxRatePercent,
+        featureFlags: row.featureFlags,
+      },
+    });
+
+    return row;
+  });
 
   res.json({
     name: updated.name,
@@ -80,7 +117,10 @@ companyRouter.patch("/settings", requireOwner, async (req, res) => {
   });
 });
 
-companyRouter.post("/logo", requireOwner, handleLogoUpload, async (req, res) => {
+// 18-phase internal remediation, Phase 3 — logo upload had no rate
+// limiter (low severity: owner-gated, size-limited by multer already, but
+// still an unbounded storage-write loop for a compromised owner session).
+companyRouter.post("/logo", requireOwner, expensiveOperationRateLimit, handleLogoUpload, async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "لم يتم إرفاق ملف" });
 
   // Goes through the storage abstraction (lib/storage/) rather than
@@ -99,7 +139,27 @@ companyRouter.post("/logo", requireOwner, handleLogoUpload, async (req, res) => 
   });
 
   const logoPath = publicUrlFor(file.storageKey);
-  await db.update(companies).set({ logoPath }).where(eq(companies.id, req.companyId!));
+  // 18-phase internal remediation, Phase 9 (follow-up) — lower-severity
+  // than the settings fix above (a cosmetic asset, not a financial/access
+  // setting), but still a company-settings mutation with no prior trail.
+  // The logoPath UPDATE and its audit event are wrapped together so an
+  // audit-insert failure can't leave the company pointed at a new logo
+  // with no record of who changed it. (uploadFile() above — the actual
+  // disk write + files-table row — is its own, separately-atomic unit,
+  // same as every other caller of the storage abstraction; only the
+  // company-row mutation this audit event describes is wrapped here.)
+  await db.transaction(async (tx) => {
+    await tx.update(companies).set({ logoPath }).where(eq(companies.id, req.companyId!));
+    await recordAuditEvent(tx, {
+      companyId: req.companyId!,
+      actorUserId: req.userId!,
+      action: "company.logoUpdated",
+      entityType: "company",
+      entityId: req.companyId!,
+      afterValue: { logoPath },
+    });
+  });
+
   res.json({ logoPath });
 });
 
@@ -268,16 +328,38 @@ companyRouter.post("/invites", requireOwner, async (req, res) => {
   }
 
   const token = generateToken();
-  const [invite] = await db
-    .insert(companyInvites)
-    .values({
+  // 18-phase internal remediation, Phase 9 (follow-up) — the insert and
+  // its audit event are atomic; the mail send below deliberately stays
+  // OUTSIDE this transaction (unchanged from before) — it's not a DB
+  // operation, and Slice AA's own already-established policy is that a
+  // mail failure never rolls back or invalidates an invite that has
+  // already durably committed.
+  const invite = await db.transaction(async (tx) => {
+    const [row] = await tx
+      .insert(companyInvites)
+      .values({
+        companyId: req.companyId!,
+        email: parsed.data.email,
+        role: parsed.data.role,
+        tokenHash: hashToken(token),
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      })
+      .returning({ id: companyInvites.id, email: companyInvites.email, role: companyInvites.role });
+
+    // An invite grants a role (including "owner") to whoever accepts it,
+    // but issuing one had no audit trail — only the later role-change
+    // route (PATCH /members/:id above) was audited. Recorded at issue
+    // time, not acceptance, since the role was decided here.
+    await recordAuditEvent(tx, {
       companyId: req.companyId!,
-      email: parsed.data.email,
-      role: parsed.data.role,
-      tokenHash: hashToken(token),
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-    })
-    .returning({ id: companyInvites.id, email: companyInvites.email, role: companyInvites.role });
+      actorUserId: req.userId!,
+      action: "company.memberInvited",
+      entityType: "company_invite",
+      entityId: row.id,
+      afterValue: { email: row.email, role: row.role },
+    });
+    return row;
+  });
 
   // Slice AA — the invite row already exists regardless of delivery
   // outcome (an owner can always see it in GET /invites and resend by
@@ -306,6 +388,19 @@ companyRouter.delete("/invites/:id", requireOwner, async (req, res) => {
   });
   if (!existing) return res.status(404).json({ error: "الدعوة غير موجودة" });
 
-  await db.delete(companyInvites).where(eq(companyInvites.id, req.params.id));
+  // 18-phase internal remediation, Phase 9 (follow-up) — same gap as
+  // invite creation, same transaction-wrapped atomicity.
+  await db.transaction(async (tx) => {
+    await tx.delete(companyInvites).where(eq(companyInvites.id, req.params.id));
+    await recordAuditEvent(tx, {
+      companyId: req.companyId!,
+      actorUserId: req.userId!,
+      action: "company.inviteRevoked",
+      entityType: "company_invite",
+      entityId: existing.id,
+      beforeValue: { email: existing.email, role: existing.role },
+    });
+  });
+
   res.status(204).end();
 });

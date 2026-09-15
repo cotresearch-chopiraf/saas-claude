@@ -8,6 +8,7 @@ import { recordAuditEvent } from "../lib/audit.js";
 import { requirePermission } from "../lib/permissions.js";
 import { pgErrorInfo } from "../lib/pgError.js";
 import { withIdempotency, IdempotencyConflictError } from "../lib/idempotency.js";
+import { expensiveOperationRateLimit } from "../middleware/rateLimit.js";
 
 type ProjectParams = { projectId: string };
 type ItemParams = ProjectParams & { itemId: string };
@@ -94,7 +95,9 @@ function csvCell(value: string | number): string {
 // Directly answers the #1 complaint about the market leader (Buildertrend):
 // "no simple or bulk way to download years of ... data." Your numbers are
 // never locked in here — one click, always a plain CSV.
-budgetRouter.get("/export.csv", async (req: Request<ProjectParams>, res: Response) => {
+// 18-phase internal remediation, Phase 3 — bulk export had no rate
+// limiter (an explicitly-called-out "expensive operation" in this pass).
+budgetRouter.get("/export.csv", expensiveOperationRateLimit, async (req: Request<ProjectParams>, res: Response) => {
   const projectId = req.params.projectId;
   const items = await db.query.budgetItems.findMany({ where: eq(budgetItems.projectId, projectId) });
   const projectExpenses = await db.query.expenses.findMany({ where: eq(expenses.projectId, projectId) });

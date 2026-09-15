@@ -3,7 +3,7 @@ import request from "supertest";
 import { buildApp } from "../src/app.js";
 import { resetDb } from "./setup.js";
 import { db } from "../src/db/client.js";
-import { files } from "../src/db/schema.js";
+import { files, auditEvents } from "../src/db/schema.js";
 import { eq } from "drizzle-orm";
 import fs from "node:fs";
 import path from "node:path";
@@ -132,6 +132,36 @@ describe("Project Documents (UI-10)", () => {
     expect(listRes.status).toBe(200);
     expect(listRes.body).toHaveLength(1);
     expect(listRes.body[0].id).toBe(uploadRes.body.id);
+  });
+
+  // 18-phase internal remediation, Phase 9 — upload previously had no
+  // audit trail, unlike the sibling client-visibility-toggle route.
+  it("6b. a successful upload records a document.uploaded audit event", async () => {
+    const projectId = await createProject();
+    const uploadRes = await uploadPng(projectId, ownerToken, "audited-photo.png");
+    expect(uploadRes.status).toBe(201);
+
+    const events = await db.query.auditEvents.findMany({ where: eq(auditEvents.entityId, uploadRes.body.id) });
+    const uploadEvent = events.find((e) => e.action === "document.uploaded");
+    expect(uploadEvent).toBeDefined();
+    expect(uploadEvent!.entityType).toBe(PROJECT_DOCUMENT_ENTITY_TYPE);
+  });
+
+  // 18-phase internal remediation, Phase 4 — the fileFilter is MIME-
+  // header-only (client-controlled); this proves the magic-byte content
+  // check (matchesFileSignature, shared with the logo upload's own fix)
+  // actually rejects a mismatched declaration, not just an unlisted one.
+  it("6c. rejects a non-PDF payload falsely declared as application/pdf (content/MIME mismatch)", async () => {
+    const projectId = await createProject();
+    const res = await request(app)
+      .post(`/api/projects/${projectId}/documents`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .attach("document", Buffer.from("not actually a pdf"), { filename: "fake.pdf", contentType: "application/pdf" });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("محتوى الملف لا يطابق نوعه المعلن");
+
+    const listRes = await listDocuments(projectId);
+    expect(listRes.body).toEqual([]);
   });
 
   it("7. rejects an unsupported MIME type", async () => {

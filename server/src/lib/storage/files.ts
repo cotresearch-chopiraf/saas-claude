@@ -1,7 +1,11 @@
 import { and, eq } from "drizzle-orm";
+import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { db } from "../../db/client.js";
 import { files } from "../../db/schema.js";
 import { storageProvider } from "./provider.js";
+import type * as schema from "../../db/schema.js";
+
+type Tx = NodePgDatabase<typeof schema>;
 
 export interface UploadFileInput {
   companyId: string;
@@ -19,7 +23,17 @@ export interface UploadFileInput {
   previousVersionId?: string;
 }
 
-export async function uploadFile(input: UploadFileInput) {
+// 18-phase internal remediation follow-up — accepts an optional tx (same
+// established convention as lib/zatca/domain/submissions.ts's
+// createSubmission/recordSubmissionOutcome), defaulting to the module-
+// level db so every existing caller is completely unaffected. Lets a
+// route make this insert atomic with a paired recordAuditEvent call. Note
+// this can only ever cover the DB row: storageProvider.save() below is a
+// real filesystem write that happens first and is not part of any
+// Postgres transaction regardless — an orphaned on-disk file if something
+// fails after it is a pre-existing characteristic of this design, not
+// something a tx parameter here changes.
+export async function uploadFile(input: UploadFileInput, dbOrTx: Tx | typeof db = db) {
   const stored = await storageProvider.save({
     buffer: input.buffer,
     fileName: input.fileName,
@@ -29,11 +43,11 @@ export async function uploadFile(input: UploadFileInput) {
 
   let version = 1;
   if (input.previousVersionId) {
-    const previous = await db.query.files.findFirst({ where: eq(files.id, input.previousVersionId) });
+    const previous = await dbOrTx.query.files.findFirst({ where: eq(files.id, input.previousVersionId) });
     version = (previous?.version ?? 0) + 1;
   }
 
-  const [record] = await db
+  const [record] = await dbOrTx
     .insert(files)
     .values({
       companyId: input.companyId,

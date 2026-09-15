@@ -14,6 +14,7 @@ import {
 import { requirePermission } from "../lib/permissions.js";
 import { recordAuditEvent } from "../lib/audit.js";
 import { uploadFile, getFile, readFileBuffer } from "../lib/storage/index.js";
+import { matchesFileSignature } from "../lib/fileSignature.js";
 
 // =============================================================================
 // MIDAD Phase D1 — Nitaqat + GOSI Compliance Tracking Foundation.
@@ -399,9 +400,14 @@ const evidenceUpload = multer({
     cb(null, true);
   },
 });
+// 18-phase internal remediation, Phase 4 — same magic-byte content check
+// as documents.ts (fileFilter above is MIME-header-only).
 function handleEvidenceUpload(req: Request, res: Response, next: () => void) {
   evidenceUpload.single("evidence")(req, res, (err: unknown) => {
     if (err) return res.status(400).json({ error: err instanceof Error ? err.message : "تعذّر رفع الملف" });
+    if (req.file && !matchesFileSignature(req.file.buffer, req.file.mimetype)) {
+      return res.status(400).json({ error: "محتوى الملف لا يطابق نوعه المعلن" });
+    }
     next();
   });
 }

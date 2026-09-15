@@ -386,6 +386,20 @@
       "when": 1789420137574,
       "tag": "0054_certain_red_skull",
       "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1789468972041,
+      "tag": "0055_bored_red_hulk",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1789474141852,
+      "tag": "0056_charming_puma",
+      "breakpoints": true
     }
   ]
 }

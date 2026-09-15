@@ -1153,21 +1153,43 @@ zatcaRouter.post("/submissions/:id/submit", requireSubmit, zatcaSubmitRateLimit,
     // fatooraProvider.ts's normalizers), and this is a real ZATCA business
     // outcome, not a MIDAD interpretation of one — see Scope 24's own
     // no-compliance-inference rule referenced in this route's file comment.
-    const responded = await recordSubmissionOutcome(req.companyId!, submission.id, {
-      state: result.status,
-      zatcaStatus: result.rawStatus ?? null,
-      correlationId: result.correlationId ?? null,
-      warnings: result.warnings ?? null,
-      clearedDocumentXmlBase64: result.clearedInvoiceXmlBase64 ?? null,
-      respondedAt: result.respondedAt,
-    });
-    await recordAuditEvent(db, {
-      companyId: req.companyId!,
-      actorUserId: req.userId!,
-      action: "zatca.submission.responseReceived",
-      entityType: "zatca_submission",
-      entityId: submission.id,
-      afterValue: { state: result.status, rawStatus: result.rawStatus ?? null, correlationId: result.correlationId ?? null },
+    //
+    // 18-phase internal remediation follow-up — recordSubmissionOutcome and
+    // recordAuditEvent are now atomic (one local transaction): the real
+    // HTTP call to ZATCA above already happened and cannot be rolled back
+    // by anything local, but if the audit insert below fails, this state
+    // write must not land half-done either — an uncaught exception here
+    // used to fall through to the catch block's non-ZatcaError branch,
+    // which (before this fix) would blindly overwrite an ALREADY-CORRECTLY-
+    // RECORDED "cleared"/"reported" outcome with "retry_required", risking
+    // a genuine duplicate submission to ZATCA on the next retry. With this
+    // wrapped, that failure mode instead rolls back to no state change at
+    // all (the row stays "submitting"), so the catch-all below only ever
+    // writes "retry_required" over a row that never got a real outcome
+    // recorded in the first place.
+    const responded = await db.transaction(async (tx) => {
+      const updated = await recordSubmissionOutcome(
+        req.companyId!,
+        submission.id,
+        {
+          state: result.status,
+          zatcaStatus: result.rawStatus ?? null,
+          correlationId: result.correlationId ?? null,
+          warnings: result.warnings ?? null,
+          clearedDocumentXmlBase64: result.clearedInvoiceXmlBase64 ?? null,
+          respondedAt: result.respondedAt,
+        },
+        tx,
+      );
+      await recordAuditEvent(tx, {
+        companyId: req.companyId!,
+        actorUserId: req.userId!,
+        action: "zatca.submission.responseReceived",
+        entityType: "zatca_submission",
+        entityId: submission.id,
+        afterValue: { state: result.status, rawStatus: result.rawStatus ?? null, correlationId: result.correlationId ?? null },
+      });
+      return updated;
     });
     logger.info("zatca_submission_response_received", { companyId: req.companyId, submissionId: submission.id, state: result.status });
     return res.json({ submission: responded, alreadyAttempted: false });
@@ -1180,23 +1202,94 @@ zatcaRouter.post("/submissions/:id/submit", requireSubmit, zatcaSubmitRateLimit,
       // correct next step; a non-retryable failure (bad credential, this
       // tenant's own configuration, a malformed request) lands on
       // "compliance_failed", unchanged from this route's prior behavior.
-      const failed = await recordSubmissionOutcome(req.companyId!, submission.id, {
-        state: err.retryable ? "retry_required" : "compliance_failed",
-        zatcaErrorCode: err.category,
-        zatcaErrorMessage: err.message,
-        respondedAt: new Date(),
-        incrementRetryCount: true,
-      });
-      await recordAuditEvent(db, {
-        companyId: req.companyId!,
-        actorUserId: req.userId!,
-        action: "zatca.submission.failed",
-        entityType: "zatca_submission",
-        entityId: submission.id,
-        afterValue: { category: err.category, message: err.message, retryable: err.retryable },
+      // 18-phase internal remediation follow-up — same atomicity as the
+      // success path above: the state write and its audit trail must land
+      // together or not at all.
+      const failed = await db.transaction(async (tx) => {
+        const updated = await recordSubmissionOutcome(
+          req.companyId!,
+          submission.id,
+          {
+            state: err.retryable ? "retry_required" : "compliance_failed",
+            zatcaErrorCode: err.category,
+            zatcaErrorMessage: err.message,
+            respondedAt: new Date(),
+            incrementRetryCount: true,
+          },
+          tx,
+        );
+        await recordAuditEvent(tx, {
+          companyId: req.companyId!,
+          actorUserId: req.userId!,
+          action: "zatca.submission.failed",
+          entityType: "zatca_submission",
+          entityId: submission.id,
+          afterValue: { category: err.category, message: err.message, retryable: err.retryable },
+        });
+        return updated;
       });
       logger.warn("zatca_submission_failed", { companyId: req.companyId, submissionId: submission.id, category: err.category });
       return res.status(httpStatusForZatcaError(err)).json({ error: err.message, category: err.category, submission: failed });
+    }
+
+    // 18-phase internal remediation, Phase 10 — audit finding: this branch
+    // used to just `throw err`, leaving the row `claimSubmissionForSubmit`
+    // already moved to "submitting" permanently stuck there — every later
+    // /submit call for the same submission would find it in
+    // SUBMISSION_TERMINAL_OR_INFLIGHT_STATES, take the `alreadyAttempted:
+    // true` branch above, and never retry, with no other route able to
+    // unstick it. Any exception reaching here that is NOT a ZatcaError is
+    // by definition a bug (a malformed provider response the normalizers
+    // didn't anticipate, a signer/verification crash, etc.) rather than a
+    // classified ZATCA outcome — but it must still leave the submission in
+    // a state a human/retry can act on, exactly like a retryable
+    // ZatcaError does. The real error is logged server-side only (never
+    // put into zatcaErrorMessage, which — per errors.ts's own documented
+    // contract for that field — must always be safe to return in an API
+    // response); the client still gets the app's normal sanitized 500 via
+    // the global error handler, since this rethrows rather than
+    // responding itself.
+    logger.error("zatca_submission_unexpected_error", {
+      companyId: req.companyId,
+      submissionId: submission.id,
+      errorName: err instanceof Error ? err.name : typeof err,
+      errorMessage: err instanceof Error ? err.message : String(err),
+    });
+    // 18-phase internal remediation follow-up — same atomicity as the
+    // other two branches. If the audit insert here fails, this rolls back
+    // to no state change — the row stays "submitting" (still stuck, but
+    // safely so: a stuck row blocks further action rather than reporting
+    // a wrong one) rather than committing a "retry_required" write on its
+    // own with no audit trail.
+    try {
+      await db.transaction(async (tx) => {
+        await recordSubmissionOutcome(
+          req.companyId!,
+          submission.id,
+          {
+            state: "retry_required",
+            zatcaErrorCode: "internal",
+            zatcaErrorMessage: "حدث خطأ غير متوقع أثناء الإرسال — يمكن إعادة المحاولة",
+            respondedAt: new Date(),
+            incrementRetryCount: true,
+          },
+          tx,
+        );
+        await recordAuditEvent(tx, {
+          companyId: req.companyId!,
+          actorUserId: req.userId!,
+          action: "zatca.submission.failed",
+          entityType: "zatca_submission",
+          entityId: submission.id,
+          afterValue: { category: "internal", retryable: true, unexpected: true },
+        });
+      });
+    } catch (recoveryErr) {
+      logger.error("zatca_submission_recovery_write_failed", {
+        companyId: req.companyId,
+        submissionId: submission.id,
+        error: recoveryErr instanceof Error ? recoveryErr.message : String(recoveryErr),
+      });
     }
     throw err;
   }

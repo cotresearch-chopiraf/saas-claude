@@ -170,4 +170,55 @@ describe("security headers", () => {
     expect(csp).not.toContain("unsafe-inline");
     expect(csp).not.toContain("unsafe-eval");
   });
+
+  // 18-phase internal remediation, Phase 5 — the one gap the CSP/headers
+  // audit found: no Permissions-Policy header at all.
+  it("sets a restrictive Permissions-Policy header", async () => {
+    const app = buildApp();
+    const res = await request(app).get("/api/health");
+    const policy = res.headers["permissions-policy"];
+    expect(policy).toBeTruthy();
+    expect(policy).toContain("camera=()");
+    expect(policy).toContain("microphone=()");
+    expect(policy).toContain("geolocation=()");
+  });
+});
+
+// 18-phase internal remediation, Phase 3 — trust proxy was never
+// configured at all (not even env-driven); see app.ts's own comment for
+// why the actual hop-count value stays a deployment (Railway) decision,
+// not something this internal pass invents. These tests only prove the
+// wiring: unset behaves exactly as before (Express's own false default,
+// so every existing test/dev-local behavior is unchanged), and a value
+// actually reaches app.set("trust proxy", ...) when TRUST_PROXY is set.
+describe("trust proxy configuration (TRUST_PROXY env var)", () => {
+  const original = process.env.TRUST_PROXY;
+  afterEach(() => {
+    if (original === undefined) delete process.env.TRUST_PROXY;
+    else process.env.TRUST_PROXY = original;
+  });
+
+  it("TRUST_PROXY unset reproduces Express's own prior default (false) — no behavior change", () => {
+    delete process.env.TRUST_PROXY;
+    const app = buildApp();
+    expect(app.get("trust proxy")).toBe(false);
+  });
+
+  it("TRUST_PROXY=1 sets a numeric hop count", () => {
+    process.env.TRUST_PROXY = "1";
+    const app = buildApp();
+    expect(app.get("trust proxy")).toBe(1);
+  });
+
+  it("TRUST_PROXY=true sets boolean trust-all", () => {
+    process.env.TRUST_PROXY = "true";
+    const app = buildApp();
+    expect(app.get("trust proxy")).toBe(true);
+  });
+
+  it("TRUST_PROXY as a subnet/address list is passed through unchanged", () => {
+    process.env.TRUST_PROXY = "loopback,uniquelocal";
+    const app = buildApp();
+    expect(app.get("trust proxy")).toBe("loopback,uniquelocal");
+  });
 });

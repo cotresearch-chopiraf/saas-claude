@@ -4,7 +4,8 @@ import { and, eq } from "drizzle-orm";
 import { buildApp } from "../src/app.js";
 import { resetDb } from "./setup.js";
 import { db } from "../src/db/client.js";
-import { auditEvents } from "../src/db/schema.js";
+import { auditEvents, idempotencyKeys } from "../src/db/schema.js";
+import { withIdempotency, IdempotencyLeaseLostError } from "../src/lib/idempotency.js";
 
 // Slice AA Scope E — opt-in Idempotency-Key support for invoice/quote
 // creation. Five-scenario matrix per the slice's own requirement: first
@@ -17,6 +18,7 @@ const app = buildApp();
 
 let tokenA: string;
 let tokenB: string;
+let companyIdA: string;
 
 beforeAll(async () => {
   await resetDb();
@@ -24,6 +26,7 @@ beforeAll(async () => {
     .post("/api/auth/register")
     .send({ companyName: "Idem Co A", name: "Owner A", email: "idem-owner-a@test.com", password: "password123" });
   tokenA = a.body.token;
+  companyIdA = a.body.company.id;
 
   const b = await request(app)
     .post("/api/auth/register")
@@ -615,5 +618,243 @@ describe("Idempotency: commitment creation", () => {
       .set("Idempotency-Key", "commitment-authz-1")
       .send(commitmentPayload(supplierFromCompanyB));
     expect(res.status).toBe(404);
+  });
+});
+
+// 18-phase internal remediation, Phase 8 follow-up — lease/heartbeat/
+// fencing-token crash recovery. A prior version of this fix reclaimed any
+// claim whose createdAt was simply "old" (>30s) — which could not tell a
+// crashed leader apart from a LIVE one that was merely slow, and a
+// read-only review caught the real consequence: a retry could steal a
+// live leader's claim and run the SAME handler a second time (a genuine
+// financial mutation executed twice), while the original leader silently
+// reported false success to its own caller too. These tests exercise the
+// real lease + fencing-token mechanism (lib/idempotency.ts) end to end —
+// including, critically, a REAL live leader with a REAL heartbeat racing
+// a REAL reclaim attempt, not just a synthetically-inserted dead row with
+// no process behind it.
+describe("Idempotency: lease-based crash recovery (dead-leader reclaim + live-leader protection)", () => {
+  // Test-scaled LEASE_DURATION_MS/HEARTBEAT_INTERVAL_MS (see idempotency.ts's
+  // own constants) — mirrored here only so these tests can compute
+  // duration multiples of them without importing internal constants.
+  const LEASE_MS = 300;
+  const HEARTBEAT_MS = 80;
+
+  async function insertDeadClaim(key: string, ageMs = LEASE_MS + 500) {
+    const [row] = await db
+      .insert(idempotencyKeys)
+      .values({
+        companyId: companyIdA,
+        operation: "expense.create",
+        key,
+        requestFingerprint: "irrelevant-fingerprint",
+        status: "pending",
+        ownerToken: "dead-owner-token",
+        leaseExpiresAt: new Date(Date.now() - ageMs),
+      })
+      .returning();
+    return row;
+  }
+
+  it("DEAD LEADER: a claim whose lease has actually expired is reclaimed (atomic steal — new ownerToken), not stuck forever", async () => {
+    const key = "lease-dead-1";
+    const original = await insertDeadClaim(key);
+
+    const outcome = await withIdempotency(companyIdA, "expense.create", key, { ok: true }, async () => ({
+      status: 201,
+      body: { recovered: true },
+    }));
+
+    expect(outcome.replayed).toBe(false);
+    expect(outcome.status).toBe(201);
+    expect(outcome.body).toEqual({ recovered: true });
+
+    const row = await db.query.idempotencyKeys.findFirst({ where: eq(idempotencyKeys.id, original.id) });
+    expect(row!.status).toBe("completed");
+    expect(row!.ownerToken).not.toBe("dead-owner-token"); // proves an actual steal happened, not an in-place edit
+  });
+
+  it("LIVE LEADER (synthetic boundary check): a claim whose lease has NOT yet expired is never stolen, even though it looks old by any timestamp other than leaseExpiresAt", async () => {
+    const key = "lease-live-boundary-1";
+    // leaseExpiresAt is set comfortably beyond the follower's ENTIRE
+    // poll/claim budget (CLAIM_ATTEMPTS * POLL_ATTEMPTS * POLL_INTERVAL_MS
+    // ≈ 3s in idempotency.ts) — not just "a bit in the future" — so the
+    // lease genuinely never expires for the full duration of this test,
+    // isolating exactly what's being proven: leaseExpiresAt, not
+    // createdAt, is what reclaim consults.
+    const [row] = await db
+      .insert(idempotencyKeys)
+      .values({
+        companyId: companyIdA,
+        operation: "expense.create",
+        key,
+        requestFingerprint: "irrelevant-fingerprint",
+        status: "pending",
+        ownerToken: "live-owner-token",
+        leaseExpiresAt: new Date(Date.now() + 8_000),
+        createdAt: new Date(Date.now() - 60_000), // old by createdAt — must NOT matter anymore
+      })
+      .returning();
+
+    await expect(
+      withIdempotency(companyIdA, "expense.create", key, { ok: true }, async () => ({
+        status: 201,
+        body: { shouldNeverRun: true },
+      })),
+    ).rejects.toThrow("idempotency key contention could not be resolved");
+
+    const after = await db.query.idempotencyKeys.findFirst({ where: eq(idempotencyKeys.id, row.id) });
+    expect(after!.ownerToken).toBe("live-owner-token"); // untouched — never stolen
+    expect(after!.status).toBe("pending");
+  });
+
+  it("LIVE LEADER (real concurrency): a genuinely live, heartbeat-renewing leader is never stolen from by a concurrent retry — handler runs exactly once, both requests get the correct result", async () => {
+    const key = "lease-live-real-1";
+    let leaderHandlerRuns = 0;
+    let followerHandlerRuns = 0;
+
+    // Leader's handler outlives at least one full lease period + a
+    // heartbeat tick (LEASE_MS=300, HEARTBEAT_MS=80) — long enough that if
+    // the OLD flat-timestamp/no-heartbeat design were still in place, a
+    // concurrent retry landing after LEASE_MS would have stolen this claim
+    // and run its own handler too. It must not.
+    const leaderPromise = withIdempotency(companyIdA, "expense.create", key, { ok: true }, async () => {
+      leaderHandlerRuns++;
+      await new Promise((resolve) => setTimeout(resolve, LEASE_MS + HEARTBEAT_MS * 2));
+      return { status: 201, body: { leader: true } };
+    });
+
+    // Give the leader a moment to actually claim before the follower starts.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const followerPromise = withIdempotency(companyIdA, "expense.create", key, { ok: true }, async () => {
+      followerHandlerRuns++;
+      return { status: 201, body: { follower: true } };
+    });
+
+    const [leaderOutcome, followerOutcome] = await Promise.all([leaderPromise, followerPromise]);
+
+    expect(leaderHandlerRuns).toBe(1);
+    expect(followerHandlerRuns).toBe(0); // the follower's handler must NEVER execute — no duplicate financial mutation
+    expect(leaderOutcome.replayed).toBe(false);
+    expect(leaderOutcome.body).toEqual({ leader: true });
+    // Correct current semantics: the follower waited out the leader and
+    // replayed its real result, rather than being told a different or
+    // fabricated outcome.
+    expect(followerOutcome.replayed).toBe(true);
+    expect(followerOutcome.body).toEqual({ leader: true });
+
+    const rows = await db.query.idempotencyKeys.findMany({
+      where: and(eq(idempotencyKeys.companyId, companyIdA), eq(idempotencyKeys.key, key)),
+    });
+    expect(rows).toHaveLength(1); // exactly one claim row ever existed for this key — no duplicate row either
+  });
+
+  it("FENCING TOKEN: if a claim's ownership changes out from under a leader while its handler is still running, the leader detects lost ownership and never reports false success", async () => {
+    const key = "lease-fencing-1";
+
+    await expect(
+      withIdempotency(companyIdA, "expense.create", key, { ok: true }, async () => {
+        // Simulates the residual pathological case (see idempotency.ts's
+        // own file comment): something else has taken over this claim's
+        // ownership while this handler was still executing. The handler
+        // itself still completes normally and "succeeds" from its own
+        // point of view — the fencing-token check is what must catch this,
+        // not the handler.
+        await db
+          .update(idempotencyKeys)
+          .set({ ownerToken: "hijacker-token", leaseExpiresAt: new Date(Date.now() + LEASE_MS) })
+          .where(and(eq(idempotencyKeys.companyId, companyIdA), eq(idempotencyKeys.key, key)));
+        return { status: 201, body: { shouldNotBeReportedAsSuccess: true } };
+      }),
+    ).rejects.toThrow(IdempotencyLeaseLostError);
+
+    // The row must reflect the hijacker's ownership, untouched by the
+    // original leader's cleanup-on-error delete (which is itself
+    // ownerToken-scoped, so it correctly can't clobber a new owner).
+    const row = await db.query.idempotencyKeys.findFirst({
+      where: and(eq(idempotencyKeys.companyId, companyIdA), eq(idempotencyKeys.key, key)),
+    });
+    expect(row).toBeDefined();
+    expect(row!.ownerToken).toBe("hijacker-token");
+    expect(row!.status).toBe("pending"); // never marked "completed" by the leader that lost ownership
+  });
+
+  it("CONCURRENT RETRIES: several concurrent callers racing to reclaim the same dead claim — exactly one wins, handler runs exactly once, everyone gets the same result", async () => {
+    const key = "lease-concurrent-reclaim-1";
+    await insertDeadClaim(key);
+    let handlerRuns = 0;
+
+    const outcomes = await Promise.all(
+      Array.from({ length: 5 }, () =>
+        withIdempotency(companyIdA, "expense.create", key, { ok: true }, async () => {
+          handlerRuns++;
+          return { status: 201, body: { winner: true } };
+        }),
+      ),
+    );
+
+    expect(handlerRuns).toBe(1);
+    for (const outcome of outcomes) {
+      expect(outcome.status).toBe(201);
+      expect(outcome.body).toEqual({ winner: true });
+    }
+    expect(outcomes.filter((o) => !o.replayed)).toHaveLength(1);
+    expect(outcomes.filter((o) => o.replayed)).toHaveLength(4);
+
+    const rows = await db.query.idempotencyKeys.findMany({
+      where: and(eq(idempotencyKeys.companyId, companyIdA), eq(idempotencyKeys.key, key)),
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].status).toBe("completed");
+  });
+
+  it("RESPONSE REPLAY: a call made after a reclaimed claim has completed simply replays it — no second execution", async () => {
+    const key = "lease-replay-after-reclaim-1";
+    await insertDeadClaim(key);
+
+    let runs = 0;
+    const first = await withIdempotency(companyIdA, "expense.create", key, { ok: true }, async () => {
+      runs++;
+      return { status: 201, body: { once: true } };
+    });
+    const second = await withIdempotency(companyIdA, "expense.create", key, { ok: true }, async () => {
+      runs++;
+      return { status: 201, body: { shouldNotRun: true } };
+    });
+
+    expect(runs).toBe(1);
+    expect(first.replayed).toBe(false);
+    expect(second.replayed).toBe(true);
+    expect(second.body).toEqual({ once: true });
+  });
+
+  it("PER-TENANT SCOPING: reclaiming a dead claim under one company never touches a same-key dead claim under a different company", async () => {
+    const bRes = await request(app).get("/api/auth/me").set("Authorization", `Bearer ${tokenB}`);
+    const companyIdB = bRes.body.company.id as string;
+    const key = "lease-tenant-scope-1";
+    await insertDeadClaim(key);
+    const [rowB] = await db
+      .insert(idempotencyKeys)
+      .values({
+        companyId: companyIdB,
+        operation: "expense.create",
+        key,
+        requestFingerprint: "company-b-fingerprint",
+        status: "pending",
+        ownerToken: "company-b-dead-owner",
+        leaseExpiresAt: new Date(Date.now() - (LEASE_MS + 500)),
+      })
+      .returning();
+
+    await withIdempotency(companyIdA, "expense.create", key, { ok: true }, async () => ({
+      status: 201,
+      body: { recovered: true },
+    }));
+
+    const stillThereForB = await db.query.idempotencyKeys.findFirst({ where: eq(idempotencyKeys.id, rowB.id) });
+    expect(stillThereForB).toBeDefined();
+    expect(stillThereForB!.status).toBe("pending");
+    expect(stillThereForB!.ownerToken).toBe("company-b-dead-owner"); // untouched
   });
 });

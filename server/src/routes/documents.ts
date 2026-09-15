@@ -7,6 +7,8 @@ import { files, projects } from "../db/schema.js";
 import { uploadFile, getFile, readFileBuffer } from "../lib/storage/index.js";
 import { requirePermission } from "../lib/permissions.js";
 import { recordAuditEvent } from "../lib/audit.js";
+import { expensiveOperationRateLimit } from "../middleware/rateLimit.js";
+import { matchesFileSignature } from "../lib/fileSignature.js";
 
 // MIDAD UI-10 — project-scoped Documents (evidence repository).
 //
@@ -70,11 +72,18 @@ const documentUpload = multer({
 // Mirrors lib/uploads.ts's handleLogoUpload exactly: multer/fileFilter
 // errors (including the size-limit MulterError) surface as a clean 400
 // here rather than falling through to the generic 500 handler.
+//
+// 18-phase internal remediation, Phase 4 — the fileFilter above is
+// MIME-header-only (client-controlled); this is the actual content check,
+// same shared matchesFileSignature() the logo upload already uses.
 function handleDocumentUpload(req: Request, res: Response, next: NextFunction) {
   documentUpload.single("document")(req, res, (err: unknown) => {
     if (err) {
       const message = err instanceof Error ? err.message : "تعذّر رفع الملف";
       return res.status(400).json({ error: message });
+    }
+    if (req.file && !matchesFileSignature(req.file.buffer, req.file.mimetype)) {
+      return res.status(400).json({ error: "محتوى الملف لا يطابق نوعه المعلن" });
     }
     next();
   });
@@ -126,18 +135,44 @@ documentsRouter.get("/", async (req: Request<ProjectParams>, res: Response) => {
   res.json(rows.map(toDocumentResponse));
 });
 
-documentsRouter.post("/", handleDocumentUpload, async (req: Request<ProjectParams>, res: Response) => {
+// 18-phase internal remediation, Phase 3 — audit finding: upload had no
+// rate limiter at all (member-accessible, not owner-only like the logo
+// upload) — throttled before the multipart body is even parsed.
+documentsRouter.post("/", expensiveOperationRateLimit, handleDocumentUpload, async (req: Request<ProjectParams>, res: Response) => {
   if (!req.file) return res.status(400).json({ error: "لم يتم إرفاق ملف" });
 
-  const record = await uploadFile({
-    companyId: req.companyId!,
-    uploadedBy: req.userId!,
-    entityType: PROJECT_DOCUMENT_ENTITY_TYPE,
-    entityId: req.params.projectId,
-    buffer: req.file.buffer,
-    fileName: req.file.originalname,
-    mimeType: req.file.mimetype,
-    namespace: "documents",
+  // 18-phase internal remediation, Phase 9 (follow-up) — the sibling
+  // visibility-toggle route just below already audits its own change;
+  // upload itself (the document actually entering the evidence
+  // repository) did not. The files-row insert (inside uploadFile) and
+  // this audit event are now atomic — see uploadFile's own comment for
+  // exactly what that can and cannot cover (the actual disk write is
+  // never transactional with Postgres regardless).
+  const record = await db.transaction(async (tx) => {
+    const row = await uploadFile(
+      {
+        companyId: req.companyId!,
+        uploadedBy: req.userId!,
+        entityType: PROJECT_DOCUMENT_ENTITY_TYPE,
+        entityId: req.params.projectId,
+        buffer: req.file!.buffer,
+        fileName: req.file!.originalname,
+        mimeType: req.file!.mimetype,
+        namespace: "documents",
+      },
+      tx,
+    );
+    await recordAuditEvent(tx, {
+      companyId: req.companyId!,
+      actorUserId: req.userId!,
+      action: "document.uploaded",
+      entityType: PROJECT_DOCUMENT_ENTITY_TYPE,
+      entityId: row.id,
+      afterValue: { fileName: row.fileName },
+      metadata: { projectId: req.params.projectId },
+    });
+
+    return row;
   });
 
   const withUploader = await db.query.files.findFirst({

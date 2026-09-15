@@ -294,3 +294,79 @@ describe("User Account Completeness (Phase A): last-owner concurrency (Wave 1E f
     expect(roles).toEqual(["member", "owner"]);
   });
 });
+
+// 18-phase internal remediation, Phase 9 — company settings/logo/invite
+// management previously had zero audit trail, unlike the PATCH
+// /members/:id route above (already covered by "user.roleChanged"/
+// "user.statusChanged" events elsewhere in this file). Own company/owner
+// so these don't interact with the deliberately-ordered owner tests above.
+describe("Company settings/logo/invite audit logging (18-phase internal remediation)", () => {
+  it("PATCH /settings records a company.settingsUpdated audit event with before/after values", async () => {
+    const res = await request(app)
+      .post("/api/auth/register")
+      .send({ companyName: "Audit Settings Co", name: "Owner", email: uniqueEmail("audit-settings-owner"), password: "password123" });
+    const token = res.body.token as string;
+    const companyId = res.body.company.id as string;
+
+    const patchRes = await request(app)
+      .patch("/api/company/settings")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ name: "Audit Settings Co Renamed", defaultTaxRatePercent: 15 });
+    expect(patchRes.status).toBe(200);
+
+    const events = await db.query.auditEvents.findMany({
+      where: eq(auditEvents.entityId, companyId),
+    });
+    const settingsEvent = events.find((e) => e.action === "company.settingsUpdated");
+    expect(settingsEvent).toBeDefined();
+    expect(settingsEvent!.entityType).toBe("company");
+    expect((settingsEvent!.afterValue as { name: string }).name).toBe("Audit Settings Co Renamed");
+  });
+
+  it("POST /logo records a company.logoUpdated audit event", async () => {
+    const res = await request(app)
+      .post("/api/auth/register")
+      .send({ companyName: "Audit Logo Co", name: "Owner", email: uniqueEmail("audit-logo-owner"), password: "password123" });
+    const token = res.body.token as string;
+    const companyId = res.body.company.id as string;
+
+    const onePixelPng = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+      "base64",
+    );
+    const uploadRes = await request(app)
+      .post("/api/company/logo")
+      .set("Authorization", `Bearer ${token}`)
+      .attach("logo", onePixelPng, { filename: "logo.png", contentType: "image/png" });
+    expect(uploadRes.status).toBe(200);
+
+    const events = await db.query.auditEvents.findMany({ where: eq(auditEvents.entityId, companyId) });
+    expect(events.some((e) => e.action === "company.logoUpdated")).toBe(true);
+  });
+
+  it("POST /invites and DELETE /invites/:id each record their own audit event", async () => {
+    const res = await request(app)
+      .post("/api/auth/register")
+      .send({ companyName: "Audit Invite Co", name: "Owner", email: uniqueEmail("audit-invite-owner"), password: "password123" });
+    const token = res.body.token as string;
+
+    const inviteEmail = uniqueEmail("audit-invitee");
+    const inviteRes = await request(app)
+      .post("/api/company/invites")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ email: inviteEmail, role: "member" });
+    expect(inviteRes.status).toBe(201);
+    const inviteId = inviteRes.body.id as string;
+
+    const createdEvents = await db.query.auditEvents.findMany({ where: eq(auditEvents.entityId, inviteId) });
+    const createdEvent = createdEvents.find((e) => e.action === "company.memberInvited");
+    expect(createdEvent).toBeDefined();
+    expect((createdEvent!.afterValue as { email: string }).email).toBe(inviteEmail);
+
+    const deleteRes = await request(app).delete(`/api/company/invites/${inviteId}`).set("Authorization", `Bearer ${token}`);
+    expect(deleteRes.status).toBe(204);
+
+    const afterDeleteEvents = await db.query.auditEvents.findMany({ where: eq(auditEvents.entityId, inviteId) });
+    expect(afterDeleteEvents.some((e) => e.action === "company.inviteRevoked")).toBe(true);
+  });
+});

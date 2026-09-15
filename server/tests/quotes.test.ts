@@ -1,7 +1,10 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import request from "supertest";
+import { eq } from "drizzle-orm";
 import { buildApp } from "../src/app.js";
 import { resetDb } from "./setup.js";
+import { db } from "../src/db/client.js";
+import { auditEvents } from "../src/db/schema.js";
 
 const app = buildApp();
 
@@ -128,5 +131,44 @@ describe("quotes: tenant isolation", () => {
 
     const res = await request(app).get(`/api/quotes/${quote.body.id}/pdf`).set("Authorization", `Bearer ${tokenB}`);
     expect(res.status).toBe(404);
+  });
+});
+
+// 18-phase internal remediation, Phase 9 — the public accept/reject
+// endpoints previously recorded no audit trail at all, unlike every
+// sibling state transition in this codebase (invoice.send/markedPaid,
+// quote.sent, quote.deleted). actorUserId is expected to be null: these
+// are unauthenticated public endpoints with no verified user to attribute
+// the action to.
+describe("quote accept/reject audit logging (18-phase internal remediation)", () => {
+  beforeEach(resetDb);
+
+  it("accepting a quote records a quote.accepted audit event with the accepter's name", async () => {
+    const token = await setupCompany();
+    const quote = await createQuote(token);
+    await request(app).patch(`/api/quotes/${quote.body.id}/send`).set("Authorization", `Bearer ${token}`);
+
+    const accept = await request(app)
+      .post(`/api/public/quotes/${quote.body.publicToken}/accept`)
+      .send({ acceptedByName: "Real Client" });
+    expect(accept.status).toBe(200);
+
+    const events = await db.query.auditEvents.findMany({ where: eq(auditEvents.entityId, quote.body.id) });
+    const acceptedEvent = events.find((e) => e.action === "quote.accepted");
+    expect(acceptedEvent).toBeDefined();
+    expect(acceptedEvent!.actorUserId).toBeNull();
+    expect((acceptedEvent!.afterValue as { acceptedByName: string }).acceptedByName).toBe("Real Client");
+  });
+
+  it("rejecting a quote records a quote.rejected audit event", async () => {
+    const token = await setupCompany();
+    const quote = await createQuote(token);
+    await request(app).patch(`/api/quotes/${quote.body.id}/send`).set("Authorization", `Bearer ${token}`);
+
+    const reject = await request(app).post(`/api/public/quotes/${quote.body.publicToken}/reject`).send({});
+    expect(reject.status).toBe(200);
+
+    const events = await db.query.auditEvents.findMany({ where: eq(auditEvents.entityId, quote.body.id) });
+    expect(events.some((e) => e.action === "quote.rejected")).toBe(true);
   });
 });

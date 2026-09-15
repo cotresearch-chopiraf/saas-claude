@@ -5,6 +5,7 @@ import { db } from "../db/client.js";
 import { files, subcontractIpcs } from "../db/schema.js";
 import { requirePermission } from "../lib/permissions.js";
 import { uploadFile, getFile, readFileBuffer } from "../lib/storage/index.js";
+import { matchesFileSignature } from "../lib/fileSignature.js";
 
 // MIDAD Phase 3 — Subcontractor IPC Evidence. Same generic `files`-table
 // storage pattern as project Documents (routes/documents.ts), with its own
@@ -65,11 +66,16 @@ const documentUpload = multer({
   },
 });
 
+// 18-phase internal remediation, Phase 4 — same magic-byte content check
+// as documents.ts (fileFilter above is MIME-header-only).
 function handleDocumentUpload(req: Request, res: Response, next: NextFunction) {
   documentUpload.single("document")(req, res, (err: unknown) => {
     if (err) {
       const message = err instanceof Error ? err.message : "تعذّر رفع الملف";
       return res.status(400).json({ error: message });
+    }
+    if (req.file && !matchesFileSignature(req.file.buffer, req.file.mimetype)) {
+      return res.status(400).json({ error: "محتوى الملف لا يطابق نوعه المعلن" });
     }
     next();
   });

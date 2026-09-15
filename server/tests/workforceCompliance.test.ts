@@ -407,6 +407,19 @@ describe("Workforce Compliance — evidence (Phase D1)", () => {
     expect(downloadRes.status).toBe(200);
   });
 
+  // 18-phase internal remediation, Phase 4 — magic-byte content check
+  // generalized from the logo upload's SVG-spoofing fix to this route.
+  it("30b. rejects a non-PDF payload falsely declared as application/pdf (content/MIME mismatch)", async () => {
+    const periodId = await makePeriod();
+    const created = await createNitaqat({ compliancePeriodId: periodId, saudiCount: 8, nonSaudiCount: 12, totalCount: 20 });
+    const res = await request(app)
+      .post(`/api/workforce-compliance/nitaqat/${created.body.id}/evidence`)
+      .set("Authorization", `Bearer ${ownerAToken}`)
+      .attach("evidence", Buffer.from("not actually a pdf"), { filename: "fake.pdf", contentType: "application/pdf" });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("محتوى الملف لا يطابق نوعه المعلن");
+  });
+
   it("31. cross-company evidence rejected", async () => {
     const periodId = await makePeriod();
     const created = await createNitaqat({ compliancePeriodId: periodId, saudiCount: 8, nonSaudiCount: 12, totalCount: 20 });

@@ -8,13 +8,13 @@ import { nextQuoteNumber } from "../lib/numbering.js";
 import { buildDocumentHtml, type DocumentLanguage } from "../lib/documentHtml.js";
 import { renderHtmlToPdf } from "../lib/pdf.js";
 import { logoFileToDataUri } from "../lib/uploads.js";
-import { computeTotals } from "../lib/money.js";
+import { computeTotals, roundMoney } from "../lib/money.js";
 import { requirePermission } from "../lib/permissions.js";
 import { recordAuditEvent } from "../lib/audit.js";
 import { logger } from "../lib/logger.js";
 import { calculateTax } from "../lib/compliance/engine.js";
 import { withIdempotency, IdempotencyConflictError } from "../lib/idempotency.js";
-import { publicDocumentRateLimit } from "../middleware/rateLimit.js";
+import { publicDocumentRateLimit, expensiveOperationRateLimit } from "../middleware/rateLimit.js";
 
 export const quotesRouter = Router();
 export const publicQuotesRouter = Router();
@@ -128,11 +128,13 @@ async function createQuote(companyId: string, data: z.infer<typeof createSchema>
       })
       .returning();
 
+    // 18-phase internal remediation, Phase 7 — same single-point-rounding
+    // consistency fix as invoices.ts's item insert (see that comment).
     await tx.insert(quoteItems).values(
       data.items.map((item) => ({
         quoteId: created.id,
         description: item.description,
-        amount: String(item.amount),
+        amount: String(roundMoney(item.amount)),
       })),
     );
 
@@ -283,7 +285,9 @@ async function buildQuotePdf(quoteId: string, companyId: string) {
   return renderHtmlToPdf(html);
 }
 
-quotesRouter.get("/:id/pdf", async (req: Request<{ id: string }>, res: Response) => {
+// 18-phase internal remediation, Phase 3 — same gap and same fix as
+// invoices.ts's authenticated PDF route.
+quotesRouter.get("/:id/pdf", expensiveOperationRateLimit, async (req: Request<{ id: string }>, res: Response) => {
   try {
     const pdf = await buildQuotePdf(req.params.id, req.companyId!);
     if (!pdf) return res.status(404).json({ error: "عرض السعر غير موجود" });
@@ -339,12 +343,43 @@ publicQuotesRouter.post("/:token/accept", async (req: Request<{ token: string }>
   // executed. Only the request whose UPDATE still finds status='sent' at
   // the moment it runs can ever succeed now, mirroring the exact pattern
   // already proven in routes/changeOrders.ts's decision route.
-  const [updated] = await db
-    .update(quotes)
-    .set({ status: "accepted", acceptedByName: parsed.data.acceptedByName, acceptedAt: new Date() })
-    .where(and(eq(quotes.id, quote.id), eq(quotes.status, "sent")))
-    .returning();
+  //
+  // 18-phase internal remediation follow-up — the UPDATE and its audit
+  // event (added below) are wrapped in one transaction, same discipline
+  // as company.ts's settings PATCH: this is a public, customer-facing
+  // endpoint (a real client clicking "accept" on an emailed quote link),
+  // so an audit-insert failure must not leave the client believing their
+  // accept failed (500) when the status change actually committed —
+  // rolling both back together means a 500 here always means the accept
+  // genuinely did not happen, and the client's own retry behaves exactly
+  // as documented (the conditional UPDATE above), not confusingly.
+  const updated = await db.transaction(async (tx) => {
+    const [row] = await tx
+      .update(quotes)
+      .set({ status: "accepted", acceptedByName: parsed.data.acceptedByName, acceptedAt: new Date() })
+      .where(and(eq(quotes.id, quote.id), eq(quotes.status, "sent")))
+      .returning();
+    if (!row) return null;
+
+    // This state transition (unlike every sibling one: invoice.send/
+    // markedPaid, quote.sent, quote.deleted) had no audit trail at all.
+    // actorUserId is null: this is an unauthenticated public endpoint, so
+    // there is no verified user to attribute it to — recording who typed
+    // the acceptance name is the best available attribution, kept in
+    // afterValue rather than invented as an actor.
+    await recordAuditEvent(tx, {
+      companyId: row.companyId,
+      actorUserId: null,
+      action: "quote.accepted",
+      entityType: "quote",
+      entityId: row.id,
+      beforeValue: { status: quote.status },
+      afterValue: { status: row.status, acceptedByName: row.acceptedByName },
+    });
+    return row;
+  });
   if (!updated) return res.status(409).json({ error: "لا يمكن قبول عرض السعر هذا" });
+
   res.json(updated);
 });
 
@@ -353,12 +388,30 @@ publicQuotesRouter.post("/:token/reject", async (req: Request<{ token: string }>
   if (!quote) return res.status(409).json({ error: "لا يمكن رفض عرض السعر هذا" });
 
   // Slice AA — same conditional-UPDATE hardening as accept above.
-  const [updated] = await db
-    .update(quotes)
-    .set({ status: "rejected" })
-    .where(and(eq(quotes.id, quote.id), eq(quotes.status, "sent")))
-    .returning();
+  // 18-phase internal remediation follow-up — same transaction-wrapped
+  // atomicity as accept above.
+  const updated = await db.transaction(async (tx) => {
+    const [row] = await tx
+      .update(quotes)
+      .set({ status: "rejected" })
+      .where(and(eq(quotes.id, quote.id), eq(quotes.status, "sent")))
+      .returning();
+    if (!row) return null;
+
+    // Same gap as accept above.
+    await recordAuditEvent(tx, {
+      companyId: row.companyId,
+      actorUserId: null,
+      action: "quote.rejected",
+      entityType: "quote",
+      entityId: row.id,
+      beforeValue: { status: quote.status },
+      afterValue: { status: row.status },
+    });
+    return row;
+  });
   if (!updated) return res.status(409).json({ error: "لا يمكن رفض عرض السعر هذا" });
+
   res.json(updated);
 });
 

@@ -100,3 +100,26 @@ export const publicDocumentRateLimit = rateLimit({
   legacyHeaders: false,
   message: { error: "عدد كبير جداً من الطلبات، الرجاء المحاولة لاحقاً" },
 });
+
+// 18-phase internal remediation, Phase 3 — audit finding: the
+// AUTHENTICATED invoice/quote PDF routes (GET /api/invoices/:id/pdf, GET
+// /api/quotes/:id/pdf — headless-browser-backed rendering, per
+// lib/pdf.ts) and the document/logo upload and budget CSV export routes
+// had no rate limiter at all; only their public, token-gated twins
+// (publicDocumentRateLimit above) were covered. A valid session (or one
+// leaked/stolen token) could otherwise loop these in a tight script to
+// exhaust server CPU/memory (PDF rendering) or storage (uploads) with no
+// throttle. Keyed by companyId like zatcaSubmitRateLimit above — these
+// routes only ever run after requireAuth, so req.companyId is always
+// populated, and the resource actually being protected (render/storage
+// capacity) is naturally a per-company budget, not a per-IP one.
+export const EXPENSIVE_OPERATION_RATE_LIMIT_MAX = limitFor(60, 600);
+
+export const expensiveOperationRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: EXPENSIVE_OPERATION_RATE_LIMIT_MAX,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req: Request) => req.companyId ?? req.ip ?? "unknown",
+  message: { error: "عدد كبير جداً من الطلبات، الرجاء المحاولة لاحقاً" },
+});

@@ -277,6 +277,21 @@ describe("Subcontractor IPC Evidence (Phase 3)", () => {
   });
 
   // --- File policy (2) ---
+  // 18-phase internal remediation, Phase 4 — magic-byte content check
+  // generalized from the logo upload's SVG-spoofing fix to this route.
+  it("13a. rejects a non-PDF payload falsely declared as application/pdf (content/MIME mismatch)", async () => {
+    const { projectId, ipcId } = await setupSubcontractIpc();
+    const res = await request(app)
+      .post(`/api/projects/${projectId}/subcontract-ipcs/${ipcId}/documents`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .attach("document", Buffer.from("not actually a pdf"), { filename: "fake.pdf", contentType: "application/pdf" });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("محتوى الملف لا يطابق نوعه المعلن");
+
+    const listRes = await listDocuments(projectId, ipcId);
+    expect(listRes.body).toEqual([]);
+  });
+
   it("13. rejects an unsupported MIME type", async () => {
     const { projectId, ipcId } = await setupSubcontractIpc();
     const res = await request(app)

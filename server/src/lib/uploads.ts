@@ -3,6 +3,7 @@ import path from "node:path";
 import multer from "multer";
 import type { Request, Response, NextFunction } from "express";
 import { storageRoot } from "./storage/localDiskProvider.js";
+import { matchesFileSignature } from "./fileSignature.js";
 
 // uploadsDir is kept as the public-serving root (app.ts's
 // express.static("/uploads", ...)) — it is the same directory
@@ -45,28 +46,12 @@ export const logoUpload = multer({
 // so a non-image (or SVG) payload declared as "image/png" passed the
 // filter above untouched. This is the actual content check the audit
 // asked for — no image-processing dependency exists in this project
-// (checked server/package.json) and none is warranted for a 3-format
-// magic-byte check, so this is a small, dependency-free addition rather
-// than a new library. Each signature is the minimal, well-known byte
-// sequence every PNG/JPEG/WebP file begins with; anything else (including
-// an SVG re-labelled as one of these three MIME types) fails here even
-// though it already passed the MIME-based fileFilter.
-function bufferMatchesDeclaredImageType(buffer: Buffer, mimetype: string): boolean {
-  if (mimetype === "image/png") {
-    return buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
-  }
-  if (mimetype === "image/jpeg" || mimetype === "image/jpg") {
-    return buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
-  }
-  if (mimetype === "image/webp") {
-    return (
-      buffer.length >= 12 &&
-      buffer.subarray(0, 4).toString("latin1") === "RIFF" &&
-      buffer.subarray(8, 12).toString("latin1") === "WEBP"
-    );
-  }
-  return false;
-}
+// (checked server/package.json) and none is warranted for a magic-byte
+// check, so this is a small, dependency-free addition rather than a new
+// library. matchesFileSignature (lib/fileSignature.ts) is shared with
+// every other upload endpoint in this codebase — see that file's own
+// comment for why it was generalized here rather than kept private to
+// this one route.
 
 // multer's fileFilter rejection (an unaccepted MIME type) surfaces as a
 // plain Error, not a multer.MulterError — the app-wide error handler in
@@ -87,7 +72,7 @@ export function handleLogoUpload(req: Request, res: Response, next: NextFunction
     // spoofing case the audit demonstrated) now that the buffer is
     // actually available (multer's fileFilter runs before the body is
     // read, so it never has access to file.buffer).
-    if (req.file && !bufferMatchesDeclaredImageType(req.file.buffer, req.file.mimetype)) {
+    if (req.file && !matchesFileSignature(req.file.buffer, req.file.mimetype)) {
       return res.status(400).json({ error: "محتوى الملف لا يطابق نوعه المعلن" });
     }
     next();

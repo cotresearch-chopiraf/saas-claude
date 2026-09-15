@@ -76,8 +76,42 @@ import { requestLogMiddleware } from "./middleware/requestLog.js";
 import { healthRouter } from "./routes/health.js";
 import { buildCorsOptions } from "./lib/corsOrigins.js";
 
+// 18-phase internal remediation, Phase 3 — this codebase never called
+// app.set("trust proxy", ...) at all (confirmed by a repo-wide audit
+// grep), so Express's own default (trust proxy = false) was silently in
+// effect: req.ip is the direct TCP peer, never X-Forwarded-For/-Proto.
+// That default is correct for local dev and this test suite (no proxy in
+// front), but is a real, self-inflicted bug the moment this runs behind
+// any reverse proxy (Railway's included): every request's direct peer
+// becomes the proxy itself, so req.ip is constant for every real client —
+// middleware/rateLimit.ts's IP-keyed limiters (authRateLimit,
+// publicDocumentRateLimit) would collapse into one shared bucket for the
+// entire user base instead of one per client.
+//
+// What is NOT fixed here, deliberately: the correct value (how many
+// proxy hops to trust, or which subnets) depends on Railway's actual
+// network topology, which this internal-only remediation pass has no way
+// to verify — inventing a number would be exactly the kind of guess the
+// remediation's own rules forbid. What IS fixed: the value is now
+// env-driven, so a deploy can set it correctly without another code
+// change, and — critically — leaving TRUST_PROXY unset reproduces
+// Express's exact prior default (this function makes no app.set() call
+// at all in that case), so no test or local-dev behavior changes.
+function parseTrustProxy(value: string | undefined): boolean | number | string | undefined {
+  if (value === undefined || value === "") return undefined;
+  if (value === "true") return true;
+  if (value === "false") return false;
+  const asNumber = Number(value);
+  if (Number.isInteger(asNumber) && String(asNumber) === value) return asNumber;
+  return value; // e.g. a CSV subnet/address list — Express's own accepted shape
+}
+
 export function buildApp() {
   const app = express();
+  const trustProxy = parseTrustProxy(process.env.TRUST_PROXY);
+  if (trustProxy !== undefined) {
+    app.set("trust proxy", trustProxy);
+  }
   // MIDAD Phase B — mounted first, ahead of cors/json parsing, so every
   // request gets a correlation id and a diagnostic trace regardless of how
   // far it gets (including a rejected CORS preflight or a malformed JSON
@@ -120,6 +154,22 @@ export function buildApp() {
       },
     }),
   );
+  // 18-phase internal remediation, Phase 5 — Permissions-Policy was the one
+  // gap the CSP/headers audit found: Helmet 8 dropped its own
+  // permissionsPolicy() middleware (the spec was still changing), so this
+  // is set directly. The client never requests any of these browser
+  // features (grepped client/src for camera/microphone/geolocation/
+  // payment/usb APIs — no matches), so every one is disabled outright
+  // rather than scoped to 'self': there is no legitimate same-origin use
+  // to preserve, and disabling denies even a future same-origin bug from
+  // invoking them.
+  app.use((_req, res, next) => {
+    res.setHeader(
+      "Permissions-Policy",
+      "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()",
+    );
+    next();
+  });
   // CORS_ORIGIN is unset by default (local dev, CI, and every existing test
   // never set it), so outside production this is cors(undefined) —
   // identical to the previous cors() call, zero behavior change until a

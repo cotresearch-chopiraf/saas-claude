@@ -13,6 +13,21 @@ export class CorsConfigError extends Error {
   }
 }
 
+// 18-phase internal remediation, Phase 11 — investigated and deliberately
+// NOT changed: an external audit pass flagged that this check only fails
+// closed when NODE_ENV is the exact literal "production", so an operator
+// who forgot to set NODE_ENV at all would get permissive CORS. Verified
+// against the actual deployment path (not just this file in isolation):
+// the Dockerfile hardcodes `ENV NODE_ENV=production` (server/../Dockerfile),
+// so a real deployment built from this image always has NODE_ENV set
+// correctly regardless of what an operator does or forgets — the
+// scenario isn't reachable through the documented deployment path.
+// Meanwhile server/package.json's own "dev" script (`tsx watch
+// src/index.ts`) deliberately leaves NODE_ENV unset for local
+// development, so tightening this check to fail closed on "unset" would
+// break `npm run dev` for every contributor without closing a gap that
+// exists in practice. Left as-is.
+
 // Development/test: CORS_ORIGIN is optional and intentionally unset by
 // default (local dev and CI never set it, so behavior there is unchanged —
 // cors() with undefined options reflects any request origin, exactly as
